@@ -44,6 +44,8 @@ def decode(operation: Operation, value: Any) -> Any:
 
 
 def validate_output(operation: Operation, value: Any) -> Any:
+    if operation.output is Response and isinstance(value, Response):
+        return value
     if operation.output is type(None):
         if value is not None:
             raise ApiError()

@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin, get_type_hints
 
+from starlette.responses import Response
+
 from app.infrastructure.access import Caller
 from app.infrastructure.shapes import Shape
 
@@ -32,6 +34,7 @@ registry: dict[str, Operation] = {}
 def is_output(shape: Any) -> bool:
     return (
         shape is type(None)
+        or shape is Response
         or (inspect.isclass(shape) and issubclass(shape, Shape))
         or (
             get_origin(shape) is list
