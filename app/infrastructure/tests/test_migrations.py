@@ -68,3 +68,12 @@ def test_conversation_run_approval_roundtrip(
     assert "approval_status" in inspect(connection).get_view_names()
     command.upgrade(config, "head")
     assert_models(connection)
+
+
+def test_migration_round_trip(isolated_migrations: tuple[Config, Connection]) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "base")
+    command.upgrade(config, "0008")
+    assert "workspace_files" in inspect(connection).get_table_names()
+    command.upgrade(config, "head")
+    assert_models(connection)
