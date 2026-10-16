@@ -78,7 +78,7 @@ def test_operation_log_line_has_no_payload(app: FastAPI, capsys, caplog) -> None
     http_app = create_app(app.state.settings)
     configure_logging("DEBUG", stream)
     logging.getLogger().addHandler(caplog.handler)
-    with TestClient(http_app) as http:
+    with TestClient(http_app, headers={"Origin": "http://localhost:8000"}) as http:
         response = http.post(
             "/api/sensitive?query=" + markers[2],
             headers={"Cookie": "unused=" + markers[1]},

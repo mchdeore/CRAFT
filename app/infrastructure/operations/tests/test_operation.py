@@ -67,7 +67,7 @@ def test_operation_python_http_same_function(settings: Settings) -> None:
     before = len(rows(app, "probe.probe"))
     result = probe(caller, ProbeInput(value=7))
     assert result.value == 7 and result.result_value == 8
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
         response = client.get("/api/probe?value=7")
     assert response.json() == {"value": 7, "resultValue": 8}
     records = rows(app, "probe.probe")[before:]
@@ -85,7 +85,7 @@ def test_operation_validation_is_strict(settings: Settings) -> None:
 
     app = create_app(settings)
     caller = trusted(app)
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
         assert client.post("/api/probe", json={"value": 7}).status_code == 200
         for body in [{"value": "7"}, {"value": 7, "unknown": True}]:
             response = client.post("/api/probe", json=body)
@@ -162,7 +162,7 @@ def test_operation_access_across_transports(settings: Settings) -> None:
     with pytest.raises(Forbidden):
         manage(trusted(app))
     manage(trusted(app, frozenset({"admin"})))
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
         assert client.get("/api/manage").status_code == 401
         assert client.get("/health/live").status_code == 200
         assert (

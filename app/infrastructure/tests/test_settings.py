@@ -49,3 +49,16 @@ def test_invalid_enum_cannot_inject_a_diagnostic_path() -> None:
     diagnostic = str(raised.value)
     assert "private_payload_marker" not in diagnostic
     assert "log_level" in diagnostic
+
+
+def test_malformed_allowed_origin_has_a_safe_diagnostic() -> None:
+    marker = "private_origin_marker"
+    with pytest.raises(SystemExit) as raised:
+        Settings.from_env(
+            {
+                "CRAFT_APP_DB_PASSWORD": "synthetic",
+                "CRAFT_ALLOWED_ORIGINS": "http://[" + marker + "]",
+            }
+        )
+    diagnostic = str(raised.value)
+    assert marker not in diagnostic and "allowed_origins" in diagnostic

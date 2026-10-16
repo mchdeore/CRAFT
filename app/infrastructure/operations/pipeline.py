@@ -13,9 +13,14 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.infrastructure.access import Caller, require, resolve_http
+from app.infrastructure.access import Caller, anonymous_http, require, resolve_http
 from app.infrastructure.errors import ApiError, InvalidInput, error_response
-from app.infrastructure.operations.context import CallContext, current_call, transport_request
+from app.infrastructure.operations.context import (
+    CallContext,
+    current_call,
+    response_actions,
+    transport_request,
+)
 from app.infrastructure.operations.registry import Operation, registry
 from app.infrastructure.operations.service import record
 from app.infrastructure.requests import current_request_id
@@ -109,11 +114,34 @@ def finish(
 
 
 def checked(operation: Operation, caller: Caller, value: Any) -> Any:
+    http = transport_request.get()
+    call = current_call.get()
+    if (
+        caller.origin == "http"
+        and http is not None
+        and not operation.name.startswith("health.")
+        and (call is None or call.parent_call_id is None)
+    ):
+        caller = resolve_http(http)
+        context = current_call.get()
+        if context is not None:
+            context.caller = caller
     require(caller, operation.access)
+    if (
+        caller.origin == "http"
+        and http is not None
+        and http.method in {"POST", "PUT", "PATCH", "DELETE"}
+    ):
+        if caller.settings is None or http.headers.get("origin") not in {
+            o.strip() for o in caller.settings.allowed_origins.split(",")
+        }:
+            from app.infrastructure.errors import Forbidden
+
+            raise Forbidden()
     request = decode(operation, value)
     if caller.origin == "mcp" and operation.effects != "NONE":
         raise ApprovalRequired()
-    return request
+    return caller, request
 
 
 def wrap(operation: Operation) -> Any:
@@ -126,8 +154,8 @@ def wrap(operation: Operation) -> Any:
             error = None
             output = None
             try:
-                value = checked(operation, caller, request)
-                output = await fn(caller, value) if operation.input else await fn(caller)
+                resolved, value = checked(operation, caller, request)
+                output = await fn(resolved, value) if operation.input else await fn(resolved)
                 return validate_output(operation, output)
             except ApiError as failure:
                 error = failure
@@ -154,8 +182,8 @@ def wrap(operation: Operation) -> Any:
             ctx, token = begin(caller)
             error = None
             try:
-                value = checked(operation, caller, request)
-                result = fn(caller, value) if operation.input else fn(caller)
+                resolved, value = checked(operation, caller, request)
+                result = fn(resolved, value) if operation.input else fn(resolved)
                 return validate_output(operation, result)
             except ApiError as failure:
                 error = failure
@@ -184,8 +212,9 @@ def endpoint(operation: Operation) -> Any:
     wrapper = operation.function
 
     async def handle(request: Request) -> Response:
-        caller = resolve_http(request)
+        caller = anonymous_http(request)
         token = transport_request.set(request)
+        action_token = response_actions.set([])
         try:
             values: Any = dict(request.query_params)
             values.update(request.path_params)
@@ -221,15 +250,22 @@ def endpoint(operation: Operation) -> Any:
             else:
                 result = await run_in_threadpool(wrapper, caller, values or None)
             if result is None:
-                return Response(status_code=204)
-            if isinstance(result, Response):
-                return result
-            status = 503 if isinstance(result, Health) and result.status == "unavailable" else 200
-            return json_response(result, status)
+                response = Response(status_code=204)
+            elif isinstance(result, Response):
+                response = result
+            else:
+                status = (
+                    503 if isinstance(result, Health) and result.status == "unavailable" else 200
+                )
+                response = json_response(result, status)
+            for action in response_actions.get() or []:
+                response.set_cookie(**action)
+            return response
         except ApiError as error:
             return error_response(error)
         finally:
             transport_request.reset(token)
+            response_actions.reset(action_token)
 
     handle.__dict__["__operation__"] = operation
     return handle

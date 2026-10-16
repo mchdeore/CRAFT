@@ -52,3 +52,37 @@ auth_sessions = Table(
     Column("revoked_at", DateTime(timezone=True)),
     Column("revoked_reason", Text),
 )
+
+
+def account(session, username: str, lock: bool = False):
+    from sqlalchemy import select
+
+    statement = select(users).where(users.c.username == username)
+    if lock:
+        statement = statement.with_for_update()
+    return session.execute(statement).mappings().first()
+
+
+def credentials(session, user):
+    from sqlalchemy import select
+
+    return session.execute(
+        select(local_credentials.c.password_hash).where(local_credentials.c.user_id == user)
+    ).scalar_one_or_none()
+
+
+def roles_for(session, user):
+    from sqlalchemy import select
+
+    return list(
+        session.execute(select(user_roles.c.role).where(user_roles.c.user_id == user)).scalars()
+    )
+
+
+def revoke_sessions(session, user, at, reason: str, only=None) -> None:
+    statement = auth_sessions.update().where(
+        auth_sessions.c.user_id == user, auth_sessions.c.revoked_at.is_(None)
+    )
+    if only is not None:
+        statement = statement.where(auth_sessions.c.id == only)
+    session.execute(statement.values(revoked_at=at, revoked_reason=reason))

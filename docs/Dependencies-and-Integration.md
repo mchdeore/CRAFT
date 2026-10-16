@@ -2,7 +2,7 @@
 
 <p class="meta">Version 1.0 | 14 October 2026</p>
 
-The S0 application skeleton implements database setup, health routes, request identifiers, error mapping, settings and transactions. Continuous integration (CI) runs the code and document checks. Application operations, account sessions, the agent runtime, approvals, executable API contracts and a front end are later slices.
+The application implements database setup, health routes, checked operations, the document provider and library, local accounts and server sessions. Continuous integration (CI) runs code, contract and document checks.
 
 This document uses application programming interface (API), Hypertext Transfer Protocol (HTTP), JavaScript Object Notation (JSON), Asynchronous Server Gateway Interface (ASGI), Model Context Protocol (MCP), Agent-User Interaction (AG-UI), Transmission Control Protocol (TCP) Portable Document Format (PDF) and Hypertext Markup Language (HTML).
 
@@ -336,3 +336,17 @@ uv run pytest -q app/infrastructure/provider/tests app/library/tests app/tests/t
 ```
 
 Library read transactions use strict iterative HNSW scans so permission filters and dead index entries do not exhaust an initial candidate scan.
+
+## 13. Account sessions and contract checks
+
+Local sign-in verifies Argon2id hashes outside transactions and rechecks account state before creating a session. Tokens contain 32 random bytes; only digests enter PostgreSQL. Cookie flags, idle and absolute expiry, throttled keep-alive, revocation and current roles follow section 9. Authentication and permissions precede Origin rejection, preserving anonymous read denial. Credential and account changes serialize on the account row.
+
+Account administration uses `craft users add`, `list`, `promote`, `reset` and `disable`; password entry uses a private prompt. An administrator can be named with `--as`. Session tests use synthetic accounts and a controlled clock.
+
+The API package locks the adopted schema generator. Contract tests compile the actual TypeScript forms, validate examples and compare route keys with the running registry. CI installs the lock before testing.
+
+```bash
+npm ci --prefix api --ignore-scripts --no-audit --no-fund
+uv run pytest -q app/accounts/tests/test_sessions.py app/accounts/tests/test_users_cli.py
+uv run pytest -q app/tests/test_contract.py
+```

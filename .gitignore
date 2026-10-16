@@ -26,3 +26,5 @@ instance/
 * 2.*
 
 /var/
+
+/api/node_modules/

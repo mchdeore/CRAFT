@@ -38,3 +38,24 @@ def end_statement() -> None:
     if current is not None:
         current.db_statements += 1
         current.db_ms += (perf_counter() - times[-1]) * 1000
+
+
+response_actions: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "response_actions", default=None
+)
+
+
+def session_cookie(value: str, max_age: int) -> None:
+    actions = response_actions.get()
+    if actions is not None:
+        actions.append(
+            {
+                "key": "__Host-craft_session",
+                "value": value,
+                "max_age": max_age,
+                "secure": True,
+                "httponly": True,
+                "samesite": "lax",
+                "path": "/",
+            }
+        )

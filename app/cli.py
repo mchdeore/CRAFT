@@ -24,9 +24,11 @@ def main(argv: list[str] | None = None) -> None:
     provider.add_argument("path", nargs="?")
     provider.add_argument("file", nargs="?")
     users = commands.add_parser("users")
-    users.add_argument("action", choices=["grant", "revoke"])
-    users.add_argument("username")
-    users.add_argument("mission")
+    users.add_argument(
+        "action", choices=["grant", "revoke", "add", "list", "promote", "reset", "disable"]
+    )
+    users.add_argument("username", nargs="?")
+    users.add_argument("mission", nargs="?")
     users.add_argument("--silo")
     users.add_argument("--as", dest="actor", default="admin")
     args = parser.parse_args(argv)
@@ -94,12 +96,47 @@ def main(argv: list[str] | None = None) -> None:
                 origin="python",
             )
             if args.command == "users":
-                from app.accounts.handlers import GrantMission, grant, revoke
+                import getpass
 
-                (revoke if args.action == "revoke" else grant)(
-                    caller,
-                    GrantMission(username=args.username, mission=args.mission, silo=args.silo),
-                )
+                from app.accounts import handlers
+
+                if args.action == "list":
+                    print(msgspec.json.encode(handlers.list_users(caller)).decode())
+                elif args.action in {"grant", "revoke"}:
+                    if not args.username or not args.mission:
+                        parser.error("account and mission required")
+                    (handlers.revoke if args.action == "revoke" else handlers.grant)(
+                        caller,
+                        handlers.GrantMission(
+                            username=args.username, mission=args.mission, silo=args.silo
+                        ),
+                    )
+                elif args.action == "add":
+                    if not args.username:
+                        parser.error("account required")
+                    handlers.add(
+                        caller,
+                        handlers.NewUser(
+                            username=args.username,
+                            display_name=args.username,
+                            password=getpass.getpass("Password: "),
+                        ),
+                    )
+                elif args.action == "reset":
+                    if not args.username:
+                        parser.error("account required")
+                    handlers.reset(
+                        caller,
+                        handlers.ResetPassword(
+                            username=args.username, password=getpass.getpass("Password: ")
+                        ),
+                    )
+                else:
+                    if not args.username:
+                        parser.error("account required")
+                    (handlers.promote if args.action == "promote" else handlers.disable)(
+                        caller, handlers.UserRef(username=args.username)
+                    )
             else:
                 from app.infrastructure.operations.registry import registry
 
