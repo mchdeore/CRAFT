@@ -1,7 +1,7 @@
 """Private typed model infrastructure entry points for trusted source processing."""
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, Literal
 
 import msgspec
 
@@ -18,6 +18,32 @@ class EmbeddingInput(Shape):
 class EmbeddingOutput(Shape):
     vector: Annotated[list[float], msgspec.Meta(min_length=1536, max_length=1536)]
     model: str
+
+
+class ModelMessage(Shape):
+    role: Literal["system", "user", "assistant", "tool"]
+    text: str
+
+
+class ModelInput(Shape):
+    messages: Annotated[list[ModelMessage], msgspec.Meta(min_length=1)]
+    role: Literal["main", "check"] = "main"
+
+
+class ModelOutput(Shape):
+    text: str
+    model: str
+
+
+@operation(PUBLIC)
+async def respond(caller: Caller, request: ModelInput) -> ModelOutput:
+    """Call the selected model with already authorized input through a private typed entry."""
+    if caller.settings is None:
+        from app.infrastructure.errors import NotFound
+
+        raise NotFound()
+    text, selected = await model.request(caller.settings, request.messages, request.role)
+    return ModelOutput(text=text, model=selected)
 
 
 @operation(PUBLIC)

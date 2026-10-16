@@ -389,6 +389,11 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
             ).scalars()
         )
     assert models == {configured.model_embedding}
+    with demo["sessions"].begin() as session:
+        assert set(session.execute(select(m.doc_versions.c.summary_kind)).scalars()) == {
+            "generated"
+        }
+    assert sum(row["model"] == configured.model_main for row in intercepted.received) == 1
     local = msgspec.structs.replace(configured, model_main="fake")
     monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, env=None: local))
     main(["index", "--rebuild"])
@@ -402,6 +407,8 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
             ).scalars()
         )
     assert models == {"fake-embed@1"}
+    with demo["sessions"].begin() as session:
+        assert set(session.execute(select(m.doc_versions.c.summary_kind)).scalars()) == {"extract"}
     # A query from another model must not score these deliberately matching vectors.
     from math import isclose
 

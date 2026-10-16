@@ -5,7 +5,7 @@ from contextlib import suppress
 from types import TracebackType
 from typing import Any, Literal
 
-from agent_framework import ResponseStream
+from agent_framework import Message, ResponseStream
 from agent_framework_foundry import FoundryChatClient
 from azure.ai.projects.aio import AIProjectClient
 from openai import DefaultAsyncHttpxClient
@@ -168,6 +168,18 @@ def client(settings: Settings, role: Role = "main"):
         return ConfiguredChatClient(settings, role)
     except Exception:
         raise ApiError() from None
+
+
+async def request(settings: Settings, messages, role: Role):
+    selected = client(settings, role)
+    try:
+        source = selected.get_response(
+            [Message(role=message.role, contents=[message.text]) for message in messages]
+        )
+        result = await complete(source) if settings.model_main == "fake" else await source
+        return result.text, result.model or "fake"
+    finally:
+        await selected.close()
 
 
 @observe("agent.embedding")
