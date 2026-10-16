@@ -75,6 +75,8 @@ def test_app_id_never_logged(chat, monkeypatch, capsys):
     )
     captured = capsys.readouterr()
     assert marker not in captured.out + captured.err
+    assert marker not in str(requests[0].url)
+    assert requests[0].headers["Authorization"] == "Bearer " + marker
 
 
 @pytest.mark.live

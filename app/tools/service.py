@@ -146,12 +146,13 @@ def agrees(left, right):
 
 @observe("tools.calculation_request")
 async def request_wolfram(expression, app_id):
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
         for attempt in range(2):
             try:
                 response = await client.get(
                     "https://www.wolframalpha.com/api/v1/llm-api",
-                    params={"input": expression, "appid": app_id},
+                    params={"input": expression},
+                    headers={"Authorization": "Bearer " + app_id},
                 )
                 response.raise_for_status()
                 if not response.text or len(response.content) > 1024 * 1024:
