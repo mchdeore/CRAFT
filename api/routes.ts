@@ -1,5 +1,8 @@
 import type * as T from "./types";
+import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
 export interface Routes {
+  "GET /api/tools": { response: T.ToolInfo[] };
+  "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
   "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
   "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number }; response: T.VersionDiff };

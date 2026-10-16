@@ -87,3 +87,34 @@ def test_route_keys_match_running_registry(settings) -> None:
         )
     )
     assert actual == declared
+
+
+def validate_chat_events(events) -> bool:
+    import jsonschema
+
+    checked = subprocess.run(
+        ["node", str(ROOT / "api/validate-stream.mjs")],
+        input=json.dumps(events),
+        text=True,
+        capture_output=True,
+    )
+    if checked.returncode != 0:
+        return False
+    schema = typescript_schema("AnswerMeta")
+    validator = jsonschema.Draft7Validator(schema)
+    return all(
+        validator.is_valid(event["content"])
+        for event in events
+        if event.get("activityType") == "craft.answer"
+    )
+
+
+def test_chat_stream_example_matches_browser_contract() -> None:
+    events = [
+        json.loads(line[6:])
+        for line in (ROOT / "api/examples/chat-answer.sse").read_text().splitlines()
+        if line.startswith("data: ")
+    ]
+    assert events and validate_chat_events(events)
+    assert events[0]["type"] == "RUN_STARTED" and events[-1]["type"] == "RUN_FINISHED"
+    assert any(event.get("activityType") == "craft.answer" for event in events)

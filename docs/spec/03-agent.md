@@ -4,6 +4,14 @@ Agent-User Interaction (AG-UI) carries stream events. The Model Context Protocol
 
 ## 3.1 Now: one agent
 
+The current read-only runtime uses the real framework agent and stream adapter with
+server-owned conversation history and session state. Tool bindings come from the
+operation registry and enter checked Python handlers as the signed-in caller.
+The authenticated HTTP MCP path below is the adopted next transport; this slice
+uses neither a run token nor a cookie in a model request. Approval pause and resume
+are not implemented yet. A supplied resume entry returns conflict.
+
+
 - One agent per conversation: Microsoft Agent Framework (open source).
 - Runs inside the CRAFT backend, on a local machine: tools, approvals and records are proven end to end before anything is deployed.
 - Acts only through CRAFT tools, as the signed-in user. Every call is checked and logged.
@@ -139,8 +147,23 @@ AG-UI: an open protocol of typed events that streams an agent run to a web page.
   - the browser sends AG-UI's `RunAgentInput`; the server reads only `threadId`, `runId`, the newest user message and `resume`;
   - browser-defined tools are off;
   - `threadId` = conversation ID, owner checked every request.
-- Answer metadata: an `ACTIVITY_SNAPSHOT` event, `activityType` `craft.answer`, content `{messageId, citations, confidence}`, after each assistant message. Saved as an activity message, so the saved history (AG-UI messages) shows the same.
+- Answer metadata: an `ACTIVITY_SNAPSHOT` event, `activityType` `craft.answer`, content `{messageId, citations, confidence}`, after each completed nonempty assistant text message. Empty tool-plan envelopes carry no answer metadata. Saved as an activity message, so the saved history (AG-UI messages) shows the same.
 - Stream events adhere to the browser event contract. Dependency compatibility is checked with the adapter.
+
+The input JSON body is at most 1 MiB. Unknown browser history, context, tools,
+instructions and identity cannot replace server records. Only the newest user text
+is appended. Run identifiers are globally unique; reuse and an active conversation
+return conflict, while a fourth active run for an account returns rate limited.
+Starts use a short account-serialized transaction. Model and tool waits occur after
+it ends. Terminal events follow durable message and session saves. Disconnects close
+the primed stream and cancel the run, including before the first body chunk.
+
+Each model call uses the configured output budget, at most 4,000 tokens. The fake
+model bounds its lexical token count and byte envelope before emitting an update.
+A run allows 20 tool calls and 120 seconds. Handled stream errors record failed
+operation outcomes. Logs contain identifiers, timings and outcome codes only.
+Citations carry current library handles. Confidence stays zero and low until the
+six-input calibration exists; cited extracts remain visible and drafting is stopped.
 
 ## 3.8 Deferred: more agents
 

@@ -88,3 +88,14 @@ export interface FacetExplanation {
   sources: string[]; otherSources: string[];
 }
 export interface SimilarityExplanation { facets: FacetExplanation[] }
+export interface ToolInfo {
+  name: string; operation: string; description: string;
+  effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
+  needsApproval: boolean; route: string;
+}
+
+export interface Citation {
+  handle: CitationHandle; title: string; headingPath: string;
+  classification: Classification; quote: string;
+}
+export interface AnswerMeta { messageId: string; citations: Citation[]; confidence: Confidence }

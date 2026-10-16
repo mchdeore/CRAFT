@@ -23,9 +23,9 @@ This document uses application programming interface (API), Hypertext Transfer P
 | psycopg[binary] | `3.3.6` | The PostgreSQL driver and binary package resolve together. Connections use `postgresql+psycopg`. |
 | Alembic | `1.20.0` | Schema changes and drift checks use one migration tool version. Generated revisions require review before upgrade. |
 | pgvector, Python | `0.5.1` | SQLAlchemy vector column support is separate from the database extension version. |
-| agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. An agent runtime remains planned. |
+| agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. The read-only runtime uses the actual Agent and server-owned AgentSession. |
 | agent-framework-foundry | `1.14.1` | The adapter uses `FoundryChatClient` for configured Responses calls. HTTP interception checks the endpoint, model roles, storage flag and budget. |
-| agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application stream remains planned. |
+| agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application emits adapter events and checks their browser schemas. |
 | mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
 | anyio | `4.15.1` | Streaming finalization shields its short cleanup work from disconnect cancellation. The held transitive version is declared directly. |
 | argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
@@ -44,12 +44,12 @@ The development interpreter selection and both Docker stages use Python `3.12.13
 
 | Selected transitive dependency | Current lock | Consequence |
 |---|---|---|
-| ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Future browser event compatibility needs explicit verification. |
-| jsonschema | `4.26.0` | It is installed through MCP. Its presence does not provide the planned TypeScript contract pipeline. |
+| ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Actual emitted events and the recorded simulated stream pass the held browser event schemas. |
+| jsonschema | `4.26.0` | Validates compiled TypeScript response and answer metadata schemas. |
 | azure-identity | `1.26.0` | It is installed through the Foundry dependency. Managed identity integration remains deferred. |
 | httpx2 | `2.13.1` | The installed model transport uses this HTTP implementation; checks intercept its actual requests. |
 
-Browser integration selects `@ag-ui/core` and its browser adapter at `1.0.2`, and `ts-json-schema-generator` at `2.9.0`. These packages require a package manifest, lock, commands and CI wiring in the executable contract slice. Browser protocol 1.0 compatibility with the Python adapter must be checked there. Deployment authentication requires a fixed version with compatibility checks.
+The proposed browser UI integration selects its event package and browser adapter at `1.0.2`. The current executable contract separately pins `@ag-ui/core` `0.0.59` for its actual `EventSchemas` export, and `ts-json-schema-generator` `2.9.0`. Their manifest, lock and CI commands are tracked in `api/`. Emitted events pass the held schema package with the Python adapter. The browser UI adapter is not implemented; its major-version gap must be resolved and verified before front-end integration. Deployment authentication requires a fixed version with compatibility checks.
 
 ## 2. Local development
 
@@ -471,3 +471,29 @@ uv run craft operations | grep -cE '^cube\.(similar_missions|explain_similarity)
 ```
 
 The targeted suite checks deterministic facets, generated summaries, vector recipes, changed-mission rebuilding, all twelve planted family matches, missing evidence, source access, mean scores, HTTP authentication and compiled forms. The response examples are `api/examples/similar-missions.json` and `api/examples/similarity-explanation.json`. External model quality is measured separately.
+
+## 23. Read-only chat stream
+
+`POST /api/agent/runs` and `GET /api/tools` use signed-in operation checks. The actual
+framework agent, function middleware and AG-UI adapter run over server-loaded
+messages, instructions and session state. Registry read tools call checked Python
+handlers. Authenticated HTTP MCP follows in the next slice; approval and durable
+conversation routes are not claimed by these checks.
+
+The browser contract pins `@ag-ui/core` to `0.0.59`, the stable pre-1 schema release.
+Python keeps `ag-ui-protocol` `0.1.22`; no server dependency was upgraded. The newer
+browser major lacks the required schema export. Every actual emitted event and the
+recorded simulated `chat-answer.sse` are validated with `EventSchemas`. Completed
+answer activities also validate against generated TypeScript `AnswerMeta` schemas.
+CI runs these checks from this stream slice.
+
+`CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests/test_chat_stream.py app/tests/test_contract.py`
+checks event order, citations, injected browser fields, ownership, duplicate and
+concurrent run limits, tool/time/output budgets, cancellation, saved session state
+and absence of model payloads in logs. Actual ASGI disconnects cover response start
+before any body chunk. The source finalizer is awaited and shielded; no active run
+or domain transaction remains after the disconnected request returns.
+
+`uv run pytest -q app/agent/tests/test_model_adapter.py` retains configured-call
+interception and fake adapter coverage. These are local synthetic tests; live model
+quality, authenticated agent MCP and approval resume are separate later criteria.

@@ -299,19 +299,19 @@ export interface Routes {
 
 ## 9. Chat stream
 
-The chat route accepts AG-UI's `RunAgentInput`. `threadId` identifies the conversation. `runId` is a new UUID echoed in `RUN_STARTED`; reuse returns `409`. The server reads only those identifiers, the newest user message in `messages`, or `resume` after a pause. It loads history, tools, context and state itself. The response is `text/event-stream`, with one AG-UI event per `data:` line.
+The chat route accepts AG-UI's `RunAgentInput`. `threadId` identifies the conversation. `runId` is a new UUID echoed in `RUN_STARTED`; reuse returns `409`. The server reads only those identifiers, the newest user message in `messages`, or `resume` after a pause. It loads history, tools, context and state itself. The response is `text/event-stream`, with one AG-UI event per `data:` line. The body limit is 1 MiB. The current read-only runtime ignores browser context, tools, state, instructions and identity, and appends only the newest user text. Resume remains unavailable until the approval slice; it returns conflict. Unknown fields cannot replace server state.
 
 ```text
-data: {"type":"RUN_STARTED","threadId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61","runId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e62"}
-data: {"type":"TOOL_CALL_START","toolCallId":"call_1","toolCallName":"search"}
-data: {"type":"TOOL_CALL_ARGS","toolCallId":"call_1","delta":"{\"query\":\"radiator margin\"}"}
-data: {"type":"TOOL_CALL_END","toolCallId":"call_1"}
-data: {"type":"TOOL_CALL_RESULT","toolCallId":"call_1","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e70","content":"8 chunks"}
-data: {"type":"TEXT_MESSAGE_START","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63","role":"assistant"}
-data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63","delta":"The radiator margin is 5 K."}
-data: {"type":"TEXT_MESSAGE_END","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63"}
-data: {"type":"ACTIVITY_SNAPSHOT","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e64","activityType":"craft.answer","content":{"messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63","citations":[{"passageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e66","documentId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e65","title":"Thermal Control Plan","section":"4.2 Radiator margins","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifact":"thermal-plan.pdf","locator":"4.2","simulated":true,"classification":"unclassified","quote":"The radiator margin is 5 K."}],"confidence":{"score":0.86,"level":"high","reason":"The figure matches the cited source."}}}
-data: {"type":"RUN_FINISHED","threadId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61","runId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e62"}
+data: {"type": "RUN_STARTED", "threadId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61", "runId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e62"}
+data: {"type": "TOOL_CALL_START", "toolCallId": "call_1", "toolCallName": "search"}
+data: {"type": "TOOL_CALL_ARGS", "toolCallId": "call_1", "delta": "{\"query\":\"radiator margin\"}"}
+data: {"type": "TOOL_CALL_END", "toolCallId": "call_1"}
+data: {"type": "TOOL_CALL_RESULT", "toolCallId": "call_1", "messageId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e70", "content": "8 chunks", "role": "tool"}
+data: {"type": "TEXT_MESSAGE_START", "messageId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63", "role": "assistant"}
+data: {"type": "TEXT_MESSAGE_CONTENT", "messageId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63", "delta": "The radiator margin is 5 K."}
+data: {"type": "TEXT_MESSAGE_END", "messageId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63"}
+data: {"type": "ACTIVITY_SNAPSHOT", "messageId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e64", "activityType": "craft.answer", "content": {"messageId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63", "citations": [{"handle": {"item": "simulated-thermal-plan", "version": 1, "block": 1, "locator": "page=1", "quoteSha256": "ba91d51a1aa4630b0e545e2b8bf6b4842c291e0d13713380a235a964b91d935e", "simulated": true}, "title": "Thermal Control Plan", "headingPath": "4.2 Radiator margins", "classification": "unclassified", "quote": "The radiator margin is 5 K."}], "confidence": {"score": 0, "level": "low", "reason": "Evidence is insufficient for drafting before calibration."}}}
+data: {"type": "RUN_FINISHED", "threadId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61", "runId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e62"}
 ```
 
 | Event | Meaning |
@@ -343,7 +343,7 @@ Each conversation has a workspace: files a person uploads or the agent makes.
 
 ## 11. Stand-ins and contract tests
 
-`api/examples/` holds one JSON response per route and two recorded streams: `chat-answer.sse` (text, a tool call and `craft.answer`) and `chat-approval.sse` (a pause). The front end can build against them with any request mock; replacing a stand-in with the real route changes only the base URL. Demonstrations use the real backend with a seed data set.
+`api/examples/` holds one JSON response per route and recorded streams as their routes are implemented: `chat-answer.sse` (text, a tool call and `craft.answer`) and `chat-approval.sse` (a pause, planned with approvals). The front end can build against them with any request mock; replacing a stand-in with the real route changes only the base URL. Demonstrations use the real backend with a seed data set.
 
 Required integration checks, introduced with the executable contract:
 
