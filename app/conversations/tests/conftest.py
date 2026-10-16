@@ -1,25 +1,9 @@
 import pytest
-from sqlalchemy import select
 
-from app.agent.tests.test_chat_stream import chat as chat
-from app.cube.tests.conftest import cube_source as cube_source
 from app.infrastructure.database import metadata as m
-
-
-@pytest.fixture(autouse=True)
-def remove_extra_conversations(chat):
-    yield
-    table = m.metadata.tables["conversations"]
-    with chat["owner"].begin() as connection:
-        ids = list(
-            connection.execute(
-                select(table.c.id).where(table.c.owner_id == chat["caller"].user_id)
-            ).scalars()
-        )
-        for name in ["workspace_files", "messages", "agent_sessions", "agent_runs"]:
-            owned = m.metadata.tables[name]
-            connection.execute(owned.delete().where(owned.c.conversation_id.in_(ids)))
-        connection.execute(table.delete().where(table.c.id.in_(ids)))
+from app.tests.support.chat import chat as chat
+from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
+from app.tests.support.cube import cube_source as cube_source
 
 
 @pytest.fixture

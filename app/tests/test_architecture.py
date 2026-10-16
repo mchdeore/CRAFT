@@ -1,6 +1,9 @@
+import ast
 import re
 
-from app.infrastructure.paths import MIGRATIONS
+import pytest
+
+from app.infrastructure.paths import MIGRATIONS, ROOT
 
 NAME = re.compile(r"(\d{4})_[a-z]+_[a-z0-9_]+\.py")
 
@@ -50,21 +53,64 @@ def test_observe_never_stacks_on_operation() -> None:
         registry.update(snapshot)
 
 
+def forbidden_imports(source: str, feature: str, package: str) -> list[tuple[int, str]]:
+    violations = []
+    for node in ast.walk(ast.parse(source)):
+        modules = []
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            prefix = (
+                package.split(".")[: len(package.split(".")) - node.level + 1] if node.level else []
+            )
+            module = (
+                ".".join([*prefix, *node.module.split(".")]) if node.module else ".".join(prefix)
+            )
+            modules = [module, *(module + "." + alias.name for alias in node.names)]
+        else:
+            continue
+        for module in modules:
+            parts = module.split(".")
+            if (
+                len(parts) >= 3
+                and parts[0] == "app"
+                and parts[1] not in {feature, "infrastructure"}
+                and parts[2] in {"service", "storage"}
+            ):
+                violation = (node.lineno, ".".join(parts[:3]))
+                if violation not in violations:
+                    violations.append(violation)
+    return violations
+
+
+@pytest.mark.parametrize(
+    "source,allowed",
+    [
+        ("from app.library.service import search", False),
+        ("import app.library.storage as storage", False),
+        ("from app.library import service", False),
+        ("from ..library import storage", False),
+        ("from app.library.handlers import search", True),
+        ("from .storage import owned", True),
+        ("from app.infrastructure.operations import operation", True),
+    ],
+)
+def test_feature_import_rule_covers_import_forms(source, allowed):
+    assert (not forbidden_imports(source, "cube", "app.cube")) is allowed
+
+
 def test_feature_calls_use_handlers() -> None:
-    import ast
-
-    def allowed(source: str, feature: str) -> bool:
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                parts = node.module.split(".")
-                if (
-                    len(parts) >= 3
-                    and parts[0] == "app"
-                    and parts[1] not in [feature, "infrastructure"]
-                ):
-                    if parts[2] in ["service", "storage"]:
-                        return False
-        return True
-
-    assert not allowed("from app.library.service import search", "cube")
-    assert allowed("from app.library.handlers import search", "cube")
+    violations = []
+    for path in sorted((ROOT / "app").rglob("*.py")):
+        relative = path.relative_to(ROOT / "app")
+        if "tests" in relative.parts or len(relative.parts) < 2:
+            continue
+        feature = relative.parts[0]
+        if feature == "infrastructure":
+            continue
+        package = ".".join(["app", *relative.parts[:-1]])
+        violations.extend(
+            f"{relative}:{line}: {module}"
+            for line, module in forbidden_imports(path.read_text(), feature, package)
+        )
+    assert not violations, "\n".join(violations)

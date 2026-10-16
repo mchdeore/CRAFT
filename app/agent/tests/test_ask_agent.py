@@ -8,16 +8,14 @@ from sqlalchemy import select
 
 from app.agent.fake import FakeChatClient
 from app.agent.handlers import AskAgent, ask_agent
-from app.agent.tests.test_chat_stream import chat as chat
-from app.conversations.tests.conftest import (
-    remove_extra_conversations as remove_extra_conversations,
-)
-from app.cube.tests.conftest import cube_source as cube_source
 from app.infrastructure.database import metadata as m
 from app.infrastructure.mcp.client import client
 from app.infrastructure.operations.registry import registry
 from app.library.handlers import CitationCheck, check_citation
-from app.notes.tests.conftest import remove_notes as remove_notes
+from app.tests.support.chat import chat as chat
+from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
+from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.notes import remove_notes as remove_notes
 
 
 def test_ask_agent_returns_cited_answer(chat):

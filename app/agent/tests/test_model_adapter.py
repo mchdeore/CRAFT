@@ -25,7 +25,7 @@ from app.infrastructure.logging import configure_logging
 from app.infrastructure.operations import operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.operations.storage import call_log
-from app.seed.tests.test_demo import demo as demo
+from app.tests.support.demo import demo as demo
 
 
 @pytest.fixture(autouse=True)
@@ -381,19 +381,25 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, env=None: configured))
     main(["index", "--rebuild"])
     capsys.readouterr()
+    items = list(provider.items())
+    documents = select(m.doc_versions.c.id).where(m.doc_versions.c.item.in_(items))
+    chunks = select(m.chunks.c.id).where(m.chunks.c.doc_version_id.in_(documents))
+    owned_vectors = m.vectors.c.owner_id.in_(documents.union_all(chunks))
     with demo["sessions"].begin() as connection:
         models = set(
             connection.execute(
                 select(m.vectors.c.model).where(
-                    m.vectors.c.owner_kind.in_(["chunk", "doc_version"])
+                    m.vectors.c.owner_kind.in_(["chunk", "doc_version"]), owned_vectors
                 )
             ).scalars()
         )
     assert models == {configured.model_embedding}
     with demo["sessions"].begin() as session:
-        assert set(session.execute(select(m.doc_versions.c.summary_kind)).scalars()) == {
-            "generated"
-        }
+        assert set(
+            session.execute(
+                select(m.doc_versions.c.summary_kind).where(m.doc_versions.c.item.in_(items))
+            ).scalars()
+        ) == {"generated"}
     assert sum(row["model"] == configured.model_main for row in intercepted.received) == 1
     local = msgspec.structs.replace(configured, model_main="fake")
     monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, env=None: local))
@@ -403,13 +409,17 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
         models = set(
             connection.execute(
                 select(m.vectors.c.model).where(
-                    m.vectors.c.owner_kind.in_(["chunk", "doc_version"])
+                    m.vectors.c.owner_kind.in_(["chunk", "doc_version"]), owned_vectors
                 )
             ).scalars()
         )
     assert models == {"fake-embed@1"}
     with demo["sessions"].begin() as session:
-        assert set(session.execute(select(m.doc_versions.c.summary_kind)).scalars()) == {"extract"}
+        assert set(
+            session.execute(
+                select(m.doc_versions.c.summary_kind).where(m.doc_versions.c.item.in_(items))
+            ).scalars()
+        ) == {"extract"}
     # A query from another model must not score these deliberately matching vectors.
     from math import isclose
 
@@ -419,7 +429,7 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
     with demo["sessions"].begin() as session:
         session.execute(
             m.vectors.update()
-            .where(m.vectors.c.owner_kind.in_(["chunk", "doc_version"]))
+            .where(m.vectors.c.owner_kind.in_(["chunk", "doc_version"]), owned_vectors)
             .values(embedding=[1.0] + [0.0] * 1535)
         )
         users = m.metadata.tables["users"]

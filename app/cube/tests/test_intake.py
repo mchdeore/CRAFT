@@ -22,8 +22,8 @@ from app.library.handlers import (
     index_provider,
     read_chunks,
 )
-from app.seed.tests.test_demo import demo as demo
 from app.seed.vocabulary import PARAMETERS
+from app.tests.support.demo import demo as demo
 
 
 @pytest.fixture

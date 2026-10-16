@@ -20,9 +20,7 @@ from sqlalchemy import select
 from app import create_app
 from app.agent import service
 from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
-from app.agent.tests.test_chat_stream import chat as chat
 from app.agent.tests.test_chat_stream import collect, request, row
-from app.cube.tests.conftest import cube_source as cube_source
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import NotFound
@@ -31,6 +29,8 @@ from app.infrastructure.operations import DATA, operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.shapes import Shape
 from app.library.handlers import DocumentRef, get_document
+from app.tests.support.chat import chat as chat
+from app.tests.support.cube import cube_source as cube_source
 
 
 @pytest.fixture
@@ -343,7 +343,17 @@ def test_mcp_effectful_tool_without_approval_refused(token):
     try:
 
         async def execute():
+            selected = native_tool(token["settings"].mcp_url, token["token"], [])
+            try:
+                await selected.connect()
+                names = {function.name for function in selected.functions}
+                assert "search" in names
+                assert not {"attempt_effect", "ask_agent"}.intersection(names)
+            finally:
+                await selected.close()
             async with session_stream(token["settings"].mcp_url, token["token"]) as session:
+                listed = await session.list_tools()
+                assert "attempt_effect" in {tool.name for tool in listed.tools}
                 return await session.call_tool(
                     "attempt_effect", {"value": 1}, meta={"craft/toolCallId": "simulated_effect"}
                 )

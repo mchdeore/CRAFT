@@ -11,8 +11,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app import create_app
-from app.agent.tests.test_chat_stream import chat as chat
-from app.cube.tests.conftest import cube_source as cube_source
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import ApiError, InvalidInput
@@ -21,6 +19,8 @@ from app.infrastructure.operations import observe, operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.operations.tests.test_operation import ProbeInput, rows, trusted
 from app.infrastructure.shapes import Shape
+from app.tests.support.chat import chat as chat
+from app.tests.support.cube import cube_source as cube_source
 
 
 class SensitiveInput(Shape):

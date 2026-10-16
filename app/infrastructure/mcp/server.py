@@ -14,7 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from app.infrastructure.access import Caller
 from app.infrastructure.errors import ApiError, NotFound
 from app.infrastructure.operations.context import CallContext, current_call
-from app.infrastructure.operations.registry import Operation
+from app.infrastructure.operations.registry import Operation, tool_named, tool_operations
 
 
 def input_schema(operation: Operation) -> dict[str, Any]:
@@ -53,13 +53,12 @@ def build_server(registry: Mapping[str, Operation], caller) -> Server:
                 description=inspect.getdoc(o.function) or "",
                 inputSchema=input_schema(o),
             )
-            for o in registry.values()
-            if o.tool
+            for o in tool_operations(registry)
         ]
 
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
-        operation = next((o for o in registry.values() if o.tool and o.tool_name == name), None)
+        operation = tool_named(registry, name)
         if operation is None:
             return error_result(NotFound())
         try:

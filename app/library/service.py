@@ -104,9 +104,21 @@ def search(caller: Caller, request):
     from app.library.handlers import LibraryHit, LibraryHits
 
     sessions, settings = scope(caller)
+    provider = SimulatedProvider(settings.provider_root)
+    live = provider.items()
     vector = embed(request.query, caller=caller)
     with unit_of_work(sessions, read_only=True) as session:
-        candidates = storage.candidates(session, caller, request, vector, model_name(settings))
+        access = {}
+        permitted = []
+        for key, record in live.items():
+            scope_key = (record["mission_key"], record["silo"])
+            if scope_key not in access:
+                access[scope_key] = storage.provider_readable(session, caller, record)
+            if record["deleted_at"] is None and access[scope_key]:
+                permitted.append(key)
+        candidates = storage.candidates(
+            session, caller, request, vector, model_name(settings), items=permitted
+        )
     maxima = {
         method: max(
             (
@@ -132,13 +144,12 @@ def search(caller: Caller, request):
     )
     spread = Counter()
     hits = []
-    provider = SimulatedProvider(settings.provider_root)
     latest_versions = {}
     for entry in ranked:
         key = entry["row"]["item"]
         if key not in latest_versions:
             try:
-                latest_versions[key] = provider.get_item(key)["versions"][-1]["version"]
+                latest_versions[key] = live[key]["versions"][-1]["version"]
             except KeyError:
                 latest_versions[key] = None
     with unit_of_work(sessions, read_only=True) as session:

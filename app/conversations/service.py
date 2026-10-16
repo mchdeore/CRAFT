@@ -24,14 +24,14 @@ def scope(caller):
 
 def load(caller, identifier):
     with unit_of_work(scope(caller), read_only=True) as session:
-        if storage.owned(session, caller.user_id, identifier) is None:
+        if storage.read_owned(session, caller.user_id, identifier) is None:
             raise NotFound()
         return storage.history(session, identifier)
 
 
 def append(caller, request):
     with unit_of_work(scope(caller)) as session:
-        if storage.owned(session, caller.user_id, request.id) is None:
+        if storage.read_owned(session, caller.user_id, request.id) is None:
             raise NotFound()
         run = session.execute(
             select(m.metadata.tables["agent_runs"].c.id).where(

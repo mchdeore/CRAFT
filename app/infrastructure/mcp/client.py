@@ -12,7 +12,7 @@ from agent_framework import FunctionMiddleware, MCPStreamableHTTPTool
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations import observe
 from app.infrastructure.operations.context import current_call
-from app.infrastructure.operations.registry import registry
+from app.infrastructure.operations.registry import registry, tool_named, tool_operations
 
 
 @observe("agent.tool")
@@ -34,7 +34,7 @@ class ToolCallMiddleware(FunctionMiddleware):
         identifier = context.metadata.get("call_id")
         if not isinstance(identifier, str) or not identifier:
             raise ApiError()
-        op = next((o for o in registry.values() if o.tool_name == context.function.name), None)
+        op = tool_named(registry, context.function.name)
         if op is None:
             raise ApiError()
         context.kwargs["_meta"] = {"craft/toolCallId": identifier}
@@ -83,11 +83,7 @@ def client(url, raw_token, results, allowed=None):
     allowlist = (
         allowed
         if allowed is not None
-        else [
-            o.tool_name
-            for o in registry.values()
-            if o.tool and o.effects == "NONE" and o.tool_name != "ask_agent"
-        ]
+        else [o.tool_name for o in tool_operations(registry, agent=True)]
     )
 
     def parse(result):

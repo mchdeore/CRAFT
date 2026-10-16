@@ -145,7 +145,7 @@ def list_tools(caller: Caller) -> list[ToolInfo]:
     """List generated tool names and effects; for example readable library search."""
     import inspect
 
-    from app.infrastructure.operations.registry import registry
+    from app.infrastructure.operations.registry import registry, tool_operations
 
     return [
         ToolInfo(
@@ -156,8 +156,7 @@ def list_tools(caller: Caller) -> list[ToolInfo]:
             needs_approval=o.effects != "NONE",
             route=str(o.method) + " /api" + str(o.path),
         )
-        for o in registry.values()
-        if o.tool
+        for o in tool_operations(registry)
     ]
 
 

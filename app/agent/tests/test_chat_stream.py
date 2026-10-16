@@ -16,54 +16,11 @@ from app import create_app
 from app.agent import runtime
 from app.agent.fake import FakeChatClient
 from app.agent.handlers import RunAgentInput, run_agent
-from app.cube.tests.conftest import cube_source as cube_source
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import Conflict, NotFound, RateLimited
 from app.infrastructure.operations.context import current_call
-
-
-@pytest.fixture
-def chat(cube_source):
-    source = cube_source
-    table = m.metadata.tables["conversations"]
-    with source["owner"].begin() as connection:
-        identifier = connection.execute(
-            table.insert()
-            .values(
-                owner_id=source["caller"].user_id,
-                title="Simulated conversation",
-            )
-            .returning(table.c.id)
-        ).scalar_one()
-    if getattr(source["settings"], "mcp_url", None):
-        from app.infrastructure.mcp.tests.http_fixture import live_server
-
-        with live_server(source["app"]):
-            configured = source["app"].state.settings
-            yield source | {
-                "thread": identifier,
-                "settings": configured,
-                "caller": replace(source["caller"], settings=configured),
-            }
-    else:
-        yield source | {"thread": identifier}
-    with source["owner"].begin() as connection:
-        connection.execute(
-            m.metadata.tables["messages"]
-            .delete()
-            .where(m.metadata.tables["messages"].c.conversation_id == identifier)
-        )
-        connection.execute(
-            m.metadata.tables["agent_sessions"]
-            .delete()
-            .where(m.metadata.tables["agent_sessions"].c.conversation_id == identifier)
-        )
-        connection.execute(
-            m.metadata.tables["agent_runs"]
-            .delete()
-            .where(m.metadata.tables["agent_runs"].c.conversation_id == identifier)
-        )
-        connection.execute(table.delete().where(table.c.id == identifier))
+from app.tests.support.chat import chat as chat
+from app.tests.support.cube import cube_source as cube_source
 
 
 def request(chat, content="Peak power", identifier=None):

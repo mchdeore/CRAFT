@@ -54,20 +54,6 @@ messages = Table(
 )
 
 
-def owned(session: Session, user, identifier):
-    return (
-        session.execute(
-            select(conversations).where(
-                conversations.c.id == identifier,
-                conversations.c.owner_id == user,
-                conversations.c.archived_at.is_(None),
-            )
-        )
-        .mappings()
-        .first()
-    )
-
-
 def history(session: Session, identifier):
     return list(
         session.execute(

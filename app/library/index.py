@@ -61,16 +61,8 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 )
             )
             if rebuild:
-                session.execute(
-                    m.vectors.delete().where(
-                        m.vectors.c.owner_kind.in_(["chunk", "doc_version", "facet_text"])
-                    )
-                )
-                session.execute(m.facet_texts.delete())
+                storage.clear_index(session, list(records))
                 dirty.update(missions)
-                session.execute(m.version_diffs.delete())
-                session.execute(m.chunks.delete())
-                session.execute(m.doc_versions.delete())
             for item in records.values():
                 columns = {
                     k: item[k]

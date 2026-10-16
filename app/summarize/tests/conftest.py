@@ -1,1 +1,1 @@
-from app.cube.tests.conftest import cube_source as cube_source
+from app.tests.support.cube import cube_source as cube_source

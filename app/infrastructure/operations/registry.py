@@ -2,7 +2,7 @@
 
 import inspect
 import re
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin, get_type_hints
 
@@ -30,6 +30,22 @@ class Operation:
 
 
 registry: dict[str, Operation] = {}
+
+
+def tool_operations(operations: Mapping[str, Operation], *, agent: bool = False) -> list[Operation]:
+    return [
+        operation
+        for operation in operations.values()
+        if operation.tool
+        and (not agent or (operation.effects == "NONE" and operation.tool_name != "ask_agent"))
+    ]
+
+
+def tool_named(operations: Mapping[str, Operation], name: str) -> Operation | None:
+    return next(
+        (operation for operation in tool_operations(operations) if operation.tool_name == name),
+        None,
+    )
 
 
 def stream_output(shape: Any) -> Any:

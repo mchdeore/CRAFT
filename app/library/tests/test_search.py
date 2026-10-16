@@ -94,6 +94,25 @@ def test_deleted_item_leaves_search(library) -> None:
     assert get_document(caller, DocumentRef(item=hit.handle.item)).deleted
 
 
+@pytest.mark.parametrize("change", ["delete", "move"])
+def test_live_provider_removal_precedes_reindex(library, change) -> None:
+    caller = library["callers"]["demo"]
+    hit = search(caller, LibrarySearch(query="radiator margin")).hits[0]
+    provider = SimulatedProvider(library["root"])
+    if change == "delete":
+        provider.delete_item(hit.handle.item)
+    else:
+        record = provider.get_item(hit.handle.item)
+        destination = provider.path("missions/msn-withheld/engineering/st3-design/moved.md")
+        destination.parent.mkdir(parents=True)
+        provider.path(record["path"]).rename(destination)
+        provider.scan()
+        assert provider.get_item(hit.handle.item)["mission_key"] == "msn-withheld"
+    # Cached metadata still describes the old readable source.
+    found = search(caller, LibrarySearch(query="radiator margin"))
+    assert all(row.handle.item != hit.handle.item for row in found.hits)
+
+
 def test_plain_preview_is_sandboxed(library) -> None:
     provider = SimulatedProvider(library["root"])
     provider.write_content("reference/plain.txt", b"Simulated preview.")
