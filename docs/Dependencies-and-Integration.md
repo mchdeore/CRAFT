@@ -448,4 +448,4 @@ uv run pytest -q app/summarize/tests/test_summarize.py -k "auth_origin or loggin
 curl -s -o /tmp/craft-summary-page.html -w '%{http_code}' http://localhost:8000/summarize
 ```
 
-The page uses text nodes for titles, quotes and suggestions. Selection and uploads clear one another; failures clear stale output and re-enable controls. The password field clears before submission, and requests include the cookie. PDF upload preview is sandboxed; office input downloads from the owned File object. Browser checks are recorded separately from server checks.
+The page uses text nodes for titles, quotes and suggestions. Selection and uploads clear one another; failures clear stale output and re-enable controls. The password field clears before submission, and requests include the cookie. Upload originals download from the owned File object; exact quoted blocks remain readable on the page. Browser checks are recorded separately from server checks.
