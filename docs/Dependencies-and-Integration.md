@@ -27,6 +27,7 @@ This document uses application programming interface (API), Hypertext Transfer P
 | agent-framework-foundry | `1.14.1` | The adapter uses `FoundryChatClient` for configured Responses calls. HTTP interception checks the endpoint, model roles, storage flag and budget. |
 | agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application stream remains planned. |
 | mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
+| anyio | `4.15.1` | Streaming finalization shields its short cleanup work from disconnect cancellation. The held transitive version is declared directly. |
 | argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
 | python-docx | `1.2.0` | Reads Word paragraphs and tables in source order. |
 | pypdf | `6.19.0` | Reads PDF text layers and page locators. Input-derived parser diagnostics are suppressed. |

@@ -2,6 +2,7 @@
 
 import inspect
 import re
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin, get_type_hints
 
@@ -31,11 +32,16 @@ class Operation:
 registry: dict[str, Operation] = {}
 
 
+def stream_output(shape: Any) -> Any:
+    return get_args(shape)[0] if get_origin(shape) in (AsyncIterator, AsyncGenerator) else None
+
+
 def is_output(shape: Any) -> bool:
     return (
         shape is type(None)
         or shape is Response
         or (inspect.isclass(shape) and issubclass(shape, Shape))
+        or (stream_output(shape) is not None and is_output(stream_output(shape)))
         or (
             get_origin(shape) is list
             and len(get_args(shape)) == 1
@@ -66,6 +72,11 @@ def declare(
         raise ValueError("Operation input must be declared")
     if "return" not in hints or not is_output(hints["return"]):
         raise ValueError("Operation output must be a Shape")
+    if stream_output(hints["return"]) is not None:
+        if not inspect.isasyncgenfunction(function) or tool:
+            raise ValueError("A stream must be an async generator and cannot be a tool")
+    elif inspect.isasyncgenfunction(function):
+        raise ValueError("A stream requires a declared event Shape")
     selected = [(verb, path) for verb, path in routes.items() if path is not None]
     if len(selected) > 1:
         raise ValueError("Operation has more than one route")

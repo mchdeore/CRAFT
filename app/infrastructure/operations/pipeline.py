@@ -8,11 +8,12 @@ from time import perf_counter
 from typing import Annotated, Any, get_args, get_origin
 from uuid import UUID, uuid4
 
+import anyio
 import msgspec
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, StreamingResponse
 
 from app.infrastructure.access import Caller, anonymous_http, require, resolve_http
 from app.infrastructure.errors import ApiError, InvalidInput, TooLarge, error_response
@@ -22,7 +23,7 @@ from app.infrastructure.operations.context import (
     response_actions,
     transport_request,
 )
-from app.infrastructure.operations.registry import Operation, registry
+from app.infrastructure.operations.registry import Operation, registry, stream_output
 from app.infrastructure.operations.service import record
 from app.infrastructure.requests import current_request_id
 from app.infrastructure.shapes import FieldError, Health, RawFile, json_response
@@ -57,7 +58,11 @@ def validate_output(operation: Operation, value: Any) -> Any:
             raise ApiError()
         return None
     try:
-        return msgspec.json.decode(msgspec.json.encode(value), type=operation.output, strict=True)
+        return msgspec.json.decode(
+            msgspec.json.encode(value),
+            type=stream_output(operation.output) or operation.output,
+            strict=True,
+        )
     except (msgspec.ValidationError, TypeError, ValueError):
         raise ApiError() from None
 
@@ -185,13 +190,88 @@ class RawHttpFile:
         )
 
 
+class JsonHttpInput:
+    def __init__(self, request: Request, limit: int):
+        self.request, self.limit = request, limit
+
+    async def read(self):
+        content = bytearray()
+        async for chunk in self.request.stream():
+            if len(content) + len(chunk) > self.limit:
+                raise TooLarge()
+            content.extend(chunk)
+        try:
+            value = msgspec.json.decode(content)
+        except msgspec.DecodeError:
+            return bytes(content)
+        if isinstance(value, dict):
+            return dict(self.request.query_params) | value | dict(self.request.path_params)
+        return bytes(content)
+
+
 def raw_file(operation: Operation) -> bool:
     return operation.input is not None and issubclass(operation.input, RawFile)
 
 
 def wrap(operation: Operation) -> Any:
     fn = operation.function
-    if inspect.iscoroutinefunction(fn) or raw_file(operation):
+    if inspect.isasyncgenfunction(fn):
+
+        @wraps(fn)
+        async def streaming(caller: Caller, request: Any = None):
+            ctx, token = begin(caller)
+            current_call.reset(token)
+            error = None
+            iterator = None
+            try:
+                token = current_call.set(ctx)
+                try:
+                    resolved = checked_access(operation, caller)
+                    value = await request.read() if isinstance(request, JsonHttpInput) else request
+                    resolved, value = checked_input(operation, resolved, value)
+                    iterator = fn(resolved, value) if operation.input else fn(resolved)
+                finally:
+                    current_call.reset(token)
+                while True:
+                    token = current_call.set(ctx)
+                    try:
+                        try:
+                            value = await anext(iterator)
+                        except StopAsyncIteration:
+                            break
+                        output = validate_output(operation, value)
+                    finally:
+                        current_call.reset(token)
+                    yield output
+            except (asyncio.CancelledError, GeneratorExit):
+                error = ApiError()
+                raise
+            except ApiError as failure:
+                error = failure
+                raise
+            except Exception:
+                error = ApiError()
+                raise error from None
+            finally:
+                with anyio.CancelScope(shield=True):
+                    token = current_call.set(ctx)
+                    try:
+                        if iterator is not None:
+                            await iterator.aclose()
+                    finally:
+                        try:
+                            await run_in_threadpool(
+                                finish, ctx, None, operation.name, "operation", error
+                            )
+                        finally:
+                            current_call.reset(token)
+
+        wrapper = streaming
+    elif (
+        inspect.iscoroutinefunction(fn)
+        or raw_file(operation)
+        or (operation.input and getattr(operation.input, "max_bytes", None))
+    ):
 
         @wraps(fn)
         async def asynchronous(caller: Caller, request: Any = None) -> Any:
@@ -199,7 +279,7 @@ def wrap(operation: Operation) -> Any:
             error = None
             output = None
             try:
-                if isinstance(request, RawHttpFile):
+                if isinstance(request, (RawHttpFile, JsonHttpInput)):
                     resolved = checked_access(operation, caller)
                     resolved, value = checked_input(operation, resolved, await request.read())
                 else:
@@ -278,6 +358,8 @@ def endpoint(operation: Operation) -> Any:
             if raw_file(operation):
                 assert operation.input is not None
                 values = RawHttpFile(request, RawFile.max_bytes)
+            elif operation.input and getattr(operation.input, "max_bytes", None):
+                values = JsonHttpInput(request, getattr(operation.input, "max_bytes", 0))
             elif operation.input:
                 # Only declared non-string query fields are parsed. JSON bodies remain strict.
                 for field in msgspec.structs.fields(operation.input):
@@ -303,7 +385,29 @@ def endpoint(operation: Operation) -> Any:
                         values = body
             elif await request.body():
                 values = await request.body()
-            if inspect.iscoroutinefunction(wrapper):
+            if inspect.isasyncgenfunction(wrapper):
+                iterator = wrapper(caller, values or None)
+                try:
+                    first = await anext(iterator)
+                except StopAsyncIteration:
+                    first = None
+
+                async def encoded():
+                    try:
+                        if first is not None:
+                            yield b"data: " + msgspec.json.encode(first) + b"\n\n"
+                        async for event in iterator:
+                            yield b"data: " + msgspec.json.encode(event) + b"\n\n"
+                    finally:
+                        with anyio.CancelScope(shield=True):
+                            await iterator.aclose()
+
+                result = StreamingResponse(
+                    encoded(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            elif inspect.iscoroutinefunction(wrapper):
                 result = await wrapper(caller, values or None)
             else:
                 result = await run_in_threadpool(wrapper, caller, values or None)
