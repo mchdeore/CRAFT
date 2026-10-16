@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -48,6 +49,31 @@ def evidence(value):
     return None
 
 
+def summary_task(question: str):
+    try:
+        task = json.loads(question)
+    except ValueError:
+        return None
+    if not isinstance(task, dict) or task.get("task") != "summarize":
+        return None
+    sentences = []
+    filings = []
+    patterns = {
+        "mission": r"\bmission(?:\s+key)?\s*[:=]?\s*(msn-[a-z0-9-]+|M-SYN-\d+)",
+        "silo": r"\bsilo\s*[:=]?\s*(engineering|requirements|quality|reviews|budget|launch)",
+        "stage": r"\bstage\s*[:=]?\s*(st[1-7]-[a-z-]+|[BC])\b",
+    }
+    for block in task["blocks"]:
+        for sentence in re.split(r"(?<=[.!?])\s+", block["text"].strip()):
+            if sentence and len(sentences) < 2:
+                sentences.append({"text": sentence, "blocks": [block["block"]]})
+        context = block["text"] + " " + block.get("headingPath", "")
+        for field, pattern in patterns.items():
+            for matched in re.finditer(pattern, context, re.IGNORECASE):
+                filings.append({"field": field, "value": matched[1], "blocks": [block["block"]]})
+    return {"sentences": sentences, "filings": filings}
+
+
 class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
     def __init__(self, role: str = "main"):
         super().__init__()
@@ -72,7 +98,10 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
         signature = hashlib.sha256(
             (self.role + question + str(len(tool_results))).encode()
         ).hexdigest()
-        if self.role == "check":
+        task = summary_task(question)
+        if task is not None:
+            contents = [Content.from_text(json.dumps(task))]
+        elif self.role == "check":
             contents = [
                 Content.from_text(json.dumps({"supported": bool(tool_results), "simulated": True}))
             ]

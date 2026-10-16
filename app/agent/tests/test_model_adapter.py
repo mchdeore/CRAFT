@@ -481,3 +481,22 @@ def test_model_stream_observation(app, intercepted):
     assert any(
         row["kind"] == "step" and row["parent_call_id"] == root["call_id"] for row in records
     )
+
+
+def test_fake_summary_task(settings):
+    selected = model.client(settings)
+    data = {
+        "task": "summarize",
+        "blocks": [
+            {"block": 1, "text": "Simulated fact one."},
+            {"block": 2, "text": "Simulated fact two."},
+        ],
+    }
+
+    async def run():
+        result = await selected.get_response([Message(role="user", contents=[json.dumps(data)])])
+        body = json.loads(result.text)
+        exact = [sentence["blocks"] for sentence in body["sentences"]] == [[1], [2]]
+        assert exact and len(body["sentences"]) == 2
+
+    asyncio.run(run())
