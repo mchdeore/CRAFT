@@ -36,6 +36,7 @@ def demo(tmp_path_factory, settings):
     environment = os.environ | {
         "CRAFT_DATABASE_PORT": "0",
         "CRAFT_DATABASE_NAME": "craft_test",
+        "CRAFT_DB_ADMIN_PASSWORD": os.environ.get("CRAFT_DB_ADMIN_PASSWORD") or uuid4().hex,
     }
     compose = ["docker", "compose", "-p", project]
     started = subprocess.run(
