@@ -10,4 +10,5 @@ export interface Routes {
   "GET /api/library/documents/:item/download": { response: Blob };
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
+  "GET /api/me": { response: T.Me };
 }

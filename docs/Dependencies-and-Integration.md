@@ -83,7 +83,7 @@ curl -fsS localhost:8000/health/ready
 docker compose down
 ```
 
-`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These commands remain future work. Model settings and the development-page switch are also later settings. Adding them to the S0 environment causes its strict settings parser to reject unknown fields.
+`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These local commands are implemented. Model settings arrive with their feature. The temporary development page is off by default; enable it with `CRAFT_DEV_PAGE=1`.
 
 ## 3. Architecture rules and their checks
 
@@ -243,9 +243,9 @@ The current settings are `CRAFT_APP_DB_PASSWORD`, `CRAFT_DATABASE_HOST`, `CRAFT_
 
 Future model integration uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. The planned settings select a main model, groundedness model and embeddings through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`; the subagent selection remains deferred. A scripted fake selection supports deterministic demonstrations. These fields are absent from S0. Endpoint, credential and deployment settings need reviewed configuration with the model feature; an installed Foundry library is not an active endpoint.
 
-The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions and examples are planned. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
+The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions, lock and examples cover the built routes. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
 
-Future simulated seed sets supply labelled demonstration data. Demonstrations use a seed set. A separate demonstration repository or branch is not required. A temporary development page at `/dev`, enabled by the planned `CRAFT_DEV_PAGE=1` setting, is planned for sign-in (S2), chat (S3) and approval (S4). It exercises the real browser cookie, Origin checks, stream and approval path while keeping contract adherence. It is removed in S5 when the front end is integrated. Neither seeds nor that page are active S0 features.
+Future simulated seed sets supply labelled demonstration data. Demonstrations use a seed set. A separate demonstration repository or branch is not required. The temporary development page at `/dev`, enabled by `CRAFT_DEV_PAGE=1`, supports sign-in and search (S2); chat (S3) and approval (S4) arrive with their features. It exercises the real browser cookie, Origin checks, stream and approval path while keeping contract adherence. It is removed in S5 when the front end is integrated. Seeded accounts are synthetic and require explicit private credential provisioning before browser sign-in.
 
 Browser verification covers the Secure host cookie on localhost, particularly Safari. Use local Hypertext Transfer Protocol Secure (HTTPS) if the selected browser requires it.
 
@@ -350,3 +350,27 @@ npm ci --prefix api --ignore-scripts --no-audit --no-fund
 uv run pytest -q app/accounts/tests/test_sessions.py app/accounts/tests/test_users_cli.py
 uv run pytest -q app/tests/test_contract.py
 ```
+
+## 14. Current account and browser demonstration
+
+`GET /api/me` returns the enabled account and the roles resolved for the current request. Browser identity hints are rejected as unknown input; headers cannot replace the trusted identity. The optional `/dev` mount serves one static page and exposes no neighboring source files. Results use text nodes, including titles containing markup.
+
+Use synthetic accounts and documents. Reset the demo credential through the local password prompt, or provision an environment-supplied test credential through the same account handler. Start the host server after stopping the application container; leave the database running.
+
+```bash
+uv run craft seed base
+uv run craft index
+uv run craft users reset demo --as admin
+docker compose stop app
+CRAFT_DEV_PAGE=1 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+In a browser, open `http://localhost:8000/dev`, sign in, search for `radiator margin`, then sign out. In the second terminal, an unsigned request gives 401:
+
+```bash
+curl -s -o /tmp/craft-me.json -w '%{http_code}' http://localhost:8000/api/me
+uv run pytest -q app/accounts/tests/test_me.py app/dev/tests/test_dev_page.py
+uv run pytest -q app/accounts/tests/test_sessions.py app/tests/test_contract.py
+```
+
+A Chromium-based in-app browser on macOS exercised sign-in, search, literal markup-title rendering and sign-out. Real HTTP checks verified cookie flags, foreign-Origin rejection and revoked-session read denial. The exact embedded browser version, native browser cookie inspection, Safari and Windows/WSL have not been verified. Stop the host server with Ctrl-C before restarting `docker compose up --build --wait`.

@@ -22,6 +22,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
     password_min_length: Annotated[int, msgspec.Meta(ge=12)] = 12
     allowed_origins: str = "http://localhost:8000"
+    dev_page: bool = False
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

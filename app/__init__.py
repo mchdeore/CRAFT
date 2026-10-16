@@ -5,6 +5,9 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
 from sqlalchemy import Engine
+from starlette.exceptions import HTTPException
+from starlette.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from app.accounts import handlers as account_handlers
 from app.health.handlers import migration_head
@@ -13,8 +16,18 @@ from app.infrastructure.database.engine import make_engine, make_sessions
 from app.infrastructure.errors import install_error_handlers
 from app.infrastructure.logging import configure_logging, instrument_sql
 from app.infrastructure.operations.pipeline import register_http
+from app.infrastructure.paths import ROOT
 from app.infrastructure.requests import RequestIdMiddleware
 from app.library import handlers as library_handlers
+
+
+class DevPage(StaticFiles):
+    """Expose only the single development page, never neighboring source files."""
+
+    async def get_response(self, path: str, scope: Scope):
+        if path != ".":
+            raise HTTPException(status_code=404)
+        return await super().get_response("dev.html", scope)
 
 
 def close_on_exit(engine: Engine) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
@@ -39,5 +52,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.migration_head = migration_head()
     install_error_handlers(app)
     register_http(app)
+    if settings.dev_page:
+        app.mount("/dev", DevPage(directory=ROOT / "app/dev"))
     app.add_middleware(RequestIdMiddleware)
     return app

@@ -68,6 +68,40 @@ def sign_out(caller: Caller) -> None:
     service.sign_out(caller)
 
 
+@operation(SIGNED_IN, get="/me")
+def me(caller: Caller) -> Me:
+    """Return the current authenticated account and its trusted roles."""
+    from sqlalchemy import select
+
+    from app.accounts import storage
+    from app.infrastructure.database.unit_of_work import unit_of_work
+    from app.infrastructure.errors import NotSignedIn
+
+    if caller.sessions is None:
+        raise NotSignedIn()
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        row = (
+            session.execute(
+                select(storage.users).where(
+                    storage.users.c.id == caller.user_id, storage.users.c.disabled_at.is_(None)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        raise NotSignedIn()
+    return msgspec.convert(
+        {
+            "id": row["id"],
+            "username": row["username"],
+            "displayName": row["display_name"],
+            "roles": sorted(caller.roles),
+        },
+        Me,
+    )
+
+
 @operation("accounts.manage")
 def add(caller: Caller, request: NewUser) -> None:
     service.add(caller, request)
