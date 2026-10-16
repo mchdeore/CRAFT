@@ -104,6 +104,11 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/conversations/:id/files` | `Blob`; query `{ classification?: T.Classification }` | `WorkspaceFile` | signed in; owned conversation | — |
 | `GET /api/conversations/:id/files/:fileId/content` | — | `Blob` | signed in; owned conversation | — |
 | `DELETE /api/conversations/:id/files/:fileId` | — | `void` | signed in; owned conversation | — |
+| `PUT /api/notes` | `WriteNote` | `Note` | signed in; live resource access | `write_note` |
+| `GET /api/notes` | —; query `{ conversationId?: string }` | `NoteSummary[]` | signed in; live resource access | `list_notes` |
+| `GET /api/notes/:id` | — | `Note` | signed in; live resource access | `read_note` |
+| `DELETE /api/notes/:id` | — | `void` | signed in; live resource access | `delete_note` |
+| `POST /api/agent/ask` | `AskAgent` | `AskAgentResult` | signed in; live resource access | `ask_agent` |
 
 ### 5.2 Agreed, not built yet
 
@@ -127,9 +132,11 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 
 | Tool | Route | Input type | Effects |
 |---|---|---|---|
+| `ask_agent` | `POST /api/agent/ask` | `AskAgent` | `NONE` |
 | `check_citation` | `POST /api/library/citations/check` | `CitationCheck` | `NONE` |
 | `compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `NONE` |
 | `compare_versions` | `GET /api/library/documents/:item/compare` | `CompareVersions` | `NONE` |
+| `delete_note` | `DELETE /api/notes/:id` | `NoteRef` | `NONE` |
 | `explain_similarity` | `POST /api/cube/similar/explain` | `ExplainSimilarity` | `NONE` |
 | `explore` | `POST /api/library/explore` | `ExploreInput` | `NONE` |
 | `find_missions` | `POST /api/cube/find` | `FindMissions` | `NONE` |
@@ -137,11 +144,14 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `get_mission` | `GET /api/cube/missions/:key` | `MissionRef` | `NONE` |
 | `get_value_evidence` | `GET /api/cube/values/:id` | `ValueRef` | `NONE` |
 | `list_missions` | `GET /api/cube/missions` | `ListMissions` | `NONE` |
+| `list_notes` | `GET /api/notes` | `NoteList` | `NONE` |
 | `list_parameters` | `GET /api/cube/parameters` | `none` | `NONE` |
 | `prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `NONE` |
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
+| `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
+| `write_note` | `PUT /api/notes` | `WriteNote` | `NONE` |
 
 `/mcp` is a stateless JSON MCP mount outside the ordinary route map. It reuses the same registry server as standard input and output. The server lists every `tool=True` operation; the native framework transport applies its read-tool allowlist. Private handlers and observations are absent. Effectful calls return `approval_required`; a run credential grants no write approval.
 
@@ -328,6 +338,14 @@ export interface RetrievalRecord { messageId: Id; runId: Id; model: string; inst
 export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
 export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }
 
+export interface WriteNote { title: string; body: string; conversationId?: Id | null }
+export interface NoteList { conversationId?: Id | null }
+export interface NoteRef { id: Id }
+export interface NoteSummary { id: Id; title: string; conversationId: Id | null; sizeBytes: number; createdAt: string; updatedAt: string }
+export interface Note extends NoteSummary { body: string }
+export interface AskAgent { question: string; conversationId?: Id | null }
+export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
+
 // Remaining forms for table 5.2.
 export type Timestamp = string;   // ISO 8601, UTC
 
@@ -415,6 +433,12 @@ export interface Routes {
   "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };
   "GET /api/conversations/:id/files/:fileId/content": { response: Blob };
   "DELETE /api/conversations/:id/files/:fileId": { response: void };
+
+  "PUT /api/notes": { body: T.WriteNote; response: T.Note };
+  "GET /api/notes": { query: { conversationId?: string }; response: T.NoteSummary[] };
+  "GET /api/notes/:id": { response: T.Note };
+  "DELETE /api/notes/:id": { response: void };
+  "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
 }
 ```
 
@@ -452,6 +476,10 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `PATCH /api/conversations/:id` | `ConversationSummary` | `api/examples/conversation-summary.json` |
 | `GET /api/conversations/:id/files` | `WorkspaceFile[]` | `api/examples/workspace-files.json` |
 | `POST /api/conversations/:id/files` | `WorkspaceFile` | `api/examples/workspace-file.json` |
+| `PUT /api/notes` | `Note` | `api/examples/note.json` |
+| `GET /api/notes` | `NoteSummary[]` | `api/examples/notes.json` |
+| `GET /api/notes/:id` | `Note` | `api/examples/note.json` |
+| `POST /api/agent/ask` | `AskAgentResult` | `api/examples/ask-agent.json` |
 
 ## 16. Stand-ins and contract tests
 

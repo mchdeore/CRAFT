@@ -11,6 +11,7 @@ from app.agent import model
 from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import Shape
+from app.library.handlers import CitationHandle
 
 
 class EmbeddingInput(Shape):
@@ -198,4 +199,87 @@ def embed(caller: Caller, request: EmbeddingInput) -> EmbeddingOutput:
             if caller.settings.model_main == "fake"
             else caller.settings.model_embedding
         ),
+    )
+
+
+class AskAgent(Shape):
+    max_bytes: ClassVar[int] = 1024 * 1024
+    question: Annotated[str, msgspec.Meta(min_length=1)]
+    conversation_id: UUID | None = None
+
+
+class AnswerCitation(Shape):
+    handle: CitationHandle
+    title: str
+    heading_path: str
+    classification: Literal["unclassified", "protected-a", "protected-b"]
+    quote: str
+
+
+class AnswerConfidence(Shape):
+    score: float
+    level: Literal["high", "medium", "low"]
+    reason: str
+
+
+class AskAgentResult(Shape):
+    answer: str
+    citations: list[AnswerCitation]
+    confidence: AnswerConfidence
+    run_id: UUID
+
+
+@operation(SIGNED_IN, post="/agent/ask", tool=True)
+async def ask_agent(caller: Caller, request: AskAgent) -> AskAgentResult:
+    """Ask the cited CRAFT runtime; for example a document question from an MCP application."""
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from starlette.concurrency import run_in_threadpool
+
+    from app.conversations.handlers import NewConversation, create_conversation
+    from app.infrastructure.errors import ApiError
+    from app.infrastructure.operations.context import current_call
+
+    if caller.run_id is not None:
+        from app.infrastructure.errors import Forbidden
+
+        raise Forbidden()
+    conversation = request.conversation_id
+    if conversation is None:
+        created = await run_in_threadpool(create_conversation, caller, NewConversation())
+        conversation = created.id
+    identifier = uuid4()
+    trusted = replace(caller, conversation_id=conversation, run_id=identifier)
+    context = current_call.get()
+    if context is not None:
+        context.caller = trusted
+    data = RunAgentInput(
+        thread_id=conversation,
+        run_id=identifier,
+        messages=[{"id": str(uuid4()), "role": "user", "content": request.question}],
+    )
+    iterator = run_agent(trusted, data)
+    text = ""
+    answer = None
+    finished = False
+    try:
+        async for event in iterator:
+            if event.type == "TEXT_MESSAGE_START":
+                text = ""
+            elif event.type == "TEXT_MESSAGE_CONTENT":
+                text += event.delta
+            elif event.type == "ACTIVITY_SNAPSHOT" and event.activity_type == "craft.answer":
+                answer = event.content
+            elif event.type == "RUN_FINISHED":
+                finished = True
+    finally:
+        await iterator.aclose()
+    if not finished or answer is None:
+        raise ApiError()
+    return AskAgentResult(
+        answer=text,
+        citations=msgspec.convert(answer["citations"], list[AnswerCitation]),
+        confidence=msgspec.convert(answer["confidence"], AnswerConfidence),
+        run_id=identifier,
     )

@@ -344,3 +344,18 @@ facet_texts = Table(
         "facet in ('purpose','design','operations','program','cost_and_risk')", name="facet"
     ),
 )
+
+notes = Table(
+    "notes",
+    metadata,
+    identifier(),
+    Column("owner", UUID, ForeignKey("users.id"), nullable=False),
+    Column("conversation_id", UUID, ForeignKey("conversations.id")),
+    Column("title", Text, nullable=False),
+    Column("body", Text, nullable=False),
+    timestamp("created_at"),
+    timestamp("updated_at"),
+    UniqueConstraint("owner", "title"),
+    CheckConstraint("char_length(title) BETWEEN 1 AND 200", name="title"),
+    CheckConstraint("char_length(body) <= 100000", name="body"),
+)

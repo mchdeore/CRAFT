@@ -1,0 +1,25 @@
+{
+  "answer": "| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 400 | W |",
+  "citations": [
+    {
+      "handle": {
+        "item": "itm_259f893facac",
+        "version": 1,
+        "block": 1,
+        "locator": "heading=1;block=1;rows=1-1",
+        "quoteSha256": "647045c0107055e5e9047787e76c64f55c4139efdbc9e7c42ebb510f3bac0fb6",
+        "simulated": true
+      },
+      "title": "budget",
+      "headingPath": "1 Budget",
+      "classification": "unclassified",
+      "quote": "| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 400 | W |"
+    }
+  ],
+  "confidence": {
+    "score": 0.0,
+    "level": "low",
+    "reason": "Evidence is insufficient for drafting before calibration."
+  },
+  "runId": "887c9dbb-e979-48cb-979b-92ced1638fa5"
+}

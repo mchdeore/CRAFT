@@ -8,100 +8,12 @@
     "route": "POST /api/library/citations/check"
   },
   {
-    "name": "compare_missions",
-    "operation": "cube.compare_missions",
-    "description": "Compare two to five readable missions in one scope. For example their mass and power.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "POST /api/cube/compare"
-  },
-  {
     "name": "compare_versions",
     "operation": "library.compare_versions",
     "description": "Compare readable versions by block hash; for example versions one and three.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/library/documents/:item/compare"
-  },
-  {
-    "name": "explain_similarity",
-    "operation": "cube.explain_similarity",
-    "description": "Read both missions' permitted facet evidence; for example a design comparison.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "POST /api/cube/similar/explain"
-  },
-  {
-    "name": "explore",
-    "operation": "library.explore",
-    "description": "Read blocks around a citation. Use for context; for example two blocks before and after.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "POST /api/library/explore"
-  },
-  {
-    "name": "find_missions",
-    "operation": "cube.find_missions",
-    "description": "Find readable missions matching all conditions. For example dry mass at most 150 kg.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "POST /api/cube/find"
-  },
-  {
-    "name": "get_document",
-    "operation": "library.get_document",
-    "description": "Read a document outline and versions. Use a known item, such as itm_000000000001.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "GET /api/library/documents/:item"
-  },
-  {
-    "name": "get_mission",
-    "operation": "cube.get_mission",
-    "description": "Read accepted mission values on a date. Use a key or alias, for example sim-01.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "GET /api/cube/missions/:key"
-  },
-  {
-    "name": "get_value_evidence",
-    "operation": "cube.get_value_evidence",
-    "description": "Read the cited source row and conversion for a value. Use an accepted value identifier.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "GET /api/cube/values/:id"
-  },
-  {
-    "name": "list_missions",
-    "operation": "cube.list_missions",
-    "description": "Resolve readable mission names and aliases. Use before cube reads; for example sim-01.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "GET /api/cube/missions"
-  },
-  {
-    "name": "list_parameters",
-    "operation": "cube.list_parameters",
-    "description": "Read the parameter dictionary and registered units. Use before filtering, such as kg or g.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "GET /api/cube/parameters"
-  },
-  {
-    "name": "prepare_values",
-    "operation": "cube.prepare_values",
-    "description": "Read cited candidates without writing values; for example a mass-budget table.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "POST /api/cube/candidates"
-  },
-  {
-    "name": "read_chunks",
-    "operation": "library.read_chunks",
-    "description": "Read up to twenty source blocks. Use after search; for example blocks 1 through 3.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "GET /api/library/documents/:item/chunks"
+    "route": "GET /api/library/documents/{item}/compare"
   },
   {
     "name": "search",
@@ -112,11 +24,139 @@
     "route": "POST /api/library/search"
   },
   {
+    "name": "get_document",
+    "operation": "library.get_document",
+    "description": "Read a document outline and versions. Use a known item, such as itm_000000000001.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/library/documents/{item}"
+  },
+  {
+    "name": "read_chunks",
+    "operation": "library.read_chunks",
+    "description": "Read up to twenty source blocks. Use after search; for example blocks 1 through 3.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/library/documents/{item}/chunks"
+  },
+  {
+    "name": "explore",
+    "operation": "library.explore",
+    "description": "Read blocks around a citation. Use for context; for example two blocks before and after.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/library/explore"
+  },
+  {
+    "name": "ask_agent",
+    "operation": "agent.ask_agent",
+    "description": "Ask the cited CRAFT runtime; for example a document question from an MCP application.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/agent/ask"
+  },
+  {
     "name": "similar_missions",
     "operation": "cube.similar_missions",
     "description": "Rank readable missions by cited facets; for example design and operations.",
     "effects": "NONE",
     "needsApproval": false,
     "route": "POST /api/cube/similar"
+  },
+  {
+    "name": "explain_similarity",
+    "operation": "cube.explain_similarity",
+    "description": "Read both missions' permitted facet evidence; for example a design comparison.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/cube/similar/explain"
+  },
+  {
+    "name": "list_missions",
+    "operation": "cube.list_missions",
+    "description": "Resolve readable mission names and aliases. Use before cube reads; for example sim-01.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/cube/missions"
+  },
+  {
+    "name": "prepare_values",
+    "operation": "cube.prepare_values",
+    "description": "Read cited candidates without writing values; for example a mass-budget table.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/cube/candidates"
+  },
+  {
+    "name": "list_parameters",
+    "operation": "cube.list_parameters",
+    "description": "Read the parameter dictionary and registered units. Use before filtering, such as kg or g.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/cube/parameters"
+  },
+  {
+    "name": "find_missions",
+    "operation": "cube.find_missions",
+    "description": "Find readable missions matching all conditions. For example dry mass at most 150 kg.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/cube/find"
+  },
+  {
+    "name": "get_mission",
+    "operation": "cube.get_mission",
+    "description": "Read accepted mission values on a date. Use a key or alias, for example sim-01.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/cube/missions/{key}"
+  },
+  {
+    "name": "compare_missions",
+    "operation": "cube.compare_missions",
+    "description": "Compare two to five readable missions in one scope. For example their mass and power.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/cube/compare"
+  },
+  {
+    "name": "get_value_evidence",
+    "operation": "cube.get_value_evidence",
+    "description": "Read the cited source row and conversion for a value. Use an accepted value identifier.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/cube/values/{id}"
+  },
+  {
+    "name": "write_note",
+    "operation": "notes.write_note",
+    "description": "Keep or replace an owned working note; for example a calculation scratchpad.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "PUT /api/notes"
+  },
+  {
+    "name": "list_notes",
+    "operation": "notes.list_notes",
+    "description": "List private working-note titles and sizes; use before reading a saved note.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/notes"
+  },
+  {
+    "name": "read_note",
+    "operation": "notes.read_note",
+    "description": "Read one owned working note; for example a previously listed scratchpad.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/notes/{id}"
+  },
+  {
+    "name": "delete_note",
+    "operation": "notes.delete_note",
+    "description": "Remove one owned working note; use after its temporary work is complete.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "DELETE /api/notes/{id}"
   }
 ]

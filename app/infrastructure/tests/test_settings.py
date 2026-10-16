@@ -79,3 +79,9 @@ def test_mcp_target_has_safe_loopback_validation(value):
         Settings.from_env({**VALID, "CRAFT_MCP_URL": value})
     safe = value not in str(stopped.value) and "mcp_url" in str(stopped.value)
     assert safe
+
+
+def test_compose_mcp_account_is_not_an_application_setting() -> None:
+    settings = Settings.from_env({**VALID, "CRAFT_MCP_ACCOUNT": "synthetic-account"})
+    assert settings.database_name == "craft_dev"
+    assert not hasattr(settings, "mcp_account")

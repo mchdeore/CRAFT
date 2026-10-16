@@ -36,4 +36,10 @@ export interface Routes {
   "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };
   "GET /api/conversations/:id/files/:fileId/content": { response: Blob };
   "DELETE /api/conversations/:id/files/:fileId": { response: void };
+
+  "PUT /api/notes": { body: T.WriteNote; response: T.Note };
+  "GET /api/notes": { query: { conversationId?: string }; response: T.NoteSummary[] };
+  "GET /api/notes/:id": { response: T.Note };
+  "DELETE /api/notes/:id": { response: void };
+  "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
 }

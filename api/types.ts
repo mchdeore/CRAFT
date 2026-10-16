@@ -113,3 +113,11 @@ export type RetrievalPath = RetrievalStep[];
 export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
 export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
 export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }
+
+export interface WriteNote { title: string; body: string; conversationId?: Id | null }
+export interface NoteList { conversationId?: Id | null }
+export interface NoteRef { id: Id }
+export interface NoteSummary { id: Id; title: string; conversationId: Id | null; sizeBytes: number; createdAt: string; updatedAt: string }
+export interface Note extends NoteSummary { body: string }
+export interface AskAgent { question: string; conversationId?: Id | null }
+export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }

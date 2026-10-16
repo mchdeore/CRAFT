@@ -9,7 +9,7 @@ import msgspec
 from app.infrastructure.config.env import read_env
 
 PREFIX = "CRAFT_"
-OTHER_TOOLS = {"db_admin_password", "owner_db_password"}  # for initdb.sh and Alembic, not the app
+OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account"}  # setup and Compose only
 
 
 class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=True):
