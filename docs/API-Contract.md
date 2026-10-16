@@ -549,3 +549,11 @@ Until the six-input confidence calibration is defined, scores remain zero, the l
 `CompareVersions` names one readable item and two positive integer versions. The response contains at most 500 ordered added, removed, changed or moved blocks, with nullable source and target positions and a truncation flag. Equal versions return an empty list. Missing or unreadable versions return 404.
 
 `CitationCheck` holds one canonical handle. It returns current, changed, newer_version or withdrawn and the latest provider version. The original is re-read outside database transactions. A row locator checks only its table row. Live source permissions apply before original bytes are read. Nonpositive positions return 400; a missing or mismatched quote returns changed. No source text is returned by these two operations.
+
+## 18. Table candidate values
+
+`POST /api/cube/candidates` accepts `PrepareValues` and returns `Candidates`. The handle must name a complete readable table chunk; a non-table input is 400 and a mismatched handle is 404. Mission, silo and stage default to source tags. A named mission must be readable, including its selected silo. Unknown scope keys or invalid dates are 400. A missing date is a problem and is never guessed.
+
+Each candidate contains its source row, header, parameter, named element or null mission total, original numeric token and unit, converted interval, row citation and at most one problem. Numeric tokens are at most 100 characters. Cells without valid numbers use an empty source-number string; their source text remains available through the row citation. Empty and TBD cells have kind unknown; n/a has kind not_applicable. Neither has numeric bounds. Ranges convert both decimal bounds. Candidate preparation writes no domain rows.
+
+Problem names are unknown header, no unit, unknown unit, not a number, outside the allowed bounds, mission not resolved and no valid-from date. A candidate takes the first applicable problem in that order. The top-level problems list includes every applicable scope and cell problem. Element recognition applies account grants even when no silo is specified. Explicit element names remain names; no unrecognized row is treated as a mission total.

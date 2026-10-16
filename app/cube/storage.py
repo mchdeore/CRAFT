@@ -84,6 +84,36 @@ def dictionary(session: Session) -> dict:
     return rows
 
 
+def intake_dictionary(session: Session, caller: Caller, target, silo):
+    synonyms = {}
+    for row in session.execute(select(m.header_synonyms)).mappings():
+        synonyms.setdefault(row["header"], []).append(row["parameter"])
+    names = {}
+    if target:
+        query = select(m.elements.c.name).where(
+            m.elements.c.mission_key == target,
+            exists().where(
+                mission_grants.c.user_id == caller.user_id,
+                mission_grants.c.mission_key == m.elements.c.mission_key,
+                or_(mission_grants.c.silo.is_(None), mission_grants.c.silo == m.elements.c.silo),
+            ),
+        )
+        if silo:
+            query = query.where(m.elements.c.silo == silo)
+        names = {name.casefold(): name for name in session.execute(query).scalars()}
+    return dictionary(session), synonyms, names
+
+
+def intake_grant(session: Session, caller: Caller, target, silo) -> bool:
+    query = select(mission_grants.c.user_id).where(
+        mission_grants.c.user_id == caller.user_id,
+        mission_grants.c.mission_key == target,
+    )
+    if silo:
+        query = query.where(or_(mission_grants.c.silo.is_(None), mission_grants.c.silo == silo))
+    return session.execute(query.limit(1)).first() is not None
+
+
 def scope(session: Session, silo, stage) -> None:
     if (
         silo is not None

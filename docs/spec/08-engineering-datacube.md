@@ -353,6 +353,10 @@ All conditions match within one mission, silo, stage and element. Comparison use
 
 `prepare_values` reads one table chunk. Each header maps to a parameter through the header synonyms. Each cell becomes a candidate with its row citation, source number and unit, converted value and any problem. The mission comes from the chunk's tags unless the request names it. Problems: unknown header, no unit, unknown unit, not a number, outside the allowed bounds, mission not resolved, no valid-from date.
 
+Parameter headers keep their explicit unit in parentheses; an inline cell unit takes precedence. Recognized parameter headers are converted in every column. Other first columns label rows, and known element columns can contain parameter-labelled rows. Explicit mission-total rows have no element; other element names stay named. Element lookup applies every mission and silo grant, including unspecified scope.
+
+Each candidate has at most one problem, in the order above. The response lists all applicable context problems. Missing mission and date remain visible; a date is never guessed from another block. Empty cells and TBD are unknown, and n/a is not applicable. Numeric bounds use the registered Decimal conversion, bounds and whole-number rule. The row citation preserves escaped source text and its absolute spreadsheet row or table-window row. Nothing is written.
+
 `submit_values` takes the candidates without problems. The approval card shows each candidate's source cell, original number and unit, converted value, mission, element and date. After approval, the values are written in one transaction, each naming the approval request.
 
 ## 8.15 Access

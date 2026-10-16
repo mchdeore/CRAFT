@@ -70,3 +70,7 @@ export interface CitationCheck { handle: CitationHandle }
 export interface CitationStatus { status: "current" | "changed" | "newer_version" | "withdrawn"; latestVersion: number }
 export interface CompareVersions { item: string; fromVersion: number; toVersion: number }
 export interface VersionDiff { blocks: {change: "added" | "removed" | "changed" | "moved"; fromBlock: number | null; toBlock: number | null}[]; truncated: boolean }
+
+export interface PrepareValues { handle: CitationHandle; mission?: string; silo?: string; stage?: string; validFrom?: string }
+export interface Candidate { row: number; header: string; parameter: string | null; element: string | null; sourceNumber: string; sourceUnit: string | null; kind: ValueKind; low: number | null; high: number | null; citation: CitationHandle; problem: string | null }
+export interface Candidates { mission: string | null; silo: string | null; stage: string | null; validFrom: string | null; candidates: Candidate[]; problems: string[] }

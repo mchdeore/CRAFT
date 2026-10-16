@@ -144,6 +144,58 @@ def list_parameters(caller):
     ]
 
 
+def prepare_values(caller, request):
+    from app.cube import intake
+
+    document = library.get_document(
+        caller,
+        library.DocumentRef(item=request.handle.item, version=request.handle.version),
+    )
+    page = library.read_chunks(
+        caller,
+        library.ChunkRange(
+            item=request.handle.item,
+            version=request.handle.version,
+            from_block=request.handle.block,
+            to_block=request.handle.block,
+        ),
+    )
+    if not page.chunks or page.chunks[0].handle != request.handle:
+        raise NotFound()
+    chunk = page.chunks[0]
+    target = request.mission if request.mission is not None else document.tags.mission
+    silo = request.silo if request.silo is not None else document.tags.silo
+    stage = request.stage if request.stage is not None else document.tags.stage
+    if request.valid_from is not None:
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", request.valid_from):
+                raise ValueError()
+            date.fromisoformat(request.valid_from)
+        except ValueError:
+            raise InvalidInput() from None
+    with unit_of_work(scope(caller), read_only=True) as session:
+        storage.scope(session, silo, stage)
+        mission = storage.mission(session, caller, target) if target else None
+        if request.mission is not None and mission is None:
+            raise NotFound()
+        if mission and not storage.intake_grant(session, caller, mission["key"], silo):
+            raise NotFound()
+        target = mission["key"] if mission else None
+        if stage == "current":
+            stage = mission["current_stage"] if mission else None
+        dictionary, synonyms, names = storage.intake_dictionary(session, caller, target, silo)
+    return intake.prepare(
+        chunk,
+        dictionary,
+        synonyms,
+        names,
+        target,
+        silo,
+        stage,
+        request.valid_from,
+    )
+
+
 def find_missions(caller, request):
     from app.cube.handlers import FoundMissions, MatchedMission
 

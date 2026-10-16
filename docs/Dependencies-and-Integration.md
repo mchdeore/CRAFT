@@ -453,3 +453,7 @@ The page uses text nodes for titles, quotes and suggestions. Selection and uploa
 ## 20. Version differences and citation checks
 
 `uv run pytest -q app/library/tests/test_versions.py` checks stored and arbitrary-pair differences, duplicate blocks, 500-row truncation, live provider versions and withdrawals, row-only hashes, access and compiled request/response forms. The demo check rebuilds all provider versions and verifies every planted version change. `uv run craft operations | grep -cE '^library\.(compare_versions|check_citation) '` returns 2. `uv run alembic upgrade head && uv run alembic check` verifies the existing difference table without a schema change.
+
+## 21. Table candidate preparation
+
+`uv run pytest -q app/cube/tests/test_intake.py` checks English and French headers, inline and header units, Decimal conversion, ranges, whole-number bounds, all seven problems, unknown and not-applicable cells, row citations, the planted budget values and unchanged cube tables. Access includes explicit mission and silo refusals and omitted-silo element filtering. Compiled API forms and real cookie/Origin transport are checked separately within the same suite. `uv run craft operations` includes cube.prepare_values with effect none. Preparation uses checked library reads, then one short dictionary/scope read transaction; conversion follows after that transaction ends.

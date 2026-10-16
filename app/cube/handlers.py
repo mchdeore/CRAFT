@@ -146,6 +146,43 @@ class ValueEvidence(Shape):
     citation_status: Literal["current", "changed", "newer_version", "withdrawn"]
 
 
+class PrepareValues(Shape):
+    handle: CitationHandle
+    mission: str | None = None
+    silo: str | None = None
+    stage: str | None = None
+    valid_from: str | None = None
+
+
+class Candidate(Shape):
+    row: int
+    header: str
+    parameter: str | None
+    element: str | None
+    source_number: str
+    source_unit: str | None
+    kind: Literal["exact", "range", "unknown", "not_applicable"]
+    low: float | None
+    high: float | None
+    citation: CitationHandle
+    problem: str | None
+
+
+class Candidates(Shape):
+    mission: str | None
+    silo: str | None
+    stage: str | None
+    valid_from: str | None
+    candidates: list[Candidate]
+    problems: list[str]
+
+
+@operation(SIGNED_IN, post="/cube/candidates", tool=True)
+def prepare_values(caller: Caller, request: PrepareValues) -> Candidates:
+    """Read cited candidates without writing values; for example a mass-budget table."""
+    return service.prepare_values(caller, request)
+
+
 @operation(SIGNED_IN, get="/cube/parameters", tool=True)
 def list_parameters(caller: Caller) -> list[Parameter]:
     """Read the parameter dictionary and registered units. Use before filtering, such as kg or g."""

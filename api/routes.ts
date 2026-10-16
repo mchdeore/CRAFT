@@ -1,5 +1,6 @@
 import type * as T from "./types";
 export interface Routes {
+  "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
   "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
   "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number }; response: T.VersionDiff };
   "GET /health/live": { response: T.Health };
