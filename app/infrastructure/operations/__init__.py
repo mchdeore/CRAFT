@@ -1,5 +1,6 @@
 """One checked operation entry point and observation-only private steps."""
 
+import asyncio
 import inspect
 from functools import wraps
 from typing import Any
@@ -66,6 +67,9 @@ def observe(name: str) -> Any:
                 error = None
                 try:
                     return await function(*args, **kwargs)
+                except asyncio.CancelledError:
+                    error = ApiError()
+                    raise
                 except Exception:
                     error = ApiError()
                     raise

@@ -1,5 +1,6 @@
 """The shared validation, permission, observation and transport pipeline."""
 
+import asyncio
 import inspect
 import logging
 from functools import wraps
@@ -208,6 +209,9 @@ def wrap(operation: Operation) -> Any:
                 else:
                     output = await run_in_threadpool(fn, resolved, value)
                 return validate_output(operation, output)
+            except asyncio.CancelledError:
+                error = ApiError()
+                raise
             except ApiError as failure:
                 error = failure
                 raise

@@ -28,6 +28,13 @@ class PayloadFilter(logging.Filter):
         return not any(record.name.startswith(name) for name in PAYLOAD_LOGGERS)
 
 
+class ProtocolPayloadFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.name != "root" and not (
+            record.name == "mcp" or record.name.startswith("mcp.")
+        )
+
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         line: dict[str, Any] = {
@@ -46,9 +53,12 @@ def configure_logging(level: str, stream: IO[str] | None = None) -> None:
     handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter())
     handler.addFilter(PayloadFilter())
+    handler.addFilter(ProtocolPayloadFilter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)
+    root.filters[:] = [f for f in root.filters if not isinstance(f, ProtocolPayloadFilter)]
+    root.addFilter(ProtocolPayloadFilter())
     for name in ("uvicorn", "uvicorn.error"):
         logger = logging.getLogger(name)
         logger.handlers.clear()
@@ -56,6 +66,7 @@ def configure_logging(level: str, stream: IO[str] | None = None) -> None:
     logging.getLogger("uvicorn.access").disabled = True
     for name in QUIET:
         logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger("mcp").setLevel(logging.CRITICAL + 1)
     for name in PAYLOAD_LOGGERS:
         logging.getLogger(name).setLevel(logging.CRITICAL + 1)
     for name, logger in logging.Logger.manager.loggerDict.items():

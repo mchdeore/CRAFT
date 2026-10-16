@@ -1,5 +1,6 @@
 """Each call writes one safe event and append-only row without payloads."""
 
+import asyncio
 import io
 import json
 import logging
@@ -137,3 +138,65 @@ def test_observe_preserves_internal_exception(app: FastAPI) -> None:
     handled(trusted(app))
     assert rows(app, "probe.handled")[-1]["outcome"] == "ok"
     assert rows(app, "private.exception")[-1]["outcome"] == "error"
+
+
+def test_async_cancellation_records_failure(app: FastAPI) -> None:
+    @observe("private.cancelled_step")
+    async def step():
+        await asyncio.Event().wait()
+
+    @operation(PUBLIC)
+    async def cancelled_operation(caller: Caller) -> None:
+        await step()
+
+    async def execute():
+        task = asyncio.create_task(cancelled_operation(trusted(app)))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(execute())
+    parent = rows(app, "probe.cancelled_operation")[-1]
+    child = rows(app, "private.cancelled_step")[-1]
+    assert parent["outcome"] == child["outcome"] == "error"
+    assert child["parent_call_id"] == parent["call_id"]
+
+
+def test_malformed_protocol_logging_has_no_input() -> None:
+    from uuid import uuid4
+
+    import anyio
+    from mcp.server.models import InitializationOptions
+    from mcp.server.session import ServerSession
+    from mcp.shared.message import SessionMessage
+    from mcp.types import JSONRPCMessage, JSONRPCRequest, ServerCapabilities
+
+    async def execute():
+        marker = uuid4().hex
+        stream = io.StringIO()
+        configure_logging("DEBUG", stream)
+        incoming, read = anyio.create_memory_object_stream(0)
+        write, outgoing = anyio.create_memory_object_stream(0)
+        options = InitializationOptions(
+            server_name="craft", server_version="1", capabilities=ServerCapabilities()
+        )
+        async with ServerSession(read, write, options, stateless=True):
+            await incoming.send(
+                SessionMessage(
+                    JSONRPCMessage(
+                        JSONRPCRequest(
+                            jsonrpc="2.0",
+                            id=1,
+                            method="tools/call",
+                            params={"name": {"value": marker}, "arguments": {}},
+                        )
+                    )
+                )
+            )
+            response = await outgoing.receive()
+        refused = hasattr(response.message.root, "error")
+        safe = marker not in stream.getvalue()
+        assert refused and safe
+
+    anyio.run(execute)
