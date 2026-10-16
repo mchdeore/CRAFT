@@ -39,7 +39,13 @@ def test_extract_summary(library) -> None:
 
 def test_vectors_per_record(library) -> None:
     with library["sessions"].begin() as session:
-        vectors = session.execute(select(m.vectors)).mappings().all()
+        vectors = (
+            session.execute(
+                select(m.vectors).where(m.vectors.c.owner_kind.in_(["chunk", "doc_version"]))
+            )
+            .mappings()
+            .all()
+        )
         chunks = session.execute(select(m.chunks.c.id)).all()
     assert len(vectors) == len(chunks) + 5
     assert all(

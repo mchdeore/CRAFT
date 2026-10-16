@@ -28,7 +28,11 @@ def library(settings: Settings, tmp_path: Path) -> Iterator[dict]:
     with sessions.begin() as session:
         doc_ids = list(session.execute(select(m.doc_versions.c.id)).scalars())
         chunk_ids = list(session.execute(select(m.chunks.c.id)).scalars())
-        session.execute(m.vectors.delete().where(m.vectors.c.owner_id.in_([*doc_ids, *chunk_ids])))
+        facet_ids = list(session.execute(select(m.facet_texts.c.id)).scalars())
+        session.execute(
+            m.vectors.delete().where(m.vectors.c.owner_id.in_([*doc_ids, *chunk_ids, *facet_ids]))
+        )
+        session.execute(m.facet_texts.delete())
         session.execute(m.version_diffs.delete())
         session.execute(m.doc_versions.delete())
         session.execute(m.provider_items.delete())
