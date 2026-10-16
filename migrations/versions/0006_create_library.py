@@ -39,7 +39,7 @@ def upgrade() -> None:
         media_type TEXT NOT NULL,
         summary TEXT NOT NULL,
         summary_kind TEXT NOT NULL,
-        summary_tsv TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', summary)) STORED,
+        summary_tsv TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', summary)) STORED NOT NULL,
         indexed_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
         CONSTRAINT pk_doc_versions PRIMARY KEY (id),
         CONSTRAINT uq_doc_versions_item_version UNIQUE (item, version),
@@ -67,7 +67,7 @@ def upgrade() -> None:
         text TEXT NOT NULL,
         text_sha256 BYTEA NOT NULL,
         tsv TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', heading_path || ' ' ||
-        text)) STORED,
+        text)) STORED NOT NULL,
         CONSTRAINT pk_chunks PRIMARY KEY (id),
         CONSTRAINT uq_chunks_doc_version_id_block UNIQUE (doc_version_id, block),
         CONSTRAINT ck_chunks_kind CHECK (kind in ('text','table','slide','sheet')),

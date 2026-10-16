@@ -49,10 +49,16 @@ def test_library_tables_exist(owner_engine: Engine) -> None:
         assert {c["name"] for c in inspector.get_columns(name)} == set(
             m.metadata.tables[name].c.keys()
         )
+    for table, column in [("doc_versions", "summary_tsv"), ("chunks", "tsv")]:
+        reflected = next(c for c in inspector.get_columns(table) if c["name"] == column)
+        assert reflected["nullable"] is False
     embedding = next(
         c["type"] for c in inspector.get_columns("vectors") if c["name"] == "embedding"
     )
     assert str(embedding) == "VECTOR(1536)"
+    for table, column in [("doc_versions", "summary_tsv"), ("chunks", "tsv")]:
+        generated = next(c for c in inspector.get_columns(table) if c["name"] == column)
+        assert generated["nullable"] is False
 
 
 def test_app_reads_library_only(app: FastAPI, owner_engine: Engine) -> None:
