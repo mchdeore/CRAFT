@@ -1,0 +1,49 @@
+{
+  "source": {
+    "kind": "upload",
+    "fileName": "source.pdf",
+    "version": "ed2856090b27ae4a947d831e1fc71f15b3bed268d295253631b2d0b0481eac83",
+    "item": null,
+    "providerVersion": null,
+    "simulated": true
+  },
+  "sentences": [
+    {
+      "text": "Simulated source fact.",
+      "citations": [
+        {
+          "handle": null,
+          "block": 1,
+          "blockVersion": "65ed0592e18e627b7837f741f49ef3bfb8441475c6839c2abc4f1d8ac3d9456e",
+          "locator": "page=1;block=1",
+          "quote": "Simulated source fact.",
+          "headingPath": "1 Source"
+        }
+      ]
+    }
+  ],
+  "mission": {
+    "value": null,
+    "confidence": 0,
+    "evidence": [],
+    "path": null
+  },
+  "silo": {
+    "value": null,
+    "confidence": 0,
+    "evidence": [],
+    "path": null
+  },
+  "stage": {
+    "value": null,
+    "confidence": 0,
+    "evidence": [],
+    "path": null
+  },
+  "confidence": {
+    "score": 0,
+    "level": "low",
+    "reason": "Evidence is insufficient for drafting until calibration."
+  },
+  "status": "insufficient_evidence"
+}

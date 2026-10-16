@@ -507,3 +507,39 @@ Content-Type: application/json
     "score": 0.895, "comparable": true, "facetScores": { "design": 0.91, "operations": 0.88 } } ],
   "facets": ["design", "operations"] }
 ```
+
+## 16. Standalone document summary
+
+`GET /summarize` returns one static sign-in and summary shell with the development page disabled. The two summary APIs require the real cookie and an allowed Origin. They create no draft, filing, workspace file, mission or accepted value. Originals remain in request and browser File memory only.
+
+| Route | Input | Result |
+|---|---|---|
+| `POST /api/summarize` | `SelectedSource`: item, integer provider version, exact original-byte SHA-256 | `SummaryResult` |
+| `POST /api/summarize/upload` | Raw bytes with `Content-Type`, `X-File-Name`, `X-Simulated: true` | `SummaryResult` |
+
+Uploads accept PDF, docx and xlsx with their actual media types. The limit is 25 MB, with at most 100,000 converted characters for summary input. An absent simulation label is refused. Malformed or unsupported input is `400`; an oversized source is `413`; an unknown, unreadable or hash-mismatched selected version is `404`. Unsupported model sentences or filing claims return safe `500` without a partial accepted summary.
+
+```ts
+export interface SelectedSource { item: string; version: number; sha256: string }
+export interface SummarySource {
+  kind: "document" | "upload"; fileName: string; version: string;
+  item: string | null; providerVersion: number | null; simulated: boolean;
+}
+export interface SummaryCitation {
+  handle: CitationHandle | null; block: number; blockVersion: string;
+  locator: string; quote: string; headingPath: string;
+}
+export interface SummarySentence { text: string; citations: SummaryCitation[] }
+export interface FilingSuggestion {
+  value: string | null; confidence: number; evidence: SummaryCitation[]; path: string | null;
+}
+export interface SummaryResult {
+  source: SummarySource; sentences: SummarySentence[];
+  mission: FilingSuggestion; silo: FilingSuggestion; stage: FilingSuggestion;
+  confidence: Confidence; status: "supported" | "insufficient_evidence";
+}
+```
+
+`SummarySource.version` hashes exact original bytes. `blockVersion` hashes the full normalized block quote. A selected citation keeps the provider handle; an upload has no provider handle or version. Every sentence cites complete supporting source context. Provider-path evidence supplies selected tags; upload filing evidence includes source headings and quotes. Missing or conflicting filing values are null.
+
+Until the six-input confidence calibration is defined, scores remain zero, the level is low and status is `insufficient_evidence`. Cited extracts remain visible and no draft or filing is written. Model self-rating is ignored. Upload originals download from the owned File object; exact quoted blocks remain readable on the page. Tokens never enter browser storage.

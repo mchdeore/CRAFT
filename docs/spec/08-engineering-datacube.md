@@ -363,7 +363,7 @@ All conditions match within one mission, silo, stage and element. Comparison use
 
 ## 8.16 Operations and tools
 
-Every operation below is declared with `@operation` (section 5) and serves HTTP, the command line and Python. Every one with a tool name is also an MCP tool through the adapter in section 3.3; no list of tools is kept by hand. Reads have the effect `NONE`. No model runs inside an operation.
+Every operation below is declared with `@operation` (section 5) and serves HTTP, the command line and Python. Every one with a tool name is also an MCP tool through the adapter in section 3.3; no list of tools is kept by hand. Reads have the effect `NONE`. Read tools run no conversational model; embedding steps remain private.
 
 | Operation | Route | Tool | Effects |
 |---|---|---|---|
@@ -405,3 +405,11 @@ The ground-truth file, `<provider root>/.provider/ground-truth.json`, lists what
 A fresh demo set has 125 source items and 48 planted questions. Twelve sources have changed versions with later valid dates; two sources move between stage folders; three copies keep matching cells with different bytes. Three cited sources are withdrawn after seeded values name them. Mission-total rows load aggregate values. A unitless cell is not loaded, and TBD is unknown.
 
 The ground-truth file at `.provider/ground-truth.json` records source handles, families, changes and dated values. File properties and package order are fixed. Repeating an unchanged completed seed adds nothing. Changing its baseline creates a new generation and preserves earlier versions and values.
+
+## 8.18 Document summary and owned inspection
+
+`library.inspect_file` is a signed-in Python-only operation with effect `NONE`. It converts supplied bytes in memory through the same format converter, returning their exact hash and ordered blocks with hashes, headings and locators. It has no route, tool or domain write.
+
+`POST /api/summarize` selects an exact readable item and integer version with its original-byte hash. `POST /api/summarize/upload` accepts one explicitly simulated PDF, Word file or workbook. Source reads and conversion finish before the private model step. A source supports a summary sentence only when the complete sentence or table row matches; citation identity alone is insufficient. Uploaded citations name the original-byte hash and ordered blocks, with no invented provider item. Selected citations keep library handles.
+
+The response holds cited extracts and uncommitted mission, silo and stage suggestions. Selected tags use provider-path evidence. Upload suggestions use bounded literal labels in source text and headings. Missing or conflicting values are null; conflicting evidence remains visible. Originals are not indexed, filed or persisted. Files are at most 25 MB and converted summary input is at most 100,000 characters. Confidence follows the calibration gate in section 4.

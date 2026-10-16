@@ -39,6 +39,8 @@ Confidence uses all six evidence inputs rather than the model's self-rating. The
 - A low-confidence result states that evidence is insufficient, shows the readable findings and stops drafting. Consequential work requires a recorded decision.
 - Section 12 defines the calibration gate for weights and thresholds against the evaluation set. A fixed set of questions with known answers and sources measures expected citations, supported claims and confidence levels. Changes to a model, instructions or search method require this evaluation.
 
+The standalone document summary preserves complete source sentences or table rows. Every cited block must support the extract, including its negation and context. Filing evidence uses literal field labels and values. Until six-input weights and thresholds are calibrated, summary and filing confidence stay at zero and the summary level is low. The result shows cited findings as insufficient for drafting. Model self-ratings do not change the score.
+
 ## 4.3 Hosted search and confidence
 
 Azure deployment or a real corpus triggers hosted search and groundedness adapters behind the same retrieval interface, agent tools and API.

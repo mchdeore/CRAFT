@@ -20,6 +20,7 @@ from app.infrastructure.operations.pipeline import register_http
 from app.infrastructure.paths import ROOT
 from app.infrastructure.requests import RequestIdMiddleware
 from app.library import handlers as library_handlers
+from app.summarize import handlers as summarize_handlers
 
 
 class DevPage(StaticFiles):
@@ -29,6 +30,30 @@ class DevPage(StaticFiles):
         if path != ".":
             raise HTTPException(status_code=404)
         return await super().get_response("dev.html", scope)
+
+
+class SummaryPage(StaticFiles):
+    async def get_response(self, path: str, scope: Scope):
+        if path != ".":
+            raise HTTPException(status_code=404)
+        response = await super().get_response("page.html", scope)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; frame-src 'self' blob:; "
+            "object-src 'none'; base-uri 'none'; form-action 'self'"
+        )
+        return response
+
+
+class SummaryPathMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/summarize":
+            scope = dict(scope, path="/summarize/", raw_path=b"/summarize/")
+        await self.app(scope, receive, send)
 
 
 def close_on_exit(engine: Engine) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
@@ -42,7 +67,7 @@ def close_on_exit(engine: Engine) -> Callable[[FastAPI], AbstractAsyncContextMan
 
 def create_app(settings: Settings) -> FastAPI:
     """Build the app: logging, the pool, error bodies, health routes, request IDs."""
-    _ = library_handlers, account_handlers, cube_handlers
+    _ = library_handlers, account_handlers, cube_handlers, summarize_handlers
     configure_logging(settings.log_level)
     engine = make_engine(settings)
     instrument_sql(engine)
@@ -55,5 +80,7 @@ def create_app(settings: Settings) -> FastAPI:
     register_http(app)
     if settings.dev_page:
         app.mount("/dev", DevPage(directory=ROOT / "app/dev"))
+    app.mount("/summarize", SummaryPage(directory=ROOT / "app/summarize"))
+    app.add_middleware(SummaryPathMiddleware)
     app.add_middleware(RequestIdMiddleware)
     return app

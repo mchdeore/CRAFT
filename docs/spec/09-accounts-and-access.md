@@ -93,3 +93,5 @@ Every access checks the owner; a conversation identifier grants no permission. H
 | A separate front-end origin | A cross-origin allowlist with credentials | Cookie, `Origin` check |
 
 Entra sign-in uses OpenID Connect with tokens on the server. Accounts link by tenant and object identifier, never email. Local credentials are disabled after migration.
+
+The single `/summarize` shell is available with the development page disabled. It contains no source content before sign-in. Summary selection and uploads require the real session and allowed Origin. Source permissions apply before a model call. Browser controls retain only the selected source or owned File object and clear results on failure or sign-out.

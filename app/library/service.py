@@ -13,6 +13,57 @@ from app.library import storage
 from app.library.embed import embed, model_name
 
 
+def inspect_file(request):
+    import hashlib
+    from pathlib import Path
+
+    from app.library.convert import convert
+    from app.library.handlers import InspectedBlock, InspectedFile
+
+    suffix = Path(request.file_name).suffix.lower()
+    types = {
+        ".md": "text/markdown",
+        ".txt": "text/plain",
+        ".html": "text/html",
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".csv": "text/csv",
+    }
+    if (
+        not request.content
+        or Path(request.file_name).name != request.file_name
+        or "\\" in request.file_name
+        or "\x00" in request.file_name
+        or types.get(suffix) != request.media_type
+    ):
+        raise InvalidInput()
+    try:
+        blocks = convert(request.content, request.file_name)
+    except (ValueError, UnicodeDecodeError):
+        raise InvalidInput() from None
+    if not blocks:
+        raise InvalidInput()
+    return InspectedFile(
+        file_name=request.file_name,
+        media_type=request.media_type,
+        sha256=hashlib.sha256(request.content).hexdigest(),
+        simulated=request.simulated,
+        blocks=[
+            InspectedBlock(
+                block=block.block,
+                kind=block.kind,
+                heading_path=block.heading_path,
+                locator=block.locator,
+                text=block.text,
+                quote_sha256=hashlib.sha256(block.text.encode()).hexdigest(),
+            )
+            for block in blocks
+        ],
+    )
+
+
 def scope(caller: Caller):
     if caller.sessions is None or caller.settings is None:
         raise NotFound()

@@ -17,4 +17,6 @@ export interface Routes {
   "GET /api/cube/missions/:key": { query: {silo?: string; stage?: string; at?: string; knownAt?: string}; response: T.MissionState };
   "POST /api/cube/compare": { body: T.CompareMissions; response: T.Comparison };
   "GET /api/cube/values/:id": { response: T.ValueEvidence };
+  "POST /api/summarize": { body: T.SelectedSource; response: T.SummaryResult };
+  "POST /api/summarize/upload": { body: Blob; response: T.SummaryResult };
 }

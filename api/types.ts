@@ -57,3 +57,11 @@ export interface ValueEvidence {
   value: CubeValue; quote: string; conversion: string;
   citationStatus: "current" | "changed" | "newer_version" | "withdrawn";
 }
+
+export interface SelectedSource { item: string; version: number; sha256: string }
+export interface SummarySource { kind: "document" | "upload"; fileName: string; version: string; item: string | null; providerVersion: number | null; simulated: boolean }
+export interface SummaryCitation { handle: CitationHandle | null; block: number; blockVersion: string; locator: string; quote: string; headingPath: string }
+export interface SummarySentence { text: string; citations: SummaryCitation[] }
+export interface FilingSuggestion { value: string | null; confidence: number; evidence: SummaryCitation[]; path: string | null }
+export interface Confidence { score: number; level: "high" | "medium" | "low"; reason: string }
+export interface SummaryResult { source: SummarySource; sentences: SummarySentence[]; mission: FilingSuggestion; silo: FilingSuggestion; stage: FilingSuggestion; confidence: Confidence; status: "supported" | "insufficient_evidence" }

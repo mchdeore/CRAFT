@@ -434,3 +434,18 @@ uv run pytest -q app/agent/tests/test_model_adapter.py -k embedding
 uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py
 CRAFT_MODEL_MAIN=fake uv run craft index --rebuild
 ```
+
+## 19. Standalone source summary
+
+The `/summarize` shell is independent of the temporary development mount. Selected documents are read through library handlers in windows of at most 20 chunks. Uploads enter the bounded raw-file pipeline after cookie, permission and Origin checks, then the checked library inspection handler. Model work enters the private typed model handler; its observation links to that child operation and the summary call. No transaction spans the model wait.
+
+The fake returns complete extract sentences and literal filing labels. Validation preserves negation and requires every cited block to support its sentence. Field labels and bounded values must occur in the named source context. The earlier four-input numeric confidence example is unused: the current six-input calibration gate leaves every score at zero and stops drafting while preserving cited findings. No live confidence quality result is implied.
+
+```bash
+CRAFT_MODEL_MAIN=fake uv run pytest -q app/summarize/tests/test_summarize.py app/summarize/tests/test_summarize_page.py
+uv run pytest -q app/tests/test_contract.py
+uv run pytest -q app/summarize/tests/test_summarize.py -k "auth_origin or logging_chain or no_transaction"
+curl -s -o /tmp/craft-summary-page.html -w '%{http_code}' http://localhost:8000/summarize
+```
+
+The page uses text nodes for titles, quotes and suggestions. Selection and uploads clear one another; failures clear stale output and re-enable controls. The password field clears before submission, and requests include the cookie. PDF upload preview is sandboxed; office input downloads from the owned File object. Browser checks are recorded separately from server checks.

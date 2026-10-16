@@ -49,7 +49,7 @@ What the decorator does on every call:
 
 ## 5.1 On FastAPI
 
-- Registration: `create_app()` collects every `@operation` and calls `app.add_api_route` for each route. Routes come only from the registry (mounts: `/mcp`, and `/dev` while it exists); hand-written routes are prohibited. FastAPI body models and OpenAPI are off.
+- Registration: `create_app()` collects every `@operation` and calls `app.add_api_route` for each route. Routes come only from the registry (mounts: `/mcp`, `/summarize`, and `/dev` while it exists); hand-written routes are prohibited. FastAPI body models and OpenAPI are off.
 - Threads: sync handlers (database) run in FastAPI's thread pool; async handlers (chat) on the event loop. Context variables carry the request, run and call IDs into both.
 
 ## 5.2 The handler rule

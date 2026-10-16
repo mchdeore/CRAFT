@@ -7,7 +7,7 @@ from starlette.responses import Response
 
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.operations import operation
-from app.infrastructure.shapes import Shape
+from app.infrastructure.shapes import RawFile, Shape
 from app.library import service
 
 Classification = Literal["unclassified", "protected-a", "protected-b"]
@@ -166,6 +166,29 @@ def convert_source(content: bytes, filename: str):
     from app.library.convert import convert
 
     return convert(content, filename)
+
+
+class InspectedBlock(Shape):
+    block: int
+    kind: str
+    heading_path: str
+    locator: str
+    text: str
+    quote_sha256: str
+
+
+class InspectedFile(Shape):
+    file_name: str
+    media_type: str
+    sha256: str
+    simulated: bool
+    blocks: list[InspectedBlock]
+
+
+@operation(SIGNED_IN)
+def inspect_file(caller: Caller, request: RawFile) -> InspectedFile:
+    """Inspect owned bytes in memory without indexing or storing an original."""
+    return service.inspect_file(request)
 
 
 def citation_status(caller: Caller, handle: CitationHandle):
