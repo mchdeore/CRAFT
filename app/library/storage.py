@@ -42,7 +42,7 @@ def blocks(session: Session, version_id, first: int = 1, last: int = 2147483647)
     )
 
 
-def candidates(session: Session, caller: Caller, request, query_vector):
+def candidates(session: Session, caller: Caller, request, query_vector, model="fake-embed@1"):
     session.execute(text("set local hnsw.iterative_scan = 'strict_order'"))
     latest = (
         select(m.doc_versions.c.item, func.max(m.doc_versions.c.version).label("version"))
@@ -94,7 +94,7 @@ def candidates(session: Session, caller: Caller, request, query_vector):
         semantic = (
             select(*fields, (1 - distance).label("raw_score"))
             .select_from(source)
-            .where(*filters)
+            .where(*filters, m.vectors.c.model == model)
             .order_by(distance)
             .limit(50)
         )

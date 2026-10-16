@@ -10,7 +10,7 @@ from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import InvalidInput, NotFound
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library import storage
-from app.library.embed import embed
+from app.library.embed import embed, model_name
 
 
 def scope(caller: Caller):
@@ -53,9 +53,9 @@ def search(caller: Caller, request):
     from app.library.handlers import LibraryHit, LibraryHits
 
     sessions, settings = scope(caller)
-    vector = embed(request.query)
+    vector = embed(request.query, caller=caller)
     with unit_of_work(sessions, read_only=True) as session:
-        candidates = storage.candidates(session, caller, request, vector)
+        candidates = storage.candidates(session, caller, request, vector, model_name(settings))
     maxima = {
         method: max(
             (
@@ -218,14 +218,16 @@ def explore(caller: Caller, request):
             max(1, request.handle.block - request.before),
             request.handle.block + request.after,
         )
-    query = embed(request.query) if request.query else None
+    query = embed(request.query, caller=caller) if request.query else None
     return ChunkPage(
         chunks=[
             chunk_text(
                 item,
                 request.handle.version,
                 b,
-                sum(x * y for x, y in zip(query, embed(b["text"]), strict=True)) if query else None,
+                sum(x * y for x, y in zip(query, embed(b["text"], caller=caller), strict=True))
+                if query
+                else None,
             )
             for b in blocks
         ],

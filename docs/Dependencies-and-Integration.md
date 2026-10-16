@@ -2,7 +2,7 @@
 
 <p class="meta">Version 1.0 | 14 October 2026</p>
 
-The application implements database setup, health routes, checked operations, the document provider and library, local accounts and server sessions. Continuous integration (CI) runs code, contract and document checks.
+The application implements database setup, health routes, checked operations, the document provider and library, local accounts, server sessions and the model adapter. Continuous integration (CI) runs code, contract and document checks.
 
 This document uses application programming interface (API), Hypertext Transfer Protocol (HTTP), JavaScript Object Notation (JSON), Asynchronous Server Gateway Interface (ASGI), Model Context Protocol (MCP), Agent-User Interaction (AG-UI), Transmission Control Protocol (TCP) Portable Document Format (PDF) and Hypertext Markup Language (HTML).
 
@@ -24,7 +24,7 @@ This document uses application programming interface (API), Hypertext Transfer P
 | Alembic | `1.20.0` | Schema changes and drift checks use one migration tool version. Generated revisions require review before upgrade. |
 | pgvector, Python | `0.5.1` | SQLAlchemy vector column support is separate from the database extension version. |
 | agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. An agent runtime remains planned. |
-| agent-framework-foundry | `1.14.1` | The compatibility probe imports `FoundryChatClient`. Model calls remain planned. |
+| agent-framework-foundry | `1.14.1` | The adapter uses `FoundryChatClient` for configured Responses calls. HTTP interception checks the endpoint, model roles, storage flag and budget. |
 | agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application stream remains planned. |
 | mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
 | argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
@@ -33,6 +33,8 @@ This document uses application programming interface (API), Hypertext Transfer P
 | python-pptx | `1.0.2` | Reads slides, explicit tables and speaker notes. |
 | openpyxl | `3.1.5` | Reads literal and cached spreadsheet values with links disabled. |
 | fpdf2, test group | `2.8.9` | Builds synthetic text-layer and image-only PDF fixtures during tests. |
+| openai | `3.29.0` | The installed framework uses this Responses and embedding transport. The version is unchanged. |
+| azure-ai-projects | `2.7.0` | The project adapter supplies the documented local API key argument to the model transport. |
 | pytest | `9.1.1` | Collection and execution use one test runner version. |
 | Ruff | `0.16.10` | CI uses one lint and formatting rule set. |
 | Pyright | `1.1.414` | CI checks Python 3.12 types with one checker version. |
@@ -44,6 +46,7 @@ The development interpreter selection and both Docker stages use Python `3.12.13
 | ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Future browser event compatibility needs explicit verification. |
 | jsonschema | `4.26.0` | It is installed through MCP. Its presence does not provide the planned TypeScript contract pipeline. |
 | azure-identity | `1.26.0` | It is installed through the Foundry dependency. Managed identity integration remains deferred. |
+| httpx2 | `2.13.1` | The installed model transport uses this HTTP implementation; checks intercept its actual requests. |
 
 Browser integration selects `@ag-ui/core` and its browser adapter at `1.0.2`, and `ts-json-schema-generator` at `2.9.0`. These packages require a package manifest, lock, commands and CI wiring in the executable contract slice. Browser protocol 1.0 compatibility with the Python adapter must be checked there. Deployment authentication requires a fixed version with compatibility checks.
 
@@ -88,7 +91,7 @@ curl -fsS localhost:8000/health/ready
 docker compose down
 ```
 
-`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These local commands are implemented. Model settings arrive with their feature. The temporary development page is off by default; enable it with `CRAFT_DEV_PAGE=1`.
+`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These local commands are implemented. Model settings select fake or configured calls. The temporary development page is off by default; enable it with `CRAFT_DEV_PAGE=1`.
 
 ## 3. Architecture rules and their checks
 
@@ -246,7 +249,7 @@ Compose contains two services. `db` uses `pgvector/pgvector:0.8.7-pg18`. Its nam
 
 The current settings are `CRAFT_APP_DB_PASSWORD`, `CRAFT_DATABASE_HOST`, `CRAFT_DATABASE_PORT`, `CRAFT_DATABASE_NAME` and `CRAFT_LOG_LEVEL`. `.env` supplies local values, with process environment values taking precedence. Validation rejects unknown application fields. The two setup password variables are explicitly excluded from application settings.
 
-Future model integration uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. The planned settings select a main model, groundedness model and embeddings through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`; the subagent selection remains deferred. A scripted fake selection supports deterministic demonstrations. These fields are absent from S0. Endpoint, credential and deployment settings need reviewed configuration with the model feature; an installed Foundry library is not an active endpoint.
+The model adapter uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. Settings select main, groundedness and embedding models through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`. `CRAFT_MODEL_ENDPOINT` selects the Foundry project endpoint, `CRAFT_MODEL_KEY` supplies a local model API key, and `CRAFT_MODEL_MAX_OUTPUT_TOKENS` sets the 16 to 4,000 token budget. Fake mode is the default and needs no endpoint or key. Configured calls have been intercepted locally; no live model endpoint has been called. Managed identity, deployment and subagent selection remain deferred.
 
 The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions, lock and examples cover the built routes. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
 
@@ -328,7 +331,7 @@ MCP structured content requires an object. List results use an object with an `i
 
 ## 12. Provider and library
 
-The provider keeps original bytes and immutable versions outside the database. Indexing runs as the owner, converts text before short writes, and creates extract summaries and deterministic token-hash vectors. Mission grants apply before candidates, scores and counts. Reading and exploration remain within one readable version. Preview follows the file contract: sandboxed, no MIME sniffing, inline only for PDF, images and plain text. Other originals download.
+The provider keeps original bytes and immutable versions outside the database. Indexing runs as the owner, converts text before short writes, and creates extract summaries and deterministic token-hash vectors in fake mode. Configured mode stores the selected embedding model on each vector. Mission grants apply before candidates, scores and counts. Reading and exploration remain within one readable version. Preview follows the file contract: sandboxed, no MIME sniffing, inline only for PDF, images and plain text. Other originals download.
 
 Compose mounts the provider folder read-only at `/provider`. Host indexing uses `CRAFT_PROVIDER_ROOT` (default `var/provider`); the application only reads it. Seed and index orchestration use an explicit owner pool, separate from request credentials.
 
@@ -416,3 +419,18 @@ uv run pytest -q app/seed/tests/test_demo.py
 ```
 
 The tests use an owned disposable Compose database, compare two complete folders, verify source hashes and dated state, and run the optional local content check over every generated version. The optional audit path is supplied through `CONTENT_CHECK_SCRIPT`; it is configured for local validation and unavailable in CI. Runtime PDF writing uses the pinned PDF library; no test-only writer is needed by the seed command.
+
+## 18. Model adapter
+
+The adapter returns a fake or configured main and groundedness model compatible with the framework. The configured path uses the held Foundry and project packages, a local model API key and the documented project `get_openai_client(api_key=...)` interface. Project identity requests are unavailable in this slice. Responses storage, selected models, medium or low effort and output budgets are sealed before each request.
+
+Configured embeddings enter a typed Python-only handler and an observed network step. Standalone indexing gets an operation parent; search preserves its trusted caller. Source conversion and embedding finish before short writes. Changing models needs `craft index --rebuild`; semantic search filters vector model names. Fake library indexing keeps its existing token-hash recipe. The separate fake model embedding reports its actual fake recipe.
+
+SDK payload log namespaces are suppressed, and configured mode rejects the SDK console payload flag. Errors expose codes and metadata. Intercepted HTTP checks verify endpoint paths, selected role models, `store=false`, output budgets and 1,536-dimensional embeddings. Rebuild checks use an owned disposable database. No live model compatibility or quality result is implied.
+
+```bash
+uv run pytest -q app/agent/tests/test_model_adapter.py
+uv run pytest -q app/agent/tests/test_model_adapter.py -k embedding
+uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py
+CRAFT_MODEL_MAIN=fake uv run craft index --rebuild
+```

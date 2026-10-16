@@ -7,7 +7,16 @@ import re
 MODEL = "fake-embed@1"
 
 
-def embed(text: str) -> list[float]:
+def model_name(settings=None) -> str:
+    return settings.model_embedding if settings and settings.model_main != "fake" else MODEL
+
+
+def embed(text: str, caller=None) -> list[float]:
+    if caller and caller.settings and caller.settings.model_main != "fake":
+        from app.agent.handlers import EmbeddingInput
+        from app.agent.handlers import embed as configured
+
+        return configured(caller, EmbeddingInput(text=text)).vector
     vector = [0.0] * 1536
     for word in re.findall(r"\w+", text.lower()):
         digest = hashlib.sha256(word.encode()).digest()

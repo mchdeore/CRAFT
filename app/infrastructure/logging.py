@@ -20,6 +20,12 @@ QUIET = (
     "alembic",
     "mcp",
 )  # chatty at INFO; URLs include query strings
+PAYLOAD_LOGGERS = ("openai", "azure", "agent_framework", "httpx", "httpx2", "httpcore")
+
+
+class PayloadFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not any(record.name.startswith(name) for name in PAYLOAD_LOGGERS)
 
 
 class JsonFormatter(logging.Formatter):
@@ -39,6 +45,7 @@ def configure_logging(level: str, stream: IO[str] | None = None) -> None:
     """One JSON handler on the root logger. Uvicorn's access log is off: it prints query strings."""
     handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter())
+    handler.addFilter(PayloadFilter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)
@@ -49,6 +56,11 @@ def configure_logging(level: str, stream: IO[str] | None = None) -> None:
     logging.getLogger("uvicorn.access").disabled = True
     for name in QUIET:
         logging.getLogger(name).setLevel(logging.WARNING)
+    for name in PAYLOAD_LOGGERS:
+        logging.getLogger(name).setLevel(logging.CRITICAL + 1)
+    for name, logger in logging.Logger.manager.loggerDict.items():
+        if isinstance(logger, logging.Logger) and any(name.startswith(p) for p in PAYLOAD_LOGGERS):
+            logger.setLevel(logging.CRITICAL + 1)
 
 
 def get_logger(name: str) -> logging.Logger:

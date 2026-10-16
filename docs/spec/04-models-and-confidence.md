@@ -14,6 +14,9 @@ The application programming interface (API) gives confidence as a score, level a
 - Changing a model means changing its setting and passing the evaluation set. It requires no application-code change.
 - `CRAFT_MODEL_MAIN=fake`: a scripted fake model + deterministic fake embeddings. No Foundry key. Used for deterministic verification and demos.
 - Responses API calls use `store=false` to disable response storage. Conversations live in CRAFT's PostgreSQL. Every call has a `max_output_tokens` limit. Section 12 defines the data-handling gate.
+- `CRAFT_MODEL_ENDPOINT` selects the Foundry project endpoint. `CRAFT_MODEL_KEY` supplies the local model API key. `CRAFT_MODEL_MAX_OUTPUT_TOKENS` accepts 16 to 4,000 tokens and defaults to 4,000. Configured mode requires an HTTPS endpoint and a key. Fake mode requires neither.
+- Main and groundedness requests keep their selected model, effort, output budget and `store=false`. Service-owned conversation references and software development kit (SDK) console payload logging are refused. Each configured call has a private observation step outside database transactions.
+- The fake produces deterministic tool plans and evidence replies. Its separate model embedding is labeled `fake-model-embed@1`. Library fake mode keeps `fake-embed@1`; configured mode uses the selected embedding model and 1,536 dimensions. Changing the embedding model requires rebuilding the library. Semantic queries use vectors from the selected model only.
 - Instructions: `app/agent/instructions.md`, versioned in git. Each run records the version used.
 - Access:
   - Now: a local development key from `.env`, simulated data only.

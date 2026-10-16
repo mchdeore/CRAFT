@@ -7,19 +7,21 @@ from collections import Counter
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
+from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library.convert import convert
-from app.library.embed import MODEL, embed
+from app.library.embed import embed, model_name
 
 
 def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
     provider = SimulatedProvider(settings.provider_root)
     provider.scan()
     sessions, engine = make_owner_sessions(settings)
+    caller = Caller(sessions=sessions, settings=settings)
     counts = Counter()
     try:
         with unit_of_work(sessions) as session:
@@ -76,9 +78,10 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                     counts["unsupported"] += 1
                     continue
                 summary = " ".join(" ".join(b.text for b in blocks).split()[:150])
-                doc_vector = embed(item["title"] + " " + summary)
+                doc_vector = embed(item["title"] + " " + summary, caller=caller)
                 chunk_vectors = [
-                    embed(item["title"] + " " + b.heading_path + " " + b.text) for b in blocks
+                    embed(item["title"] + " " + b.heading_path + " " + b.text, caller=caller)
+                    for b in blocks
                 ]
                 with unit_of_work(sessions) as session:
                     document = session.execute(
@@ -97,7 +100,7 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                         m.vectors.insert().values(
                             owner_kind="doc_version",
                             owner_id=document,
-                            model=MODEL,
+                            model=model_name(settings),
                             recipe="doc-v1",
                             embedding=doc_vector,
                         )
@@ -120,7 +123,7 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                             m.vectors.insert().values(
                                 owner_kind="chunk",
                                 owner_id=chunk,
-                                model=MODEL,
+                                model=model_name(settings),
                                 recipe="chunk-v1",
                                 embedding=vector,
                             )

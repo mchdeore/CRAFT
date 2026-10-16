@@ -23,6 +23,12 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     password_min_length: Annotated[int, msgspec.Meta(ge=12)] = 12
     allowed_origins: str = "http://localhost:8000"
     dev_page: bool = False
+    model_main: str = "fake"
+    model_check: str = "gpt-5.2"
+    model_embedding: str = "text-embedding-3-large"
+    model_endpoint: str = ""
+    model_key: str = ""
+    model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=4000)] = 4000
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -48,6 +54,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
                 valid = False
             if not valid:
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
+            validate_models(settings)
             return settings
         except msgspec.ValidationError as error:
             message = str(error)
@@ -63,6 +70,45 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"
 
     __str__ = __repr__
+
+
+def validate_models(settings: Settings) -> None:
+    import os
+    from urllib.parse import urlsplit
+
+    def fail(field: str):
+        raise SystemExit(f"bad setting: {field}: invalid configuration")
+
+    for field in ["model_main", "model_check", "model_embedding"]:
+        value = getattr(settings, field)
+        if not isinstance(value, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}", value
+        ):
+            fail(field)
+    budget = settings.model_max_output_tokens
+    if not isinstance(budget, int) or isinstance(budget, bool) or not 16 <= budget <= 4000:
+        fail("model_max_output_tokens")
+    if settings.model_main == "fake":
+        return
+    if os.environ.get("AZURE_AI_PROJECTS_CONSOLE_LOGGING", "false").lower() == "true":
+        fail("model_logging")
+    if not settings.model_key or not settings.model_key.strip():
+        fail("model_key")
+    try:
+        endpoint = urlsplit(settings.model_endpoint)
+        valid = (
+            endpoint.scheme == "https"
+            and bool(endpoint.hostname)
+            and endpoint.username is None
+            and endpoint.password is None
+            and not endpoint.query
+            and not endpoint.fragment
+            and (endpoint.port is None or 0 < endpoint.port <= 65535)
+        )
+    except (ValueError, TypeError):
+        valid = False
+    if not valid:
+        fail("model_endpoint")
 
 
 def valid_origin(origin: str) -> bool:
