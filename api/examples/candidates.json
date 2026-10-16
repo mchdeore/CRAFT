@@ -1,0 +1,29 @@
+{
+  "mission": "msn-sim-01",
+  "silo": "engineering",
+  "stage": "st3-design",
+  "validFrom": "2026-01-01",
+  "candidates": [
+    {
+      "row": 1,
+      "header": "Dry mass (kg)",
+      "parameter": "mass_dry",
+      "element": null,
+      "sourceNumber": "1",
+      "sourceUnit": "kg",
+      "kind": "exact",
+      "low": 1.0,
+      "high": 1.0,
+      "citation": {
+        "item": "itm_000000000001",
+        "version": 1,
+        "block": 1,
+        "locator": "heading=Budget;block=1;rows=1-1;row=1",
+        "quoteSha256": "69f98d540021742512c94fafdd5a02b0943f90f0731610e4c72ad9ae6ba7c5c5",
+        "simulated": true
+      },
+      "problem": null
+    }
+  ],
+  "problems": []
+}

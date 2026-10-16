@@ -1,0 +1,56 @@
+{
+  "source": {
+    "kind": "document",
+    "fileName": "source.md",
+    "version": "ed2856090b27ae4a947d831e1fc71f15b3bed268d295253631b2d0b0481eac83",
+    "item": "itm_123456789abc",
+    "providerVersion": 1,
+    "simulated": true
+  },
+  "sentences": [
+    {
+      "text": "Simulated source fact.",
+      "citations": [
+        {
+          "handle": {
+            "item": "itm_123456789abc",
+            "version": 1,
+            "block": 1,
+            "locator": "heading=1;block=1",
+            "quoteSha256": "65ed0592e18e627b7837f741f49ef3bfb8441475c6839c2abc4f1d8ac3d9456e",
+            "simulated": true
+          },
+          "block": 1,
+          "blockVersion": "65ed0592e18e627b7837f741f49ef3bfb8441475c6839c2abc4f1d8ac3d9456e",
+          "locator": "heading=1;block=1",
+          "quote": "Simulated source fact.",
+          "headingPath": "1 Source"
+        }
+      ]
+    }
+  ],
+  "mission": {
+    "value": "msn-sim-01",
+    "confidence": 0,
+    "evidence": [],
+    "path": "missions/msn-sim-01/engineering/st3-design/source.md"
+  },
+  "silo": {
+    "value": "engineering",
+    "confidence": 0,
+    "evidence": [],
+    "path": "missions/msn-sim-01/engineering/st3-design/source.md"
+  },
+  "stage": {
+    "value": "st3-design",
+    "confidence": 0,
+    "evidence": [],
+    "path": "missions/msn-sim-01/engineering/st3-design/source.md"
+  },
+  "confidence": {
+    "score": 0,
+    "level": "low",
+    "reason": "Evidence is insufficient for drafting until calibration."
+  },
+  "status": "insufficient_evidence"
+}

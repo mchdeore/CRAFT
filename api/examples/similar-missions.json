@@ -1,0 +1,25 @@
+{
+  "missions": [
+    {
+      "mission": {
+        "key": "msn-sim-02",
+        "title": "Simulated mission 02",
+        "currentStage": "st2-definition",
+        "aliases": [
+          "sim-02"
+        ],
+        "simulated": true
+      },
+      "score": 0.6,
+      "comparable": true,
+      "facetScores": {
+        "design": 0.6,
+        "operations": null
+      }
+    }
+  ],
+  "facets": [
+    "design",
+    "operations"
+  ]
+}

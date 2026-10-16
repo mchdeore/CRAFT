@@ -36,28 +36,18 @@ Requirement IDs, mapped to the sections of this spec that cover them at the curr
 
 | Requirements and capability | Section | Stage |
 |---|---|---|
-| UMR-031, UMR-034: cost estimates and uncertainty | 8.21, 12 | Deferred R4 |
-| UMR-032: normalized parametric similarity | 8.10 | Now |
-| UMR-033: closest missions with configurable count and cutoff | 8.10 | Now |
-| UMR-053, UMR-083: authoritative financial evidence | 8.21, 12 | Deferred R4, read-only |
-| UMR-077: option and planning comparisons without mission design changes | 8.7, 8.9, 8.13 | Now |
-| UMR-006: cell evidence and deep citations | 8.6, 8.11 | Now |
+| UMR-032, UMR-033: similar missions with a configurable count | 8.13 | Now: facet similarity |
+| UMR-077: mission comparisons without mission design changes | 8.12 | Now |
+| UMR-006: value evidence and deep citations | 8.4, 8.10, 8.12 | Now |
 | UMR-004, UMR-005, UMR-094: scoped document retrieval | 8.11, 10 | Now |
-| UMR-051, UMR-067: original identity and reference boundary | 8.11, 8.16 | Now |
-| UMR-021, HITL-002: cube changes approved before execution | 3.4, 8.17 | Now |
-| UMR-022, HITL-003: exact candidate evidence and reasoning | 8.16, 8.17 | Now |
-| UMR-026, UMR-027: append-only decisions and value history | 7, 8.18 | Now |
-| UMR-066: mission, silo and evidence access | 8.17 | Now |
-| UMR-091: simulated labels and isolated similarity sets | 8.6, 8.10 | Now |
-| UMR-007, UMR-008, UMR-086: evidence-based confidence and insufficiency | 4, 8.6, 8.15 | Now |
-| UMR-055: typed cube routes and tools | 8.13, 8.14 | Now |
-| UMR-092: bounded approved workspace view | 7, 8.12, 8.13 | Now |
-| UMR-049, UMR-050: stage history and styled differences | 8.21, 12 | Deferred R3 |
-| UMR-046, UMR-061, UMR-062: reports and audit export | 8.21, 12 | Deferred R5 |
-| UMR-063: registered units and versioned similarity settings | 8.5, 8.10 | Now |
-| UMR-054: planning-tool static exports | 8.16, 12 | Deferred R2 |
-| UMR-036, UMR-041, UMR-089: risk and anomaly operations | 8.15, 12 | Deferred |
-| UMR-037, UMR-038: other risk identification | 12 | Deferred |
-| UMR-042 to UMR-045, UMR-078: other anomaly and telemetry functions | 12 | Deferred |
-| UMR-047, UMR-090: report review and background processing | 12, 14 | Deferred |
-| UMR-052: source connectors | 12 | Deferred |
+| UMR-051, UMR-067: original identity and the provider boundary | 8.2, 8.3 | Now |
+| UMR-021, HITL-002: cube changes approved before execution | 3.4, 8.14 | Now |
+| UMR-022, HITL-003: exact candidate evidence and reasoning | 8.14 | Now |
+| UMR-026, UMR-027: append-only decisions and value history | 7, 8.10 | Now |
+| UMR-066: mission and silo access | 8.15 | Now |
+| UMR-091: simulated labels | 8.1, 8.17 | Now |
+| UMR-007, UMR-008, UMR-086: evidence-based confidence and insufficiency | 4, 8.12 | Now |
+| UMR-055: typed cube routes and tools | 8.16 | Now |
+| UMR-092: bounded approved workspace view | 7, 8.16 | Now |
+| UMR-063: registered units | 8.9 | Now |
+| UMR-049, UMR-050: version differences and mission stages | 8.6, 8.8 | Now: block differences and the current stage |

@@ -17,10 +17,19 @@ services:
     build: .
     environment:                                        # the app's own settings only
       CRAFT_APP_DB_PASSWORD: ${CRAFT_APP_DB_PASSWORD:?set it in .env}
+      CRAFT_PROVIDER_ROOT: /provider
       CRAFT_DATABASE_HOST: db
       CRAFT_DATABASE_PORT: "5432"
       CRAFT_DATABASE_NAME: ${CRAFT_DATABASE_NAME:-craft_dev}
       CRAFT_LOG_LEVEL: ${CRAFT_LOG_LEVEL:-INFO}
+      CRAFT_MODEL_MAIN: ${CRAFT_MODEL_MAIN:-fake}
+      CRAFT_MODEL_CHECK: ${CRAFT_MODEL_CHECK:-gpt-5.2}
+      CRAFT_MODEL_EMBEDDING: ${CRAFT_MODEL_EMBEDDING:-text-embedding-3-large}
+      CRAFT_MODEL_ENDPOINT: ${CRAFT_MODEL_ENDPOINT:-}
+      CRAFT_MODEL_KEY: ${CRAFT_MODEL_KEY:-}
+      CRAFT_MODEL_MAX_OUTPUT_TOKENS: ${CRAFT_MODEL_MAX_OUTPUT_TOKENS:-4000}
+    volumes:
+      - ${CRAFT_PROVIDER_ROOT:-./var/provider}:/provider:ro
     ports: ["8000:8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://localhost:8000/health/live', timeout=2)"]

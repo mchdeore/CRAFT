@@ -48,8 +48,18 @@ class RequestIdMiddleware:
                 await send_internal_error(send_with_id, rid)
         finally:
             duration_ms = round((perf_counter() - started) * 1000, 1)
-            log.info("http", extra={"fields": {"method": scope["method"], "path": scope["path"],
-                     "status": status, "duration_ms": duration_ms, "request_id": rid}})  # fmt: skip
+            log.info(
+                "http",
+                extra={
+                    "fields": {
+                        "method": scope["method"],
+                        "path": getattr(scope.get("route"), "path", "/unmatched"),
+                        "status": status,
+                        "duration_ms": duration_ms,
+                        "request_id": rid,
+                    }
+                },
+            )
             request_id.reset(token)
 
 

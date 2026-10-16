@@ -1,0 +1,17 @@
+[
+  {
+    "username": "demo",
+    "display_name": "Demo",
+    "role": "member"
+  },
+  {
+    "username": "restricted",
+    "display_name": "Restricted",
+    "role": "member"
+  },
+  {
+    "username": "admin",
+    "display_name": "Admin",
+    "role": "admin"
+  }
+]

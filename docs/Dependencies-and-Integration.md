@@ -2,7 +2,7 @@
 
 <p class="meta">Version 1.0 | 14 October 2026</p>
 
-The S0 application skeleton implements database setup, health routes, request identifiers, error mapping, settings and transactions. Continuous integration (CI) runs the code and document checks. Application operations, account sessions, the agent runtime, approvals, executable API contracts and a front end are later slices.
+The application implements database setup, health routes, checked operations, the document provider and library, local accounts, server sessions and the model adapter. Continuous integration (CI) runs code, contract and document checks.
 
 This document uses application programming interface (API), Hypertext Transfer Protocol (HTTP), JavaScript Object Notation (JSON), Asynchronous Server Gateway Interface (ASGI), Model Context Protocol (MCP), Agent-User Interaction (AG-UI), Transmission Control Protocol (TCP) Portable Document Format (PDF) and Hypertext Markup Language (HTML).
 
@@ -23,11 +23,19 @@ This document uses application programming interface (API), Hypertext Transfer P
 | psycopg[binary] | `3.3.6` | The PostgreSQL driver and binary package resolve together. Connections use `postgresql+psycopg`. |
 | Alembic | `1.20.0` | Schema changes and drift checks use one migration tool version. Generated revisions require review before upgrade. |
 | pgvector, Python | `0.5.1` | SQLAlchemy vector column support is separate from the database extension version. |
-| agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. An agent runtime remains planned. |
-| agent-framework-foundry | `1.14.1` | The compatibility probe imports `FoundryChatClient`. Model calls remain planned. |
-| agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application stream remains planned. |
+| agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. The read-only runtime uses the actual Agent and server-owned AgentSession. |
+| agent-framework-foundry | `1.14.1` | The adapter uses `FoundryChatClient` for configured Responses calls. HTTP interception checks the endpoint, model roles, storage flag and budget. |
+| agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application emits adapter events and checks their browser schemas. |
 | mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
+| anyio | `4.15.1` | Streaming finalization shields its short cleanup work from disconnect cancellation. The held transitive version is declared directly. |
 | argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
+| python-docx | `1.2.0` | Reads Word paragraphs and tables in source order. |
+| pypdf | `6.19.0` | Reads PDF text layers and page locators. Input-derived parser diagnostics are suppressed. |
+| python-pptx | `1.0.2` | Reads slides, explicit tables and speaker notes. |
+| openpyxl | `3.1.5` | Reads literal and cached spreadsheet values with links disabled. |
+| fpdf2, test group | `2.8.9` | Builds synthetic text-layer and image-only PDF fixtures during tests. |
+| openai | `3.29.0` | The installed framework uses this Responses and embedding transport. The version is unchanged. |
+| azure-ai-projects | `2.7.0` | The project adapter supplies the documented local API key argument to the model transport. |
 | pytest | `9.1.1` | Collection and execution use one test runner version. |
 | Ruff | `0.16.10` | CI uses one lint and formatting rule set. |
 | Pyright | `1.1.414` | CI checks Python 3.12 types with one checker version. |
@@ -36,11 +44,12 @@ The development interpreter selection and both Docker stages use Python `3.12.13
 
 | Selected transitive dependency | Current lock | Consequence |
 |---|---|---|
-| ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Future browser event compatibility needs explicit verification. |
-| jsonschema | `4.26.0` | It is installed through MCP. Its presence does not provide the planned TypeScript contract pipeline. |
+| ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Actual emitted events and the recorded simulated stream pass the held browser event schemas. |
+| jsonschema | `4.26.0` | Validates compiled TypeScript response and answer metadata schemas. |
 | azure-identity | `1.26.0` | It is installed through the Foundry dependency. Managed identity integration remains deferred. |
+| httpx2 | `2.13.1` | The installed model transport uses this HTTP implementation; checks intercept its actual requests. |
 
-Browser integration selects `@ag-ui/core` and its browser adapter at `1.0.2`, and `ts-json-schema-generator` at `2.9.0`. These packages require a package manifest, lock, commands and CI wiring in the executable contract slice. Browser protocol 1.0 compatibility with the Python adapter must be checked there. Deployment authentication requires a fixed version with compatibility checks.
+The proposed browser UI integration selects its event package and browser adapter at `1.0.2`. The current executable contract separately pins `@ag-ui/core` `0.0.59` for its actual `EventSchemas` export, and `ts-json-schema-generator` `2.9.0`. Their manifest, lock and CI commands are tracked in `api/`. Emitted events pass the held schema package with the Python adapter. The browser UI adapter is not implemented; its major-version gap must be resolved and verified before front-end integration. Deployment authentication requires a fixed version with compatibility checks.
 
 ## 2. Local development
 
@@ -83,7 +92,7 @@ curl -fsS localhost:8000/health/ready
 docker compose down
 ```
 
-`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These commands remain future work. Model settings and the development-page switch are also later settings. Adding them to the S0 environment causes its strict settings parser to reject unknown fields.
+`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These local commands are implemented. Model settings select fake or configured calls. The temporary development page is off by default; enable it with `CRAFT_DEV_PAGE=1`.
 
 ## 3. Architecture rules and their checks
 
@@ -219,6 +228,12 @@ Build prerequisites are Git, Python 3, Pandoc `3.11`, Poppler and Chrome or Chro
 docs/tools/build.sh
 ```
 
+Diagrams are Mermaid sources in `docs/spec/images/*.mmd`, each committed with the Scalable Vector Graphics (SVG) file rendered from it. `docs/tools/diagrams.sh` renders them with Mermaid CLI `11.12.0` and Mermaid `11.12.0` through `npm exec`, using `docs/tools/mermaid.json` (Charter, no HTML labels) and the Chrome that `CHROME` selects. It needs Node.js and npm. The documents build embeds each SVG in the PDF; it never runs Mermaid.
+
+```bash
+docs/tools/diagrams.sh
+```
+
 The output directory is `docs/build`. The build produces `CRAFT-Dependencies-and-Integration.pdf` alongside `CRAFT-Specification.pdf`, `CRAFT-API-Contract.pdf` and `index.html`. Dates come from each source's last Git change. Uncommitted sources use the current date and draft revision. The specification index receives page numbers in a second pass.
 
 The documents workflow builds on every pull request, pushes to `main` and manual dispatch. Pull requests use Linux and verify only. Other events use macOS. The output check permits only the HTML index and named CRAFT PDFs. Private notes, source material and import packages stay outside publication.
@@ -235,11 +250,11 @@ Compose contains two services. `db` uses `pgvector/pgvector:0.8.7-pg18`. Its nam
 
 The current settings are `CRAFT_APP_DB_PASSWORD`, `CRAFT_DATABASE_HOST`, `CRAFT_DATABASE_PORT`, `CRAFT_DATABASE_NAME` and `CRAFT_LOG_LEVEL`. `.env` supplies local values, with process environment values taking precedence. Validation rejects unknown application fields. The two setup password variables are explicitly excluded from application settings.
 
-Future model integration uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. The planned settings select a main model, groundedness model and embeddings through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`; the subagent selection remains deferred. A scripted fake selection supports deterministic demonstrations. These fields are absent from S0. Endpoint, credential and deployment settings need reviewed configuration with the model feature; an installed Foundry library is not an active endpoint.
+The model adapter uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. Settings select main, groundedness and embedding models through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`. `CRAFT_MODEL_ENDPOINT` selects the Foundry project endpoint, `CRAFT_MODEL_KEY` supplies a local model API key, and `CRAFT_MODEL_MAX_OUTPUT_TOKENS` sets the 16 to 4,000 token budget. Fake mode is the default and needs no endpoint or key. Configured calls have been intercepted locally; no live model endpoint has been called. Managed identity, deployment and subagent selection remain deferred.
 
-The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions and examples are planned. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
+The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions, lock and examples cover the built routes. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
 
-Future simulated seed sets supply labelled demonstration data. Demonstrations use a seed set. A separate demonstration repository or branch is not required. A temporary development page at `/dev`, enabled by the planned `CRAFT_DEV_PAGE=1` setting, is planned for sign-in (S2), chat (S3) and approval (S4). It exercises the real browser cookie, Origin checks, stream and approval path while keeping contract adherence. It is removed in S5 when the front end is integrated. Neither seeds nor that page are active S0 features.
+Future simulated seed sets supply labelled demonstration data. Demonstrations use a seed set. A separate demonstration repository or branch is not required. The temporary development page at `/dev`, enabled by `CRAFT_DEV_PAGE=1`, supports sign-in and search (S2); chat (S3) and approval (S4) arrive with their features. It exercises the real browser cookie, Origin checks, stream and approval path while keeping contract adherence. It is removed in S5 when the front end is integrated. Seeded accounts are synthetic and require explicit private credential provisioning before browser sign-in.
 
 Browser verification covers the Secure host cookie on localhost, particularly Safari. Use local Hypertext Transfer Protocol Secure (HTTPS) if the selected browser requires it.
 
@@ -251,24 +266,234 @@ A deadline for each application transaction is added with the transaction-using 
 
 ## 8. Datacube measures and component checks
 
-The datacube is a later application component. The following commands are added with their named build steps. These are acceptance targets; they are not executions on the S0 skeleton.
+Each build step adds its checks. A step that changes behavior updates section 8 of the specification in the same pull request.
 
-| Measure | Exact executable acceptance or planned build check | Expected result |
+| Step | Command | Expected result |
 |---|---|---|
-| Parametric set | Fixture state at January date with mass/power conjunction | Exactly the two expected readable missions |
-| Append-only values | Fixture insert as craft_app then UPDATE/DELETE | INSERT succeeds; both mutation attempts denied |
-| Option context | Fixture option from another mission | Foreign key violation caught |
-| Access and counts | Fixture mission/silo/evidence restrictions and empty account | Only authorized records counted; empty account count zero |
-| Time | Fixture three dates around two mass changes | Exact expected synthetic value on each date |
-| Similarity baseline | Known same, near, partial and far pairs with 0.6/0.4 weights, 10/20 scales and 0.6 coverage floor | Exact order, per-parameter shares and zero-distance behavior |
-| B09 schema/access | uv run pytest app/datacube/tests/test_schema_access.py | Empty upgrade, grants, composite keys and no leakage pass |
-| B10 parser | uv run pytest app/documents/tests/test_intake.py | Literal-only intake; locators and inert executable contents pass |
-| B11 metadata | uv run pytest app/documents/tests/test_metadata.py | Evidence-backed identity and duplicate-hash behavior pass |
-| B12 dictionary/filters | uv run pytest app/datacube/tests/test_parametric.py | Units, markers, logical-cell state before filtering, exact conjunction pass |
-| B15 candidate intake | uv run pytest app/datacube/tests/test_intake.py | Typed batch, unit recipe, idempotency and errors pass |
-| B16 comparison/evidence | uv run pytest app/datacube/tests/test_compare.py | Fixed times, option/class scope, computed delta and readable evidence pass |
-| B17 similarity | uv run pytest app/datacube/tests/test_similarity.py | Frozen sigma, reference-set access, shares, coverage and cutoff pass |
-| B23 write gate | uv run pytest app/datacube/tests/test_approval_gate.py | Requester approve/reject, hash/replay, revoked access, transactional once pass |
-| B24 bounded view | uv run pytest app/datacube/tests/test_views.py | Labelled JSON workspace view and existing external-export gate pass |
+| B01 accounts and call log | `uv run pytest app/infrastructure/tests/test_migrations.py app/infrastructure/tests/test_grants.py` | Account constraints, explicit application grants and an isolated migration round trip pass |
+| B03 library tables | `uv run pytest app/infrastructure/tests/test_library_schema.py` | Migration 0006 creates the library tables; `craft_app` reads them and writes only `mission_grants` |
+| B05 MCP adapter | `uv run pytest app/infrastructure/mcp/tests/test_stdio.py` | Every tool operation is listed; calls run the operation pipeline and log `origin=mcp` |
+| B06 provider and library | `uv run pytest app/infrastructure/provider/tests app/library/tests` | Scan, change feed, indexing, search, neighbours and access pass |
+| B09 cube tables | `uv run pytest app/cube/tests/test_schema_access.py` | Migrations 0009 to 0011, append-only values and mission access pass |
+| B10 office formats | `uv run pytest app/library/tests/test_convert.py` | Each format gives ordered chunks with locators; formulas and scripts never run |
+| B11 demo seeder | `uv run pytest app/seed/tests/test_demo.py` | The same seed number gives the same bytes and ground truth |
+| B12 cube reads | `uv run pytest app/cube/tests/test_parametric.py app/cube/tests/test_compare.py` | Units, conditions, state on a date, comparison and evidence pass |
+| B15 version differences and citations | `uv run pytest app/library/tests/test_versions.py` | Edits, moves, deletes, block differences and citation status pass |
+| B16 candidate values | `uv run pytest app/cube/tests/test_intake.py` | Header synonyms, unit conversion and every problem case pass |
+| B17 facets and similarity | `uv run pytest app/library/tests/test_facets.py app/cube/tests/test_similarity.py` | Facet validator, facet vectors, ranking and not-comparable cases pass |
+| B23 values through the gate | `uv run pytest app/cube/tests/test_approval_gate.py` | Values are written once, only after the requester approves |
+| B24 saved views | `uv run pytest app/cube/tests/test_views.py` | A labelled, cited JSON view saves through approval |
+| B25 evaluation | `uv run craft eval` | Fused recall at 8 is at least keyword-only recall on the demo ground truth |
 
-Record the median and 95th-percentile elapsed time and encoded bytes for fixed synthetic queries and corpus sizes. Measure tool selection, argument validity, permission leaks, arithmetic support, citations, unsupported claims, clarification/refusal and approval correctness. Adversarial acceptance requires zero observed permission leaks and unapproved effects. Parser failures are grouped by format and representation. Contract checks compare actual registered routes and Python/TypeScript forms, including nested GET scope decoding. The label set fixes thresholds before real-model acceptance. No SQL result establishes browser or agent behavior.
+Fixed synthetic queries record the median and 95th-percentile time and encoded bytes. Adversarial checks require zero permission leaks and zero unapproved writes.
+
+## 9. Migration verification
+
+Account and call-log migrations have immutable schema snapshots. Application grants are checked by table, including denied writes to the append-only call log. Migration round trips use a rollback-only connection on `craft_test`, preserving existing synthetic fixtures. Autogeneration compares the full table registry with the migrated database.
+
+```bash
+uv run pytest -q app/infrastructure/tests/test_migrations.py app/infrastructure/tests/test_grants.py
+CRAFT_DATABASE_NAME=craft_test uv run alembic upgrade head
+CRAFT_DATABASE_NAME=craft_test uv run alembic check
+```
+
+Conversation history and approval records use append-only application grants. Partial unique indexes enforce one approval decision and one execution outcome. The read-only status view selects the latest event. Run-token digests and runtime state remain separate from message content.
+
+```bash
+uv run pytest -q app/infrastructure/tests/test_append_only.py app/infrastructure/tests/test_migrations.py
+```
+
+## 10. Operation pipeline
+
+The operation registry generates HTTP routes and validates names, access, input and output shapes. Sync handlers run in the thread pool; context follows nested calls and resets after errors. Services choose domain transactions. The log service appends only metadata in a separate short transaction. Observation steps remain private, and SQL counters read no statements or parameters. Health probe logging follows section 5's availability exceptions.
+
+```bash
+uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture.py
+uv run pytest -q app/infrastructure/operations/tests/test_operation.py -k test_operation_curl_without_session
+uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py -k "one_row or payload or observe"
+```
+
+## 11. Local MCP transport
+
+The MCP adapter derives tool names, descriptions and input schemas from the operation registry. It performs no model call. Invalid arguments enter the same checked pipeline as HTTP and Python. Standard output carries protocol messages only; logs use standard error. Missing or disabled accounts exit with status 2. Effectful calls without a run return `approval_required`.
+
+```bash
+uv run craft mcp --as demo
+uv run pytest -q app/infrastructure/mcp/tests/test_stdio.py
+```
+
+Start the command in the repository folder. An MCP application configuration uses:
+
+```json
+{"mcpServers":{"craft":{"command":"uv","args":["run","craft","mcp","--as","demo"],"cwd":"."}}}
+```
+
+MCP structured content requires an object. List results use an object with an `items` field; their text content remains the original JSON list.
+
+## 12. Provider and library
+
+The provider keeps original bytes and immutable versions outside the database. Indexing runs as the owner, converts text before short writes, and creates extract summaries and deterministic token-hash vectors in fake mode. Configured mode stores the selected embedding model on each vector. Mission grants apply before candidates, scores and counts. Reading and exploration remain within one readable version. Preview follows the file contract: sandboxed, no MIME sniffing, inline only for PDF, images and plain text. Other originals download.
+
+Compose mounts the provider folder read-only at `/provider`. Host indexing uses `CRAFT_PROVIDER_ROOT` (default `var/provider`); the application only reads it. Seed and index orchestration use an explicit owner pool, separate from request credentials.
+
+```bash
+uv run craft seed base
+uv run craft index
+uv run craft operations
+uv run craft call library.search --as demo '{"query":"radiator margin"}'
+uv run pytest -q app/infrastructure/provider/tests app/library/tests app/tests/test_cli.py
+```
+
+Library read transactions use strict iterative HNSW scans so permission filters and dead index entries do not exhaust an initial candidate scan.
+
+## 13. Account sessions and contract checks
+
+Local sign-in verifies Argon2id hashes outside transactions and rechecks account state before creating a session. Tokens contain 32 random bytes; only digests enter PostgreSQL. Cookie flags, idle and absolute expiry, throttled keep-alive, revocation and current roles follow section 9. Authentication and permissions precede Origin rejection, preserving anonymous read denial. Credential and account changes serialize on the account row.
+
+Account administration uses `craft users add`, `list`, `promote`, `reset` and `disable`; password entry uses a private prompt. An administrator can be named with `--as`. Session tests use synthetic accounts and a controlled clock.
+
+The API package locks the adopted schema generator. Contract tests compile the actual TypeScript forms, validate examples and compare route keys with the running registry. CI installs the lock before testing.
+
+```bash
+npm ci --prefix api --ignore-scripts --no-audit --no-fund
+uv run pytest -q app/accounts/tests/test_sessions.py app/accounts/tests/test_users_cli.py
+uv run pytest -q app/tests/test_contract.py
+```
+
+## 14. Current account and browser demonstration
+
+`GET /api/me` returns the enabled account and the roles resolved for the current request. Browser identity hints are rejected as unknown input; headers cannot replace the trusted identity. The optional `/dev` mount serves one static page and exposes no neighboring source files. Results use text nodes, including titles containing markup.
+
+Use synthetic accounts and documents. Reset the demo credential through the local password prompt, or provision an environment-supplied test credential through the same account handler. Start the host server after stopping the application container; leave the database running.
+
+```bash
+uv run craft seed base
+uv run craft index
+uv run craft users reset demo --as admin
+docker compose stop app
+CRAFT_DEV_PAGE=1 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+In a browser, open `http://localhost:8000/dev`, sign in, search for `radiator margin`, then sign out. In the second terminal, an unsigned request gives 401:
+
+```bash
+curl -s -o /tmp/craft-me.json -w '%{http_code}' http://localhost:8000/api/me
+uv run pytest -q app/accounts/tests/test_me.py app/dev/tests/test_dev_page.py
+uv run pytest -q app/accounts/tests/test_sessions.py app/tests/test_contract.py
+```
+
+A Chromium-based in-app browser on macOS exercised sign-in, search, literal markup-title rendering and sign-out. Real HTTP checks verified cookie flags, foreign-Origin rejection and revoked-session read denial. The exact embedded browser version, native browser cookie inspection, Safari and Windows/WSL have not been verified. Stop the host server with Ctrl-C before restarting `docker compose up --build --wait`.
+
+## 15. Cube schema and mission access
+
+Revisions 0009 through 0011 create mission reference rows, the parameter dictionary, append-only values and derived facet texts. Value constraints require both numbers for exact/range and neither for unknown/not applicable. Kind and facet are required. The application reads reference and facet tables and inserts values; stage maintenance uses the owner pool. Mission grants filter lists before name matching, ordering and limits.
+
+```bash
+uv run alembic upgrade head
+uv run alembic check
+uv run craft seed base
+uv run craft missions stage msn-sim-01 st3-design
+uv run craft call cube.list_missions --as demo '{}'
+uv run pytest -q app/cube/tests/test_schema_access.py
+```
+
+## 16. Office conversion
+
+The reader versions were released at least two weeks before 16 October 2026 and support Python 3.12. Tests generate made-up files inside their temporary folders; no binary fixture is tracked. Office package roots and the PDF signature must match the extension. Word paragraphs and tables retain source order. Slides keep speaker notes; tables in every format repeat their header for each window of at most 30 data rows. PDF table extraction uses aligned text columns. Scanned documents return `no text layer`.
+
+Spreadsheet reads use `data_only=True` and `keep_links=False`. Formulas, macros and remote links never execute. Multiline cells render on one line; literal pipe and backslash characters are escaped so a cell cannot become an extra column. Conversion failures expose fixed reasons.
+
+```bash
+uv run python -c "import docx, pypdf, pptx, openpyxl; print('ok')"
+uv run pytest -q app/library/tests/test_convert.py
+```
+
+## 17. Synthetic demo set
+
+`craft seed demo --seed 1` writes a reproducible source set, indexes it, loads mission totals with row citations, then withdraws three cited source items and refreshes the index. A fresh set has 125 items, twelve missions in four families, 48 planted questions, twelve changed-version pairs, two moves and three copies with matching cells but different bytes. Spreadsheet headers alternate English and French; source units mix kg/g and W/kW. A TBD cell remains unknown, and unitless cells are not loaded as values. Component rows and three mission elements support later intake.
+
+The ground-truth file is `<provider root>/.provider/ground-truth.json`. It records mission families, questions with stable handles, version and move records, withdrawals, copies, dated values and a source fingerprint. Fixed package properties, sorted ZIP entries and PDF creation dates keep bytes reproducible. An unchanged completed seed adds no source version or value. A changed baseline creates a new generation while earlier versions and values remain.
+
+```bash
+uv run craft seed demo --seed 1
+uv run pytest -q app/seed/tests/test_demo.py
+```
+
+The tests use an owned disposable Compose database, compare two complete folders, verify source hashes and dated state, and run the optional local content check over every generated version. The optional audit path is supplied through `CONTENT_CHECK_SCRIPT`; it is configured for local validation and unavailable in CI. Runtime PDF writing uses the pinned PDF library; no test-only writer is needed by the seed command.
+
+## 18. Model adapter
+
+The adapter returns a fake or configured main and groundedness model compatible with the framework. The configured path uses the held Foundry and project packages, a local model API key and the documented project `get_openai_client(api_key=...)` interface. Project identity requests are unavailable in this slice. Responses storage, selected models, medium or low effort and output budgets are sealed before each request.
+
+Configured indexing makes one model call per document version for a generated summary of at most 150 words. Fake mode keeps an extract summary. Model requests and embeddings enter typed Python-only handlers and an observed network step. Standalone indexing gets an operation parent; search preserves its trusted caller. Source conversion and embedding finish before short writes. Changing models needs `craft index --rebuild`; semantic search filters vector model names. Fake library indexing keeps its existing token-hash recipe. The separate fake model embedding reports its actual fake recipe.
+
+SDK payload log namespaces are suppressed, and configured mode rejects the SDK console payload flag. Errors expose codes and metadata. Intercepted HTTP checks verify endpoint paths, selected role models, `store=false`, output budgets and 1,536-dimensional embeddings. Rebuild checks use an owned disposable database. No live model compatibility or quality result is implied.
+
+```bash
+uv run pytest -q app/agent/tests/test_model_adapter.py
+uv run pytest -q app/agent/tests/test_model_adapter.py -k embedding
+uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py
+CRAFT_MODEL_MAIN=fake uv run craft index --rebuild
+```
+
+## 19. Standalone source summary
+
+The `/summarize` shell is independent of the temporary development mount. Selected documents are read through library handlers in windows of at most 20 chunks. Uploads enter the bounded raw-file pipeline after cookie, permission and Origin checks, then the checked library inspection handler. Model work enters the private typed model handler; its observation links to that child operation and the summary call. No transaction spans the model wait.
+
+The fake returns complete extract sentences and literal filing labels. Validation preserves negation and requires every cited block to support its sentence. Field labels and bounded values must occur in the named source context. The earlier four-input numeric confidence example is unused: the current six-input calibration gate leaves every score at zero and stops drafting while preserving cited findings. No live confidence quality result is implied.
+
+```bash
+CRAFT_MODEL_MAIN=fake uv run pytest -q app/summarize/tests/test_summarize.py app/summarize/tests/test_summarize_page.py
+uv run pytest -q app/tests/test_contract.py
+uv run pytest -q app/summarize/tests/test_summarize.py -k "auth_origin or logging_chain or no_transaction"
+curl -s -o /tmp/craft-summary-page.html -w '%{http_code}' http://localhost:8000/summarize
+```
+
+The page uses text nodes for titles, quotes and suggestions. Selection and uploads clear one another; failures clear stale output and re-enable controls. The password field clears before submission, and requests include the cookie. Upload originals download from the owned File object; exact quoted blocks remain readable on the page. Browser checks are recorded separately from server checks.
+
+## 20. Version differences and citation checks
+
+`uv run pytest -q app/library/tests/test_versions.py` checks stored and arbitrary-pair differences, duplicate blocks, 500-row truncation, live provider versions and withdrawals, row-only hashes, access and compiled request/response forms. The demo check rebuilds all provider versions and verifies every planted version change. `uv run craft operations | grep -cE '^library\.(compare_versions|check_citation) '` returns 2. `uv run alembic upgrade head && uv run alembic check` verifies the existing difference table without a schema change.
+
+## 21. Table candidate preparation
+
+`uv run pytest -q app/cube/tests/test_intake.py` checks English and French headers, inline and header units, Decimal conversion, ranges, whole-number bounds, all seven problems, unknown and not-applicable cells, row citations, the planted budget values and unchanged cube tables. Access includes explicit mission and silo refusals and omitted-silo element filtering. Compiled API forms and real cookie/Origin transport are checked separately within the same suite. `uv run craft operations` includes cube.prepare_values with effect none. Preparation uses checked library reads, then one short dictionary/scope read transaction; conversion follows after that transaction ends.
+
+## 22. Facets and similar missions
+
+Indexing derives five mission facets from current source summaries, validates terminal item citations and stores one labeled vector per nonempty facet. Fake mode groups first sentences by the documented silo mapping. Configured mode makes one mission call for all five texts. Conversion, model calls and embeddings finish before short writes. Unknown missions have no facet row until their mission record exists.
+
+Private facet reads filter indexed and live source grants, withdrawals and mission changes. Similarity selects readable missions first, uses current-model vectors and averages the available cosine scores. All five facets are selected by default; one to five distinct selections and one to ten results are accepted. A pair needs at least half the selected facets, rounded up. Explanations show readable sides only. These read tools make no conversational model call.
+
+```bash
+uv run pytest -q app/library/tests/test_facets.py app/cube/tests/test_similarity.py
+uv run craft operations | grep -cE '^cube\.(similar_missions|explain_similarity) '
+```
+
+The targeted suite checks deterministic facets, generated summaries, vector recipes, changed-mission rebuilding, all twelve planted family matches, missing evidence, source access, mean scores, HTTP authentication and compiled forms. The response examples are `api/examples/similar-missions.json` and `api/examples/similarity-explanation.json`. External model quality is measured separately.
+
+## 23. Read-only chat stream
+
+`POST /api/agent/runs` and `GET /api/tools` use signed-in operation checks. The actual
+framework agent, function middleware and AG-UI adapter run over server-loaded
+messages, instructions and session state. Registry read tools call checked Python
+handlers. Authenticated HTTP MCP follows in the next slice; approval and durable
+conversation routes are not claimed by these checks.
+
+The browser contract pins `@ag-ui/core` to `0.0.59`, the stable pre-1 schema release.
+Python keeps `ag-ui-protocol` `0.1.22`; no server dependency was upgraded. The newer
+browser major lacks the required schema export. Every actual emitted event and the
+recorded simulated `chat-answer.sse` are validated with `EventSchemas`. Completed
+answer activities also validate against generated TypeScript `AnswerMeta` schemas.
+CI runs these checks from this stream slice.
+
+`CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests/test_chat_stream.py app/tests/test_contract.py`
+checks event order, citations, injected browser fields, ownership, duplicate and
+concurrent run limits, tool/time/output budgets, cancellation, saved session state
+and absence of model payloads in logs. Actual ASGI disconnects cover response start
+before any body chunk. The source finalizer is awaited and shielded; no active run
+or domain transaction remains after the disconnected request returns.
+
+`uv run pytest -q app/agent/tests/test_model_adapter.py` retains configured-call
+interception and fake adapter coverage. These are local synthetic tests; live model
+quality, authenticated agent MCP and approval resume are separate later criteria.

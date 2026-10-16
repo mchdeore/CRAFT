@@ -41,6 +41,10 @@ class RateLimited(ApiError):
     status, code, message = 429, "rate_limited", "Too many requests."
 
 
+class TooLarge(ApiError):
+    status, code, message = 413, "too_large", "The file is too large."
+
+
 def error_response(error: ApiError) -> Response:
     body = ApiErrorBody(
         code=error.code, message=error.message, request_id=current_request_id(), fields=error.fields

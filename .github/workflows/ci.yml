@@ -52,12 +52,12 @@ jobs:
           PGHOST: localhost
       - name: Migrations
         run: uv run alembic upgrade head && uv run alembic check
+      - name: Contract dependencies
+        run: npm ci --prefix api --ignore-scripts --no-audit --no-fund
       - name: Tests
         run: uv run pytest
       - name: Contract tests
-        run: |
-          if [ -d api ]; then echo "api/ exists: wire the contract tests into this step"; exit 1; fi
-          echo "Skipped: api/ does not exist yet."
+        run: CRAFT_MODEL_MAIN=fake uv run pytest -q app/tests/test_contract.py app/agent/tests/test_chat_stream.py
       - name: Full stack
         env:
           CRAFT_DATABASE_PORT: "5433"  # the CI service holds 5432

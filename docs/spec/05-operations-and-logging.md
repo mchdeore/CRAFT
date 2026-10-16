@@ -5,20 +5,20 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 Every call enters through an `@operation` handler. The decorator checks and decodes, records observation, logs and maps errors. Services select short database transactions and pass a Session explicitly to storage.
 
 ```python
-@operation("documents.read", get="/documents/{document_id}", tool=True)
-def read_document(caller: Caller, request: ReadDocument) -> Document:
+@operation(SIGNED_IN, get="/library/documents/{item}", tool=True)
+def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
     """Return one document the caller may read. Use when the user names a document."""
-    return service.read_readable(caller, request.document_id)
+    return service.read_readable(caller, request.item, request.version)
 ```
 
 `@operation(access, *, get|post|put|patch|delete=path, tool=False, effects=NONE)`
 
 | Declaration | Required | Values and rule |
 |---|---|---|
-| `access` (first argument) | yes | A permission (`"documents.read"`), `SIGNED_IN`, `PUBLIC`. No default: a missing one fails at import |
+| `access` (first argument) | yes | A permission (`"accounts.manage"`), `SIGNED_IN`, `PUBLIC`. No default: a missing one fails at import |
 | `caller: Caller` (first parameter) | yes | Every call has a user scope. A handler without it fails at import |
-| input | if the call takes input | Second parameter, a msgspec `Shape`. Path + query + body fill its fields |
-| output | yes | Return type: a `Shape`, `list[Shape]` or `None` (`204`). An async generator = an event stream (chat) |
+| input | if the call takes input | Second parameter, a msgspec `Shape`. Path + query + body fill its fields. A RawFile shape receives bounded original bytes and declared file headers after access checks |
+| output | yes | Return type: a `Shape`, `list[Shape]` or `None` (`204`). A binary HTTP route returns a Response; it is never a tool. An async generator = an event stream (chat) |
 | `get=` … `delete=` | no | The HTTP route under `/api`. At most one |
 | `tool=True` | no | Also an MCP tool. Needs a route and a docstring (what, when, one example) |
 | `effects=` | no, default `NONE` | `NONE`, `DATA`, `DOCUMENT`, `EXTERNAL`, `FINAL`. An agent call with an effect other than `NONE` pauses for approval |
@@ -41,7 +41,7 @@ What the decorator does on every call:
 | 10 | Log: one JSON line + one `call_log` row, in its own transaction, with the database work counted | Yes | Yes | Yes | |
 | 11 | Map errors to `ApiError` | Status + body | Tool error | Raises | Details only in the server log |
 
-- Python calls run the full pipeline: `read_document(caller, ReadDocument(document_id=…))` is checked and logged (`origin=python`). No bypass. Scripts and the CLI call handlers this way.
+- Python calls run the full pipeline: `get_document(caller, DocumentRef(item=…))` is checked and logged (`origin=python`). No bypass. Scripts and the CLI call handlers this way.
 - Streams call services with short database transactions; none spans a model call or approval wait.
 - `uv run craft operations` prints every operation: name, route, tool, access, effects.
 
@@ -49,7 +49,7 @@ What the decorator does on every call:
 
 ## 5.1 On FastAPI
 
-- Registration: `create_app()` collects every `@operation` and calls `app.add_api_route` for each route. Routes come only from the registry (mounts: `/mcp`, and `/dev` while it exists); hand-written routes are prohibited. FastAPI body models and OpenAPI are off.
+- Registration: `create_app()` collects every `@operation` and calls `app.add_api_route` for each route. Routes come only from the registry (mounts: `/mcp`, `/summarize`, and `/dev` while it exists); hand-written routes are prohibited. FastAPI body models and OpenAPI are off.
 - Threads: sync handlers (database) run in FastAPI's thread pool; async handlers (chat) on the event loop. Context variables carry the request, run and call IDs into both.
 
 ## 5.2 The handler rule
@@ -87,3 +87,5 @@ Each operation declares a permission. Account roles are rows in `user_roles` (§
 - Never logged: passwords, tokens, bodies, prompts, conversation or document text, query strings, exception messages. Uvicorn's access log is off; Outbound HTTP and Alembic loggers stay at `WARNING` (they print URLs).
 - Logs aren't audit: approvals keep their own records.
 - Deferred: OpenTelemetry export (Agent Framework already emits traces) to Azure Monitor; retention.
+
+Health probes preserve availability when log storage is unavailable. Liveness emits its operation event to stdout without database work. Readiness emits a database row only when the database is ready; an unavailable result emits stdout only and keeps the three-second deadline.

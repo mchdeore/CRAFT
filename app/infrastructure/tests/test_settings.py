@@ -33,3 +33,32 @@ def test_settings_never_print_secrets() -> None:
 def test_admin_and_owner_passwords_are_not_app_settings() -> None:
     env = {**VALID, "CRAFT_DB_ADMIN_PASSWORD": "a", "CRAFT_OWNER_DB_PASSWORD": "o"}
     assert Settings.from_env(env).database_name == "craft_dev"
+
+
+def test_invalid_enum_value_is_not_echoed() -> None:
+    marker = "CRAFT_SECRET_INVALID_LEVEL"
+    with pytest.raises(SystemExit) as raised:
+        Settings.from_env({"CRAFT_APP_DB_PASSWORD": "synthetic", "CRAFT_LOG_LEVEL": marker})
+    assert marker not in str(raised.value)
+
+
+def test_invalid_enum_cannot_inject_a_diagnostic_path() -> None:
+    marker = "$.private_payload_marker"
+    with pytest.raises(SystemExit) as raised:
+        Settings.from_env({"CRAFT_APP_DB_PASSWORD": "synthetic", "CRAFT_LOG_LEVEL": marker})
+    diagnostic = str(raised.value)
+    assert "private_payload_marker" not in diagnostic
+    assert "log_level" in diagnostic
+
+
+def test_malformed_allowed_origin_has_a_safe_diagnostic() -> None:
+    marker = "private_origin_marker"
+    with pytest.raises(SystemExit) as raised:
+        Settings.from_env(
+            {
+                "CRAFT_APP_DB_PASSWORD": "synthetic",
+                "CRAFT_ALLOWED_ORIGINS": "http://[" + marker + "]",
+            }
+        )
+    diagnostic = str(raised.value)
+    assert marker not in diagnostic and "allowed_origins" in diagnostic

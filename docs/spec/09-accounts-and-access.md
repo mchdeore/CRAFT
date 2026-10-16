@@ -67,8 +67,9 @@ Each request resolves its session, checks the operation permission, applies the 
 | `CRAFT_SIGN_IN_ATTEMPTS_PER_MINUTE` | 5 |
 | `CRAFT_PASSWORD_MIN_LENGTH` | 12 |
 | `CRAFT_ALLOWED_ORIGINS` | `http://localhost:8000` |
+| `CRAFT_DEV_PAGE` | 0 (disabled) |
 
-Settings validate at startup. The keep-alive update extends idle expiry by eight hours, at most once a minute, and never beyond the twelve-hour absolute expiry.
+Settings validate at startup. `CRAFT_DEV_PAGE=1` mounts the single temporary `/dev` page for same-origin sign-in, current-account lookup, library search and sign-out. The page uses text nodes for document content and stores no session token. The keep-alive update extends idle expiry by eight hours, at most once a minute, and never beyond the twelve-hour absolute expiry.
 
 ## 9.5 Conversation storage
 
@@ -92,3 +93,5 @@ Every access checks the owner; a conversation identifier grants no permission. H
 | A separate front-end origin | A cross-origin allowlist with credentials | Cookie, `Origin` check |
 
 Entra sign-in uses OpenID Connect with tokens on the server. Accounts link by tenant and object identifier, never email. Local credentials are disabled after migration.
+
+The single `/summarize` shell is available with the development page disabled. It contains no source content before sign-in. Summary selection and uploads require the real session and allowed Origin. Source permissions apply before a model call. Browser controls retain only the selected source or owned File object and clear results on failure or sign-out.

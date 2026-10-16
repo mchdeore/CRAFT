@@ -28,3 +28,5 @@ The conversation owns the agent workspace under section 7. Generated code runs o
   - Microsoft Agent Framework, models from Microsoft Foundry
   - the front end, built against the `api/` contract
 - Protocols: HTTP with JSON for ordinary calls, AG-UI for the chat stream, and MCP for agent tool calls.
+
+The `/summarize` page reads one exact library version or one owned simulated upload. It returns cited extracts and filing suggestions without changing the corpus, cube or conversation storage. Upload originals stay in request and browser memory.

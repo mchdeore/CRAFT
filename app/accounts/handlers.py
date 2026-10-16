@@ -1,0 +1,127 @@
+"""Account administration entry points for local mission grants."""
+
+from typing import Annotated, Literal
+from uuid import UUID
+
+import msgspec
+
+from app.accounts import service
+from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
+from app.infrastructure.operations import operation
+from app.infrastructure.shapes import Shape
+
+
+class GrantMission(Shape):
+    username: str
+    mission: str
+    silo: str | None = None
+
+
+@operation("accounts.manage")
+def grant(caller: Caller, request: GrantMission) -> None:
+    """Grant a mission scope to an existing local account."""
+    service.change(caller, request, False)
+
+
+@operation("accounts.manage")
+def revoke(caller: Caller, request: GrantMission) -> None:
+    """Remove one mission scope from an existing local account."""
+    service.change(caller, request, True)
+
+
+class SignIn(Shape):
+    username: Annotated[str, msgspec.Meta(min_length=1)]
+    password: Annotated[str, msgspec.Meta(min_length=1)]
+
+
+class Me(Shape):
+    id: UUID
+    username: str
+    display_name: str
+    roles: list[Literal["member", "admin"]]
+
+
+class NewUser(Shape):
+    username: str
+    display_name: str
+    password: str
+
+
+class UserRef(Shape):
+    username: str
+
+
+class ResetPassword(Shape):
+    username: str
+    password: str
+
+
+@operation(PUBLIC, post="/session")
+def sign_in(caller: Caller, request: SignIn) -> Me:
+    """Sign in with a local account."""
+    return service.sign_in(caller, request)
+
+
+@operation(SIGNED_IN, delete="/session")
+def sign_out(caller: Caller) -> None:
+    """Revoke the current sign-in session."""
+    service.sign_out(caller)
+
+
+@operation(SIGNED_IN, get="/me")
+def me(caller: Caller) -> Me:
+    """Return the current authenticated account and its trusted roles."""
+    from sqlalchemy import select
+
+    from app.accounts import storage
+    from app.infrastructure.database.unit_of_work import unit_of_work
+    from app.infrastructure.errors import NotSignedIn
+
+    if caller.sessions is None:
+        raise NotSignedIn()
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        row = (
+            session.execute(
+                select(storage.users).where(
+                    storage.users.c.id == caller.user_id, storage.users.c.disabled_at.is_(None)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        raise NotSignedIn()
+    return msgspec.convert(
+        {
+            "id": row["id"],
+            "username": row["username"],
+            "displayName": row["display_name"],
+            "roles": sorted(caller.roles),
+        },
+        Me,
+    )
+
+
+@operation("accounts.manage")
+def add(caller: Caller, request: NewUser) -> None:
+    service.add(caller, request)
+
+
+@operation("accounts.manage")
+def list_users(caller: Caller) -> list[Me]:
+    return service.list_users(caller)
+
+
+@operation("accounts.manage")
+def promote(caller: Caller, request: UserRef) -> None:
+    service.manage(caller, request, "promote")
+
+
+@operation("accounts.manage")
+def reset(caller: Caller, request: ResetPassword) -> None:
+    service.manage(caller, request, "reset")
+
+
+@operation("accounts.manage")
+def disable(caller: Caller, request: UserRef) -> None:
+    service.manage(caller, request, "disable")

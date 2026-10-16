@@ -14,6 +14,9 @@ The application programming interface (API) gives confidence as a score, level a
 - Changing a model means changing its setting and passing the evaluation set. It requires no application-code change.
 - `CRAFT_MODEL_MAIN=fake`: a scripted fake model + deterministic fake embeddings. No Foundry key. Used for deterministic verification and demos.
 - Responses API calls use `store=false` to disable response storage. Conversations live in CRAFT's PostgreSQL. Every call has a `max_output_tokens` limit. Section 12 defines the data-handling gate.
+- `CRAFT_MODEL_ENDPOINT` selects the Foundry project endpoint. `CRAFT_MODEL_KEY` supplies the local model API key. `CRAFT_MODEL_MAX_OUTPUT_TOKENS` accepts 16 to 4,000 tokens and defaults to 4,000. Configured mode requires an HTTPS endpoint and a key. Fake mode requires neither.
+- Main and groundedness requests keep their selected model, effort, output budget and `store=false`. Service-owned conversation references and software development kit (SDK) console payload logging are refused. Each configured call has a private observation step outside database transactions.
+- The fake produces deterministic tool plans and evidence replies. Its separate model embedding is labeled `fake-model-embed@1`. Library fake mode keeps `fake-embed@1`; configured mode uses the selected embedding model and 1,536 dimensions. Changing the embedding model requires rebuilding the library. Semantic queries use vectors from the selected model only.
 - Instructions: `app/agent/instructions.md`, versioned in git. Each run records the version used.
 - Access:
   - Now: a local development key from `.env`, simulated data only.
@@ -35,6 +38,8 @@ Confidence uses all six evidence inputs rather than the model's self-rating. The
 - The output score lies between 0 and 1, with a level and evidence-based reason. The level follows calibrated thresholds. A reason can name agreement across sources or a cited table.
 - A low-confidence result states that evidence is insufficient, shows the readable findings and stops drafting. Consequential work requires a recorded decision.
 - Section 12 defines the calibration gate for weights and thresholds against the evaluation set. A fixed set of questions with known answers and sources measures expected citations, supported claims and confidence levels. Changes to a model, instructions or search method require this evaluation.
+
+The standalone document summary preserves complete source sentences or table rows. Every cited block must support the extract, including its negation and context. Filing evidence uses literal field labels and values. Until six-input weights and thresholds are calibrated, summary and filing confidence stay at zero and the summary level is low. The result shows cited findings as insufficient for drafting. Model self-ratings do not change the score.
 
 ## 4.3 Hosted search and confidence
 

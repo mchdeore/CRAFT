@@ -1,0 +1,14 @@
+{
+  "theme": "base",
+  "htmlLabels": false,
+  "themeVariables": {
+    "fontFamily": "Charter, Georgia, serif",
+    "fontSize": "22px",
+    "lineColor": "#57606a",
+    "primaryColor": "#ffffff",
+    "primaryBorderColor": "#57606a",
+    "clusterBkg": "#fafafa",
+    "clusterBorder": "#d1d9e0"
+  },
+  "flowchart": { "htmlLabels": false, "curve": "basis", "nodeSpacing": 25, "rankSpacing": 45, "padding": 8, "wrappingWidth": 260 }
+}

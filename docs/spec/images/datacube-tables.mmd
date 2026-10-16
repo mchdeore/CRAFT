@@ -1,0 +1,72 @@
+%% Datacube tables, their relations and what is embedded (section 8.5).
+%% Render with docs/tools/diagrams.sh; never edit the SVG by hand.
+flowchart TB
+  subgraph PROV["Provider: the files"]
+    PI["`**provider_items**
+    item, path, deleted
+    *tags: mission, silo, stage from the path*`"]
+  end
+  subgraph LIB["Library: rebuilt from the provider"]
+    DV["`**doc_versions**
+    item, version, hash, title, summary
+    *tags copied from the item*`"]
+    CH["`**chunks**
+    text, heading_path, locator
+    *tags copied from its document*`"]
+    FT["`**facet_texts**
+    mission, facet, text (about 80 words)
+    *tag: facet*`"]
+    VX[("`**vectors**
+    owner kind, owner id, model, vector`")]
+    VD["`**version_diffs**
+    from version, to version, block, change`"]
+  end
+  subgraph CUBE["Cube: approved records"]
+    MI["`**missions**
+    key, title, current stage, simulated`"]
+    MA["mission_aliases"]
+    SS["`silos, stages
+    (reference lists)`"]
+    EL["`elements
+    mission, silo, name, parent`"]
+    PA["`parameters
+    + unit_conversions`"]
+    HS["header_synonyms"]
+    VA["`**cube_values**
+    mission, element, parameter,
+    number, unit, valid from
+    *tags: mission, silo, stage*`"]
+    AP["approvals"]
+  end
+
+  PI -->|"has versions"| DV
+  PI -->|"path names"| MI
+  PI -->|"path names"| SS
+  DV -->|"split into"| CH
+  DV -->|"compared with previous"| VD
+  MI -->|"one per facet, up to 5"| FT
+  CH ==>|"1 each: title + heading path + text"| VX
+  DV ==>|"1 each: title + summary"| VX
+  FT ==>|"1 each: the facet text"| VX
+  MI --> MA
+  MI --> EL
+  MI -->|"current stage"| SS
+  VA -->|"of"| MI
+  VA -->|"of"| EL
+  VA -->|"measures"| PA
+  PA --> HS
+  VA -->|"cites"| CH
+  VA -->|"accepted by"| AP
+  HS ~~~ DV
+  EL ~~~ DV
+  MA ~~~ DV
+
+  classDef emb fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+  classDef vec fill:#2563eb,stroke:#1e40af,color:#fff
+  classDef lib fill:#fff,stroke:#57606a
+  classDef cube fill:#fef3c7,stroke:#b45309
+  class CH,DV,FT emb
+  class VX vec
+  class PI,VD lib
+  class MI,MA,SS,EL,PA,HS,VA,AP cube
+  linkStyle 6,7,8 stroke:#2563eb,stroke-width:3px
