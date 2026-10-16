@@ -10,7 +10,7 @@ from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import Shape
-from app.library.handlers import CitationHandle
+from app.library.handlers import CitationHandle, Facet
 
 
 class Mission(Shape):
@@ -19,6 +19,59 @@ class Mission(Shape):
     current_stage: str
     aliases: list[str]
     simulated: bool
+
+
+class SimilarMissions(Shape):
+    key: str
+    facets: Annotated[list[Facet], msgspec.Meta(min_length=1, max_length=5)] | None = None
+    limit: Annotated[int, msgspec.Meta(ge=1, le=10)] = 5
+
+
+class SimilarMission(Shape):
+    mission: Mission
+    score: float | None
+    comparable: bool
+    facet_scores: dict[Facet, float | None]
+
+
+class SimilarPage(Shape):
+    missions: list[SimilarMission]
+    facets: list[Facet]
+
+
+class ExplainSimilarity(Shape):
+    key: str
+    other: str
+    facets: Annotated[list[Facet], msgspec.Meta(min_length=1, max_length=5)] | None = None
+
+
+class FacetExplanation(Shape):
+    facet: Facet
+    score: float | None
+    text: str | None
+    other_text: str | None
+    sources: list[str]
+    other_sources: list[str]
+
+
+class SimilarityExplanation(Shape):
+    facets: list[FacetExplanation]
+
+
+@operation(SIGNED_IN, post="/cube/similar", tool=True)
+def similar_missions(caller: Caller, request: SimilarMissions) -> SimilarPage:
+    """Rank readable missions by cited facets; for example design and operations."""
+    from app.cube.similarity import similar
+
+    return similar(caller, request)
+
+
+@operation(SIGNED_IN, post="/cube/similar/explain", tool=True)
+def explain_similarity(caller: Caller, request: ExplainSimilarity) -> SimilarityExplanation:
+    """Read both missions' permitted facet evidence; for example a design comparison."""
+    from app.cube.similarity import explain
+
+    return explain(caller, request)
 
 
 class ListMissions(Shape):

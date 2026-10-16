@@ -207,6 +207,8 @@ One model call per mission reads the summaries of the mission's documents and wr
 
 With the fake model, each facet text is the first sentence of each document summary whose silo feeds that facet first in the table above: requirements feeds `purpose`, engineering and quality feed `design`, launch feeds `operations`, reviews feeds `program` and budget feeds `cost_and_risk`.
 
+Facet texts use active sources and their latest indexed summaries, with at most 80 words per facet. Changed versions, moves and withdrawals rebuild the affected missions. Each text has a `facet-v1` vector labeled with the embedding model. Reads recheck every cited source against indexed and live mission and silo grants. A withdrawn source, changed mission or missing current-model vector cannot contribute to a similarity score. Read operations make no conversational model call.
+
 ## 8.8 Missions, silos and stages
 
 | Record | Holds | Example |
@@ -336,6 +338,8 @@ All conditions match within one mission, silo, stage and element. Comparison use
 5. Comparable missions are sorted by score, highest first, then by key. Not comparable missions follow. At most 10 results; 5 by default.
 
 `explain_similarity` returns, for each chosen facet, the score and both facet texts with the items they name.
+
+Facet selections contain one to five distinct names. Missing or unreadable facet texts return a null side and no source identifiers. Missing, zero or nonfinite vectors produce a null score. Cosine scores preserve negative values; the mean includes only the facets available on both sides.
 
 | Mission | Score | design | operations | cost_and_risk |
 |---|---|---|---|---|

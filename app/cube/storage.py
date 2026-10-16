@@ -69,6 +69,24 @@ def set_stage(session: Session, mission: str, stage: str) -> bool:
     )
 
 
+def similarity_missions(session: Session, caller: Caller):
+    rows = [
+        dict(row)
+        for row in session.execute(
+            select(missions).where(mission_access(caller)).order_by(missions.c.key)
+        ).mappings()
+    ]
+    for row in rows:
+        row["aliases"] = list(
+            session.execute(
+                select(mission_aliases.c.alias)
+                .where(mission_aliases.c.mission_key == row["key"])
+                .order_by(mission_aliases.c.alias)
+            ).scalars()
+        )
+    return rows
+
+
 def dictionary(session: Session) -> dict:
     rows = {
         row["key"]: dict(row) | {"conversions": {}}

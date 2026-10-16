@@ -78,6 +78,139 @@ def provider_readable(session: Session, caller: Caller, record) -> bool:
     )
 
 
+def facet_documents(session: Session, mission, items):
+    latest = (
+        select(m.doc_versions.c.item, func.max(m.doc_versions.c.version).label("version"))
+        .group_by(m.doc_versions.c.item)
+        .subquery()
+    )
+    return [
+        dict(row)
+        for row in session.execute(
+            select(
+                m.provider_items.c.item,
+                m.provider_items.c.silo,
+                m.provider_items.c.simulated,
+                m.doc_versions.c.summary,
+            )
+            .join(m.doc_versions, m.doc_versions.c.item == m.provider_items.c.item)
+            .join(
+                latest,
+                and_(
+                    latest.c.item == m.doc_versions.c.item,
+                    latest.c.version == m.doc_versions.c.version,
+                ),
+            )
+            .join(m.missions, m.missions.c.key == m.provider_items.c.mission_key)
+            .where(
+                m.provider_items.c.mission_key == mission,
+                m.provider_items.c.item.in_(items),
+                m.provider_items.c.deleted_at.is_(None),
+            )
+            .order_by(m.provider_items.c.item)
+        ).mappings()
+    ]
+
+
+def facet_refresh(session: Session, missions, changed_items, main_model, embedding_model):
+    rows = list(
+        session.execute(
+            select(
+                m.facet_texts.c.mission_key,
+                m.facet_texts.c.sources,
+                m.facet_texts.c.model,
+                m.vectors.c.model.label("embedding_model"),
+                m.vectors.c.recipe,
+            ).outerjoin(
+                m.vectors,
+                and_(
+                    m.vectors.c.owner_kind == "facet_text",
+                    m.vectors.c.owner_id == m.facet_texts.c.id,
+                ),
+            )
+        ).mappings()
+    )
+    seen = {row["mission_key"] for row in rows}
+    dirty = set(missions) - seen
+    for row in rows:
+        if set(row["sources"]) & changed_items or (
+            row["mission_key"] in missions
+            and (
+                row["model"] != main_model
+                or row["embedding_model"] != embedding_model
+                or row["recipe"] != "facet-v1"
+            )
+        ):
+            dirty.add(row["mission_key"])
+    return dirty
+
+
+def replace_facets(session: Session, mission, prepared, main_model, embedding_model):
+    ids = list(
+        session.execute(
+            select(m.facet_texts.c.id).where(m.facet_texts.c.mission_key == mission)
+        ).scalars()
+    )
+    session.execute(
+        m.vectors.delete().where(
+            m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(ids)
+        )
+    )
+    session.execute(m.facet_texts.delete().where(m.facet_texts.c.mission_key == mission))
+    for facet, (text_value, sources, vector) in prepared.items():
+        identifier = session.execute(
+            m.facet_texts.insert()
+            .values(
+                mission_key=mission, facet=facet, text=text_value, sources=sources, model=main_model
+            )
+            .returning(m.facet_texts.c.id)
+        ).scalar_one()
+        session.execute(
+            m.vectors.insert().values(
+                owner_kind="facet_text",
+                owner_id=identifier,
+                model=embedding_model,
+                recipe="facet-v1",
+                embedding=vector,
+            )
+        )
+    return len(ids)
+
+
+def facet_records(session: Session, missions, facets):
+    return [
+        dict(row)
+        for row in session.execute(
+            select(m.facet_texts)
+            .where(m.facet_texts.c.mission_key.in_(missions), m.facet_texts.c.facet.in_(facets))
+            .order_by(m.facet_texts.c.mission_key, m.facet_texts.c.facet)
+        ).mappings()
+    ]
+
+
+def provider_records(session: Session, items):
+    return {
+        row["item"]: dict(row)
+        for row in session.execute(
+            select(m.provider_items).where(m.provider_items.c.item.in_(items))
+        ).mappings()
+    }
+
+
+def facet_vectors(session: Session, identifiers, model):
+    return {
+        row["owner_id"]: [float(value) for value in row["embedding"]]
+        for row in session.execute(
+            select(m.vectors.c.owner_id, m.vectors.c.embedding).where(
+                m.vectors.c.owner_kind == "facet_text",
+                m.vectors.c.owner_id.in_(identifiers),
+                m.vectors.c.model == model,
+                m.vectors.c.recipe == "facet-v1",
+            )
+        ).mappings()
+    }
+
+
 def candidates(session: Session, caller: Caller, request, query_vector, model="fake-embed@1"):
     session.execute(text("set local hnsw.iterative_scan = 'strict_order'"))
     latest = (

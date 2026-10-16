@@ -286,6 +286,50 @@ def explore(caller: Caller, request):
     )
 
 
+def read_facets(caller: Caller, request):
+    from app.library.handlers import FacetEvidence
+
+    sessions, settings = scope(caller)
+    with unit_of_work(sessions, read_only=True) as session:
+        rows = storage.facet_records(session, request.missions, request.facets)
+        source_ids = {item for row in rows for item in row["sources"]}
+        cached = storage.provider_records(session, source_ids)
+        cached_access = {
+            item: storage.provider_readable(session, caller, row) for item, row in cached.items()
+        }
+    live = SimulatedProvider(settings.provider_root).items()
+    with unit_of_work(sessions, read_only=True) as session:
+        live_access = {
+            item: cached_access.get(item, False)
+            and item in live
+            and live[item]["deleted_at"] is None
+            and storage.provider_readable(session, caller, live[item])
+            for item in source_ids
+        }
+        visible = [
+            row
+            for row in rows
+            if row["sources"]
+            and all(
+                live_access.get(item, False) and live[item]["mission_key"] == row["mission_key"]
+                for item in row["sources"]
+            )
+        ]
+        vectors = storage.facet_vectors(
+            session, [row["id"] for row in visible], model_name(settings)
+        )
+    return [
+        FacetEvidence(
+            mission=row["mission_key"],
+            facet=row["facet"],
+            text=row["text"],
+            sources=row["sources"],
+            vector=vectors.get(row["id"]),
+        )
+        for row in visible
+    ]
+
+
 def compare_versions(caller: Caller, request):
     from app.library.diff import compare
     from app.library.handlers import DiffBlock, VersionDiff

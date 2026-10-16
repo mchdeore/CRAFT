@@ -1,0 +1,24 @@
+{
+  "facets": [
+    {
+      "facet": "design",
+      "score": 0.6,
+      "text": "Simulated design evidence. [itm_123456789abc]",
+      "otherText": "Simulated peer evidence. [itm_abcdef123456]",
+      "sources": [
+        "itm_123456789abc"
+      ],
+      "otherSources": [
+        "itm_abcdef123456"
+      ]
+    },
+    {
+      "facet": "operations",
+      "score": null,
+      "text": null,
+      "otherText": null,
+      "sources": [],
+      "otherSources": []
+    }
+  ]
+}

@@ -359,21 +359,51 @@ Deferred: `/api/v2` when another front end needs a breaking change; paging; rout
 
 Datacube operations use the access, error, request, approval and stream conventions above. Section 8 of the specification defines their behavior. Unknown parameters, units, facets or stages return `invalid_input`; unreadable missions, values or handles return `not_found`.
 
-| Operation | Route | Request | Response | Tool | Effects | Slice |
-|---|---|---|---|---|---|---|
-| `cube.list_parameters` | `GET /api/cube/parameters` | | `Parameter[]` | `list_parameters` | NONE | S3 |
-| `cube.list_missions` | `GET /api/cube/missions?query=&limit=` | | `Mission[]` | `list_missions` | NONE | S3 |
-| `cube.find_missions` | `POST /api/cube/find` | `FindMissions` | `FoundMissions` | `find_missions` | NONE | S3 |
-| `cube.get_mission` | `GET /api/cube/missions/:key?silo=&stage=&at=&knownAt=` | | `MissionState` | `get_mission` | NONE | S3 |
-| `cube.compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `Comparison` | `compare_missions` | NONE | S3 |
-| `cube.get_value_evidence` | `GET /api/cube/values/:id` | | `ValueEvidence` | `get_value_evidence` | NONE | S3 |
-| `cube.prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | `prepare_values` | NONE | S3 |
-| `cube.similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `SimilarPage` | `similar_missions` | NONE | S3 |
-| `cube.explain_similarity` | `POST /api/cube/similar/explain` | `ExplainSimilarity` | `SimilarityExplanation` | `explain_similarity` | NONE | S3 |
-| `cube.submit_values` | `POST /api/cube/values` | `SubmitValues` | `ValueReceipt` | `submit_values`, pauses for approval | DATA | S4 |
-| `cube.save_view` | `POST /api/cube/views` | `SaveView` | `WorkspaceFile` | `save_view`, pauses for approval | DOCUMENT | S5 |
+| Operation | Route |
+| --- | --- |
+| `cube.list_parameters` | `GET /api/cube/parameters` |
+| `cube.list_missions` | `GET /api/cube/missions?query=&limit=` |
+| `cube.find_missions` | `POST /api/cube/find` |
+| `cube.get_mission` | `GET /api/cube/missions/:key?silo=&stage=&at=&knownAt=` |
+| `cube.compare_missions` | `POST /api/cube/compare` |
+| `cube.get_value_evidence` | `GET /api/cube/values/:id` |
+| `cube.prepare_values` | `POST /api/cube/candidates` |
+| `cube.similar_missions` | `POST /api/cube/similar` |
+| `cube.explain_similarity` | `POST /api/cube/similar/explain` |
+| `cube.submit_values` | `POST /api/cube/values` |
+| `cube.save_view` | `POST /api/cube/views` |
+
+| Operation | Request | Response |
+| --- | --- | --- |
+| `cube.list_parameters` |  | `Parameter[]` |
+| `cube.list_missions` |  | `Mission[]` |
+| `cube.find_missions` | `FindMissions` | `FoundMissions` |
+| `cube.get_mission` |  | `MissionState` |
+| `cube.compare_missions` | `CompareMissions` | `Comparison` |
+| `cube.get_value_evidence` |  | `ValueEvidence` |
+| `cube.prepare_values` | `PrepareValues` | `Candidates` |
+| `cube.similar_missions` | `SimilarMissions` | `SimilarPage` |
+| `cube.explain_similarity` | `ExplainSimilarity` | `SimilarityExplanation` |
+| `cube.submit_values` | `SubmitValues` | `ValueReceipt` |
+| `cube.save_view` | `SaveView` | `WorkspaceFile` |
+
+| Operation | Tool | Effects | Slice |
+| --- | --- | --- | --- |
+| `cube.list_parameters` | `list_parameters` | NONE | S3 |
+| `cube.list_missions` | `list_missions` | NONE | S3 |
+| `cube.find_missions` | `find_missions` | NONE | S3 |
+| `cube.get_mission` | `get_mission` | NONE | S3 |
+| `cube.compare_missions` | `compare_missions` | NONE | S3 |
+| `cube.get_value_evidence` | `get_value_evidence` | NONE | S3 |
+| `cube.prepare_values` | `prepare_values` | NONE | S3 |
+| `cube.similar_missions` | `similar_missions` | NONE | S3 |
+| `cube.explain_similarity` | `explain_similarity` | NONE | S3 |
+| `cube.submit_values` | `submit_values`, pauses for approval | DATA | S4 |
+| `cube.save_view` | `save_view`, pauses for approval | DOCUMENT | S5 |
 
 Limits: 1 to 12 conditions and at most 20 missions in `find_missions`; 2 to 5 missions in `compare_missions`; at most 10 results in `similar_missions`; at most 100 candidates in `submit_values`; at most 200 rows in a saved view. `at` is a date (`YYYY-MM-DD`) and `knownAt` a timestamp; both default to the time of the request and are returned. Source numbers are decimal strings of at most 100 characters without exponent, NaN or Infinity.
+
+Similarity selects all five facets by default. An explicit selection has one to five distinct names; duplicate or unknown names are invalid. Scores range from -1 to 1. Missing or unreadable facet texts have null sides and no source identifiers; missing current-model vectors yield null scores. At least half the selected facets, rounded up, must count. Comparable results sort by descending mean score and then mission key; other results follow. The JSON examples are `api/examples/similar-missions.json` and `api/examples/similarity-explanation.json`.
 
 ## 13. Datacube TypeScript forms
 
@@ -443,10 +473,11 @@ export interface SimilarMission {
 }
 export interface SimilarPage { missions: SimilarMission[]; facets: Facet[] }
 export interface ExplainSimilarity { key: string; other: string; facets?: Facet[] }
-export interface SimilarityExplanation {
-  facets: { facet: Facet; score: number | null; text: string | null; otherText: string | null;
-            sources: string[]; otherSources: string[] }[];
+export interface FacetExplanation {
+  facet: Facet; score: number | null; text: string | null; otherText: string | null;
+  sources: string[]; otherSources: string[];
 }
+export interface SimilarityExplanation { facets: FacetExplanation[] }
 export interface SaveView {
   conversationId: Id; name: string;
   operation: "find_missions" | "get_mission" | "compare_missions" | "similar_missions";

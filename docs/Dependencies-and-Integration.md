@@ -457,3 +457,16 @@ The page uses text nodes for titles, quotes and suggestions. Selection and uploa
 ## 21. Table candidate preparation
 
 `uv run pytest -q app/cube/tests/test_intake.py` checks English and French headers, inline and header units, Decimal conversion, ranges, whole-number bounds, all seven problems, unknown and not-applicable cells, row citations, the planted budget values and unchanged cube tables. Access includes explicit mission and silo refusals and omitted-silo element filtering. Compiled API forms and real cookie/Origin transport are checked separately within the same suite. `uv run craft operations` includes cube.prepare_values with effect none. Preparation uses checked library reads, then one short dictionary/scope read transaction; conversion follows after that transaction ends.
+
+## 22. Facets and similar missions
+
+Indexing derives five mission facets from current source summaries, validates terminal item citations and stores one labeled vector per nonempty facet. Fake mode groups first sentences by the documented silo mapping. Configured mode makes one mission call for all five texts. Conversion, model calls and embeddings finish before short writes. Unknown missions have no facet row until their mission record exists.
+
+Private facet reads filter indexed and live source grants, withdrawals and mission changes. Similarity selects readable missions first, uses current-model vectors and averages the available cosine scores. All five facets are selected by default; one to five distinct selections and one to ten results are accepted. A pair needs at least half the selected facets, rounded up. Explanations show readable sides only. These read tools make no conversational model call.
+
+```bash
+uv run pytest -q app/library/tests/test_facets.py app/cube/tests/test_similarity.py
+uv run craft operations | grep -cE '^cube\.(similar_missions|explain_similarity) '
+```
+
+The targeted suite checks deterministic facets, generated summaries, vector recipes, changed-mission rebuilding, all twelve planted family matches, missing evidence, source access, mean scores, HTTP authentication and compiled forms. The response examples are `api/examples/similar-missions.json` and `api/examples/similarity-explanation.json`. External model quality is measured separately.

@@ -22,4 +22,6 @@ export interface Routes {
   "GET /api/cube/values/:id": { response: T.ValueEvidence };
   "POST /api/summarize": { body: T.SelectedSource; response: T.SummaryResult };
   "POST /api/summarize/upload": { body: Blob; response: T.SummaryResult };
+  "POST /api/cube/similar": { body: T.SimilarMissions; response: T.SimilarPage };
+  "POST /api/cube/similar/explain": { body: T.ExplainSimilarity; response: T.SimilarityExplanation };
 }

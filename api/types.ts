@@ -74,3 +74,17 @@ export interface VersionDiff { blocks: {change: "added" | "removed" | "changed" 
 export interface PrepareValues { handle: CitationHandle; mission?: string; silo?: string; stage?: string; validFrom?: string }
 export interface Candidate { row: number; header: string; parameter: string | null; element: string | null; sourceNumber: string; sourceUnit: string | null; kind: ValueKind; low: number | null; high: number | null; citation: CitationHandle; problem: string | null }
 export interface Candidates { mission: string | null; silo: string | null; stage: string | null; validFrom: string | null; candidates: Candidate[]; problems: string[] }
+
+export type Facet = "purpose" | "design" | "operations" | "program" | "cost_and_risk";
+export interface SimilarMissions { key: string; facets?: Facet[]; limit?: number }
+export interface SimilarMission {
+  mission: Mission; score: number | null; comparable: boolean;
+  facetScores: Partial<Record<Facet, number | null>>;
+}
+export interface SimilarPage { missions: SimilarMission[]; facets: Facet[] }
+export interface ExplainSimilarity { key: string; other: string; facets?: Facet[] }
+export interface FacetExplanation {
+  facet: Facet; score: number | null; text: string | null; otherText: string | null;
+  sources: string[]; otherSources: string[];
+}
+export interface SimilarityExplanation { facets: FacetExplanation[] }

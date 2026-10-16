@@ -11,6 +11,26 @@ from app.infrastructure.shapes import RawFile, Shape
 from app.library import service
 
 Classification = Literal["unclassified", "protected-a", "protected-b"]
+Facet = Literal["purpose", "design", "operations", "program", "cost_and_risk"]
+
+
+class FacetRequest(Shape):
+    missions: list[str]
+    facets: list[Facet]
+
+
+class FacetEvidence(Shape):
+    mission: str
+    facet: Facet
+    text: str
+    sources: list[str]
+    vector: Annotated[list[float], msgspec.Meta(min_length=1536, max_length=1536)] | None
+
+
+@operation(SIGNED_IN)
+def read_facets(caller: Caller, request: FacetRequest) -> list[FacetEvidence]:
+    """Read private facet evidence only when every live source remains readable."""
+    return service.read_facets(caller, request)
 
 
 class CitationHandle(Shape):
