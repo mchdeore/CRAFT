@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import socket
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -34,20 +33,22 @@ def file_hashes(root: Path) -> dict[str, str]:
 @pytest.fixture(scope="module")
 def demo(tmp_path_factory, settings):
     project = "craft-demo-" + uuid4().hex[:8]
-    with socket.socket() as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        port = reservation.getsockname()[1]
     environment = os.environ | {
-        "CRAFT_DATABASE_PORT": str(port),
+        "CRAFT_DATABASE_PORT": "0",
         "CRAFT_DATABASE_NAME": "craft_test",
     }
     compose = ["docker", "compose", "-p", project]
     started = subprocess.run(
         [*compose, "up", "-d", "--wait", "db"], env=environment, capture_output=True
     )
-    assert started.returncode == 0
     engine = None
     try:
+        assert started.returncode == 0
+        binding = subprocess.run(
+            [*compose, "port", "db", "5432"], env=environment, capture_output=True, text=True
+        )
+        assert binding.returncode == 0
+        port = int(binding.stdout.strip().rsplit(":", 1)[1])
         one = tmp_path_factory.mktemp("demo-one")
         two = tmp_path_factory.mktemp("demo-two")
         configured = msgspec.structs.replace(settings, database_port=port, provider_root=str(one))
