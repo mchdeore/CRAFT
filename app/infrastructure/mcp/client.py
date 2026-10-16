@@ -3,7 +3,10 @@
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from http.cookiejar import CookieJar, DefaultCookiePolicy
+from typing import Any
 
+import httpx
 from agent_framework import FunctionMiddleware, MCPStreamableHTTPTool
 
 from app.infrastructure.errors import ApiError
@@ -56,6 +59,26 @@ class ToolCallMiddleware(FunctionMiddleware):
             current_call.reset(token)
 
 
+class LocalHTTPTool(MCPStreamableHTTPTool):
+    """Own a direct local transport for one run, without proxy or cookie inheritance."""
+
+    def __init__(self, **kwargs: Any):
+        transport = httpx.AsyncClient(
+            trust_env=False,
+            follow_redirects=False,
+            timeout=120,
+            cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
+        )
+        super().__init__(http_client=transport, **kwargs)
+        self._local_http = transport
+
+    async def close(self) -> None:
+        try:
+            await super().close()
+        finally:
+            await self._local_http.aclose()
+
+
 def client(url, raw_token, results, allowed=None):
     allowlist = (
         allowed
@@ -74,7 +97,7 @@ def client(url, raw_token, results, allowed=None):
         results.append(value)
         return json.dumps(value, separators=(",", ":"))
 
-    return MCPStreamableHTTPTool(
+    return LocalHTTPTool(
         name="craft",
         url=url,
         allowed_tools=allowlist,

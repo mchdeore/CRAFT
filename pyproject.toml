@@ -60,6 +60,6 @@ venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-testpaths = ["app"]
+testpaths = ["app", "tests"]
 addopts = "-q"
 markers = ["live: requires configured external service credentials"]
