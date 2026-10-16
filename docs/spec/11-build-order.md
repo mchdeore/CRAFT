@@ -6,7 +6,7 @@ S0 is implemented at tag `s0-skeleton`: locked dependencies, database initializa
 
 Migration 0008 belongs to the early tables. The datacube uses migrations 0009 through 0011.
 
-S1 ends at step 6, tagged `s1-documents`; S2 at step 8, tagged `s2-accounts`; S3 at step 20, tagged `s3-agent`; S4 at step 23, tagged `s4-approvals`; and S5 at step 26, tagged `s5-answers`.
+S1 ends at step 6, tagged `s1-documents`; S2 at step 8, tagged `s2-accounts`; S3 at step 21, tagged `s3-agent`; S4 at step 26, tagged `s4-approvals`; and S5 at step 32, tagged `s5-answers`.
 
 1. Tables: accounts and call log (0001-0002)
 2. Tables: conversations, runs and approvals (0003-0005)
@@ -26,14 +26,20 @@ S1 ends at step 6, tagged `s1-documents`; S2 at step 8, tagged `s2-accounts`; S3
 16. Candidate values from tables
 17. Facet texts and similar missions
 18. Agent runtime and chat stream, fake model
-19. /mcp and run token
-20. Conversations, answers and workspace files, tag s3-agent
-21. Approval gate
-22. Drafts, saved conversations and export
-23. Cube values through the gate, tag s4-approvals
-24. Saved cube views in the workspace
-25. Evaluation set, vector search and fusion
-26. Real answers, tag s5-answers
+19. API Contract matches what is built
+20. /mcp and run token
+21. Conversations, answers and workspace files, tag s3-agent
+22. Agent and scratchpad on the MCP, in a container
+23. Chart and calculation-check tools
+24. Approval gate
+25. Drafts, saved conversations and export
+26. Cube values through the gate, tag s4-approvals
+27. Saved cube views in the workspace
+28. Demo users, demo data and frozen snapshots
+29. OpenText document provider, seeded with demo files
+30. Bilingual file names in OpenText, through the approval gate
+31. Evaluation set, vector search and fusion
+32. Real answers, tag s5-answers
 
 ## 11.1 Milestone demonstrations
 
