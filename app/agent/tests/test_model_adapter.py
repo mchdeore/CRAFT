@@ -489,7 +489,7 @@ def test_fake_summary_task(settings):
         "task": "summarize",
         "blocks": [
             {"block": 1, "text": "Simulated fact one."},
-            {"block": 2, "text": "Simulated fact two."},
+            {"block": 2, "text": "| Stage | C |", "headingPath": "Stage B"},
         ],
     }
 
@@ -498,5 +498,7 @@ def test_fake_summary_task(settings):
         body = json.loads(result.text)
         exact = [sentence["blocks"] for sentence in body["sentences"]] == [[1], [2]]
         assert exact and len(body["sentences"]) == 2
+        stages = {row["value"] for row in body["filings"] if row["field"] == "stage"}
+        assert stages == {"B", "C"}
 
     asyncio.run(run())

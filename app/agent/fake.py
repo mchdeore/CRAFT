@@ -59,9 +59,9 @@ def summary_task(question: str):
     sentences = []
     filings = []
     patterns = {
-        "mission": r"\bmission(?:\s+key)?\s*[:=]?\s*(msn-[a-z0-9-]+|M-SYN-\d+)",
-        "silo": r"\bsilo\s*[:=]?\s*(engineering|requirements|quality|reviews|budget|launch)",
-        "stage": r"\bstage\s*[:=]?\s*(st[1-7]-[a-z-]+|[BC])\b",
+        "mission": r"\bmission(?:\s+key)?[\s|:=]*(msn-[a-z0-9-]+|M-SYN-\d+)",
+        "silo": r"\bsilo[\s|:=]*(engineering|requirements|quality|reviews|budget|launch)",
+        "stage": r"\bstage[\s|:=]*(st[1-7]-[a-z-]+|[BC])\b",
     }
     for block in task["blocks"]:
         for sentence in re.split(r"(?<=[.!?])\s+", block["text"].strip()):
