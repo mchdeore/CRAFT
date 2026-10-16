@@ -7,8 +7,10 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Annotated
 from uuid import UUID, uuid4
 
+import msgspec
 import pytest
 import uvicorn
 from fastapi import FastAPI
@@ -271,3 +273,27 @@ def test_optional_query_shape(settings: Settings) -> None:
     with TestClient(create_app(settings)) as client:
         assert client.get("/api/optional?value=7").json()["value"] == 7
         assert client.get("/api/optional?value=nope").status_code == 400
+
+
+class PositiveOutput(Shape):
+    count: Annotated[int, msgspec.Meta(ge=1)]
+
+
+def test_native_output_constraints_are_checked_for_shapes_and_lists(settings: Settings) -> None:
+    @operation(PUBLIC, get="/bad-output")
+    def bad_output(caller: Caller) -> PositiveOutput:
+        return PositiveOutput(count=0)
+
+    @operation(PUBLIC, get="/bad-output-list")
+    async def bad_output_list(caller: Caller) -> list[PositiveOutput]:
+        return [PositiveOutput(count=0)]
+
+    app = create_app(settings)
+    with pytest.raises(ApiError):
+        bad_output(trusted(app))
+    with TestClient(app) as client:
+        for path in ["/api/bad-output", "/api/bad-output-list"]:
+            response = client.get(path)
+            assert response.status_code == 500 and response.json()["code"] == "internal_error"
+    assert rows(app, "probe.bad_output")[-1]["error_code"] == "internal_error"
+    assert rows(app, "probe.bad_output_list")[-1]["error_code"] == "internal_error"

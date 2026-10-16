@@ -56,7 +56,7 @@ def validate_output(operation: Operation, value: Any) -> Any:
             raise ApiError()
         return None
     try:
-        return msgspec.convert(value, operation.output, strict=True)
+        return msgspec.json.decode(msgspec.json.encode(value), type=operation.output, strict=True)
     except (msgspec.ValidationError, TypeError, ValueError):
         raise ApiError() from None
 
