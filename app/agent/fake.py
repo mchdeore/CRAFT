@@ -132,6 +132,19 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
 
             async def updates():
                 response = self.reply(messages)
+                text = " ".join(
+                    content.text or json.dumps(content.arguments or {})
+                    for message in response.messages
+                    for content in message.contents
+                )
+                budget = options.get("max_tokens") or 4000
+                if (
+                    len(re.findall(r"\w+|[^\w\s]", text)) > budget
+                    or len(text.encode()) > budget * 16
+                ):
+                    from app.infrastructure.errors import ApiError
+
+                    raise ApiError()
                 for message in response.messages:
                     yield ChatResponseUpdate(
                         role="assistant",
@@ -140,7 +153,14 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
                         model="fake",
                     )
 
-            return ResponseStream(updates(), finalizer=lambda _: self.reply(messages))
+            source = ResponseStream(updates(), finalizer=lambda _: self.reply(messages))
+            from app.infrastructure.operations.context import current_call
+
+            if current_call.get() is not None:
+                from app.agent.model import observed_stream
+
+                return observed_stream(source)
+            return source
 
         async def complete():
             return self.reply(messages)
