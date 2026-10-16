@@ -7,5 +7,20 @@ from importlib.metadata import version
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="craft", description="CRAFT backend tools")
     parser.add_argument("--version", action="version", version=f"craft {version('craft')}")
-    parser.parse_args(argv)
-    parser.print_help()
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("operations")
+    args = parser.parse_args(argv)
+    if args.command == "operations":
+        from app.infrastructure.operations.registry import registry
+
+        for operation in registry.values():
+            print(
+                operation.name,
+                operation.method or "-",
+                operation.path or "-",
+                operation.tool_name if operation.tool else "-",
+                operation.access,
+                operation.effects,
+            )
+    else:
+        parser.print_help()
