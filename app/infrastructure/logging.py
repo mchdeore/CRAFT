@@ -13,7 +13,13 @@ ALLOWED_FIELDS = (
     "call_id", "parent_call_id", "user_id", "auth_session_id",
     "conversation_id", "run_id", "tool_call_id",
 )  # fmt: skip
-QUIET = ("httpx", "httpx2", "httpcore", "alembic")  # chatty at INFO; URLs include query strings
+QUIET = (
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "alembic",
+    "mcp",
+)  # chatty at INFO; URLs include query strings
 
 
 class JsonFormatter(logging.Formatter):

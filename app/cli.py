@@ -8,9 +8,15 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="craft", description="CRAFT backend tools")
     parser.add_argument("--version", action="version", version=f"craft {version('craft')}")
     commands = parser.add_subparsers(dest="command")
+    mcp = commands.add_parser("mcp")
+    mcp.add_argument("--as", dest="username", required=True)
     commands.add_parser("operations")
     args = parser.parse_args(argv)
-    if args.command == "operations":
+    if args.command == "mcp":
+        from app.infrastructure.mcp.stdio import run_stdio
+
+        run_stdio(args.username)
+    elif args.command == "operations":
         from app.infrastructure.operations.registry import registry
 
         for operation in registry.values():

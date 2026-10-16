@@ -64,6 +64,7 @@ MCP (Model Context Protocol): the standard way an agent lists and calls tools. I
 - Two transports share the adapter: HTTP at `/mcp` with a run token for the agent, and standard input and output through `craft mcp --as <username>` for a local MCP application. The command line names a local account; calls log `origin=mcp`.
 - Over standard input and output there is no run, so a tool with an effect other than `NONE` returns `approval_required`.
 
+- List results use an `items` object in MCP structured content and the original JSON list in text content.
 - A tool = an operation with `tool=True`. Name, description (the docstring) and JSON Schema (msgspec) are generated.
 - Tool name = the function name (`search`): lowercase letters, digits, `_`, at most 64, unique across the registry (startup check). OpenAI-family models reject dots, so the operation name (`library.search`) stays for routes and logs only.
 - Agent side: `MCPStreamableHTTPTool(url, header_provider=<run token>, allowed_tools=[…], approval_mode=…)`.

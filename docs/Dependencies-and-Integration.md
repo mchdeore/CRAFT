@@ -303,3 +303,20 @@ uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture
 uv run pytest -q app/infrastructure/operations/tests/test_operation.py -k test_operation_curl_without_session
 uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py -k "one_row or payload or observe"
 ```
+
+## 11. Local MCP transport
+
+The MCP adapter derives tool names, descriptions and input schemas from the operation registry. It performs no model call. Invalid arguments enter the same checked pipeline as HTTP and Python. Standard output carries protocol messages only; logs use standard error. Missing or disabled accounts exit with status 2. Effectful calls without a run return `approval_required`.
+
+```bash
+uv run craft mcp --as demo
+uv run pytest -q app/infrastructure/mcp/tests/test_stdio.py
+```
+
+Start the command in the repository folder. An MCP application configuration uses:
+
+```json
+{"mcpServers":{"craft":{"command":"uv","args":["run","craft","mcp","--as","demo"],"cwd":"."}}}
+```
+
+MCP structured content requires an object. List results use an object with an `items` field; their text content remains the original JSON list.
