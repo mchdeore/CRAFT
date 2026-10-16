@@ -399,3 +399,7 @@ The API contract defines the request and response forms. Logs record handles, sc
 The demo set is generated, not stored: the same seed number gives the same bytes. It includes version pairs, renamed copies, moved and deleted documents, mixed units, English and French headers, unknown values and a value whose source is withdrawn. Every mission, document and value is labelled simulated. No name, value or document number comes from a real source.
 
 The ground-truth file, `<provider root>/.provider/ground-truth.json`, lists what the generator planted: questions with the citation handles that answer them, the mission families, the version changes and the aliases. Section 10's evaluation reads it.
+
+A fresh demo set has 125 source items and 48 planted questions. Twelve sources have changed versions with later valid dates; two sources move between stage folders; three copies keep matching cells with different bytes. Three cited sources are withdrawn after seeded values name them. Mission-total rows load aggregate values. A unitless cell is not loaded, and TBD is unknown.
+
+The ground-truth file at `.provider/ground-truth.json` records source handles, families, changes and dated values. File properties and package order are fixed. Repeating an unchanged completed seed adds nothing. Changing its baseline creates a new generation and preserves earlier versions and values.

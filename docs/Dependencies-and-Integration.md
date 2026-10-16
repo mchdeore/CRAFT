@@ -403,3 +403,16 @@ Spreadsheet reads use `data_only=True` and `keep_links=False`. Formulas, macros 
 uv run python -c "import docx, pypdf, pptx, openpyxl; print('ok')"
 uv run pytest -q app/library/tests/test_convert.py
 ```
+
+## 17. Synthetic demo set
+
+`craft seed demo --seed 1` writes a reproducible source set, indexes it, loads mission totals with row citations, then withdraws three cited source items and refreshes the index. A fresh set has 125 items, twelve missions in four families, 48 planted questions, twelve changed-version pairs, two moves and three copies with matching cells but different bytes. Spreadsheet headers alternate English and French; source units mix kg/g and W/kW. A TBD cell remains unknown, and unitless cells are not loaded as values. Component rows and three mission elements support later intake.
+
+The ground-truth file is `<provider root>/.provider/ground-truth.json`. It records mission families, questions with stable handles, version and move records, withdrawals, copies, dated values and a source fingerprint. Fixed package properties, sorted ZIP entries and PDF creation dates keep bytes reproducible. An unchanged completed seed adds no source version or value. A changed baseline creates a new generation while earlier versions and values remain.
+
+```bash
+uv run craft seed demo --seed 1
+uv run pytest -q app/seed/tests/test_demo.py
+```
+
+The tests use an owned disposable Compose database, compare two complete folders, verify source hashes and dated state, and run the optional local content check over every generated version. The optional audit path is supplied through `CONTENT_CHECK_SCRIPT`; it is configured for local validation and unavailable in CI. Runtime PDF writing uses the pinned PDF library; no test-only writer is needed by the seed command.

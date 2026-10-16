@@ -12,7 +12,8 @@ def main(argv: list[str] | None = None) -> None:
     mcp.add_argument("--as", dest="username", required=True)
     commands.add_parser("operations")
     seed = commands.add_parser("seed")
-    seed.add_argument("set", choices=["base"])
+    seed.add_argument("set", choices=["base", "demo"])
+    seed.add_argument("--seed", type=int, default=1)
     index = commands.add_parser("index")
     index.add_argument("--rebuild", action="store_true")
     call = commands.add_parser("call")
@@ -69,9 +70,14 @@ def main(argv: list[str] | None = None) -> None:
 
             change_stage(settings, args.mission, args.stage)
         elif args.command == "seed":
-            from app.seed.base import seed
+            if args.set == "demo":
+                from app.seed.demo import seed as seed_demo
 
-            print(json.dumps(seed(settings)))
+                print(json.dumps(seed_demo(settings, args.seed)))
+            else:
+                from app.seed.base import seed as seed_base
+
+                print(json.dumps(seed_base(settings)))
         elif args.command == "index":
             from app.library.index import build
 

@@ -152,3 +152,17 @@ def preview(caller: Caller, request: OriginalRef) -> Response:
 def download(caller: Caller, request: OriginalRef) -> Response:
     """Download a readable original version."""
     return service.original(caller, request, True)
+
+
+def index_provider(settings, rebuild: bool = False) -> dict[str, int]:
+    """Run local owner indexing for command and seed orchestration."""
+    from app.library.index import build
+
+    return build(settings, rebuild)
+
+
+def convert_source(content: bytes, filename: str):
+    """Convert supplied source bytes for local seed and indexing maintenance."""
+    from app.library.convert import convert
+
+    return convert(content, filename)
