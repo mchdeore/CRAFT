@@ -261,6 +261,7 @@ Each build step adds its checks. A step that changes behavior updates section 8 
 
 | Step | Command | Expected result |
 |---|---|---|
+| B01 accounts and call log | `uv run pytest app/infrastructure/tests/test_migrations.py app/infrastructure/tests/test_grants.py` | Account constraints, explicit application grants and an isolated migration round trip pass |
 | B03 library tables | `uv run pytest app/infrastructure/tests/test_library_schema.py` | Migration 0006 creates the library tables; `craft_app` reads them and writes only `mission_grants` |
 | B05 MCP adapter | `uv run pytest app/infrastructure/mcp/tests/test_stdio.py` | Every tool operation is listed; calls run the operation pipeline and log `origin=mcp` |
 | B06 provider and library | `uv run pytest app/infrastructure/provider/tests app/library/tests` | Scan, change feed, indexing, search, neighbours and access pass |
@@ -276,3 +277,13 @@ Each build step adds its checks. A step that changes behavior updates section 8 
 | B25 evaluation | `uv run craft eval` | Fused recall at 8 is at least keyword-only recall on the demo ground truth |
 
 Fixed synthetic queries record the median and 95th-percentile time and encoded bytes. Adversarial checks require zero permission leaks and zero unapproved writes.
+
+## 9. Migration verification
+
+Account and call-log migrations have immutable schema snapshots. Application grants are checked by table, including denied writes to the append-only call log. Migration round trips use a rollback-only connection on `craft_test`, preserving existing synthetic fixtures. Autogeneration compares the full table registry with the migrated database.
+
+```bash
+uv run pytest -q app/infrastructure/tests/test_migrations.py app/infrastructure/tests/test_grants.py
+CRAFT_DATABASE_NAME=craft_test uv run alembic upgrade head
+CRAFT_DATABASE_NAME=craft_test uv run alembic check
+```

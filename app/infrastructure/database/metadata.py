@@ -11,3 +11,14 @@ metadata = MetaData(
         "pk": "pk_%(table_name)s",
     }
 )
+
+
+def register_tables() -> None:
+    """Import the table declarations without opening a connection."""
+    from importlib import import_module
+
+    for module in ("app.accounts.storage", "app.infrastructure.operations.storage"):
+        import_module(module)
+
+
+register_tables()

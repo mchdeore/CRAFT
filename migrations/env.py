@@ -22,7 +22,15 @@ url = URL.create(
     database=context.config.attributes.get("database_name", settings.database_name),
 )
 
-with create_engine(url).connect() as connection:
+
+def migrate(connection):
     context.configure(connection=connection, target_metadata=metadata)
     with context.begin_transaction():
         context.run_migrations()
+
+
+if connection := context.config.attributes.get("connection"):
+    migrate(connection)
+else:
+    with create_engine(url).connect() as connection:
+        migrate(connection)
