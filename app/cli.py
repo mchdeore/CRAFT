@@ -79,9 +79,9 @@ def main(argv: list[str] | None = None) -> None:
 
                 print(json.dumps(seed_base(settings)))
         elif args.command == "index":
-            from app.library.index import build
+            from app.library.handlers import index_provider
 
-            print(json.dumps(build(settings, args.rebuild)))
+            print(json.dumps(index_provider(settings, args.rebuild)))
         elif args.command == "provider":
             from app.infrastructure.provider.simulated import SimulatedProvider
 
