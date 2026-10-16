@@ -14,7 +14,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.infrastructure.access import Caller, anonymous_http, require, resolve_http
-from app.infrastructure.errors import ApiError, InvalidInput, error_response
+from app.infrastructure.errors import ApiError, InvalidInput, TooLarge, error_response
 from app.infrastructure.operations.context import (
     CallContext,
     current_call,
@@ -24,7 +24,7 @@ from app.infrastructure.operations.context import (
 from app.infrastructure.operations.registry import Operation, registry
 from app.infrastructure.operations.service import record
 from app.infrastructure.requests import current_request_id
-from app.infrastructure.shapes import FieldError, Health, json_response
+from app.infrastructure.shapes import FieldError, Health, RawFile, json_response
 
 
 class ApprovalRequired(ApiError):
@@ -113,7 +113,7 @@ def finish(
             current_call.reset(token)
 
 
-def checked(operation: Operation, caller: Caller, value: Any) -> Any:
+def checked_access(operation: Operation, caller: Caller) -> Caller:
     http = transport_request.get()
     call = current_call.get()
     if (
@@ -138,15 +138,59 @@ def checked(operation: Operation, caller: Caller, value: Any) -> Any:
             from app.infrastructure.errors import Forbidden
 
             raise Forbidden()
+    return caller
+
+
+def checked_input(operation: Operation, caller: Caller, value: Any) -> Any:
+    if raw_file(operation):
+        content = (
+            value.get("content") if isinstance(value, dict) else getattr(value, "content", None)
+        )
+        if isinstance(content, (bytes, bytearray)) and len(content) > RawFile.max_bytes:
+            raise TooLarge()
     request = decode(operation, value)
     if caller.origin == "mcp" and operation.effects != "NONE":
         raise ApprovalRequired()
     return caller, request
 
 
+def checked(operation: Operation, caller: Caller, value: Any) -> Any:
+    return checked_input(operation, checked_access(operation, caller), value)
+
+
+class RawHttpFile:
+    def __init__(self, request: Request, limit: int):
+        self.request = request
+        self.limit = limit
+
+    async def read(self):
+        content = bytearray()
+        async for chunk in self.request.stream():
+            if len(content) + len(chunk) > self.limit:
+                raise TooLarge()
+            content.extend(chunk)
+        simulated = self.request.headers.get("x-simulated", "false").lower()
+        if simulated not in {"true", "false"}:
+            raise InvalidInput()
+        return (
+            dict(self.request.query_params)
+            | dict(self.request.path_params)
+            | {
+                "content": bytes(content),
+                "fileName": self.request.headers.get("x-file-name", ""),
+                "mediaType": self.request.headers.get("content-type", "").split(";", 1)[0].lower(),
+                "simulated": simulated == "true",
+            }
+        )
+
+
+def raw_file(operation: Operation) -> bool:
+    return operation.input is not None and issubclass(operation.input, RawFile)
+
+
 def wrap(operation: Operation) -> Any:
     fn = operation.function
-    if inspect.iscoroutinefunction(fn):
+    if inspect.iscoroutinefunction(fn) or raw_file(operation):
 
         @wraps(fn)
         async def asynchronous(caller: Caller, request: Any = None) -> Any:
@@ -154,8 +198,15 @@ def wrap(operation: Operation) -> Any:
             error = None
             output = None
             try:
-                resolved, value = checked(operation, caller, request)
-                output = await fn(resolved, value) if operation.input else await fn(resolved)
+                if isinstance(request, RawHttpFile):
+                    resolved = checked_access(operation, caller)
+                    resolved, value = checked_input(operation, resolved, await request.read())
+                else:
+                    resolved, value = checked(operation, caller, request)
+                if inspect.iscoroutinefunction(fn):
+                    output = await fn(resolved, value) if operation.input else await fn(resolved)
+                else:
+                    output = await run_in_threadpool(fn, resolved, value)
                 return validate_output(operation, output)
             except ApiError as failure:
                 error = failure
@@ -220,7 +271,10 @@ def endpoint(operation: Operation) -> Any:
             values.update(request.path_params)
             if operation.name.startswith("health."):
                 values = {}
-            if operation.input:
+            if raw_file(operation):
+                assert operation.input is not None
+                values = RawHttpFile(request, RawFile.max_bytes)
+            elif operation.input:
                 # Only declared non-string query fields are parsed. JSON bodies remain strict.
                 for field in msgspec.structs.fields(operation.input):
                     name = field.encode_name

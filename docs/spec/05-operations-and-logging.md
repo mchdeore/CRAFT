@@ -17,7 +17,7 @@ def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
 |---|---|---|
 | `access` (first argument) | yes | A permission (`"accounts.manage"`), `SIGNED_IN`, `PUBLIC`. No default: a missing one fails at import |
 | `caller: Caller` (first parameter) | yes | Every call has a user scope. A handler without it fails at import |
-| input | if the call takes input | Second parameter, a msgspec `Shape`. Path + query + body fill its fields |
+| input | if the call takes input | Second parameter, a msgspec `Shape`. Path + query + body fill its fields. A RawFile shape receives bounded original bytes and declared file headers after access checks |
 | output | yes | Return type: a `Shape`, `list[Shape]` or `None` (`204`). A binary HTTP route returns a Response; it is never a tool. An async generator = an event stream (chat) |
 | `get=` … `delete=` | no | The HTTP route under `/api`. At most one |
 | `tool=True` | no | Also an MCP tool. Needs a route and a docstring (what, when, one example) |
