@@ -186,8 +186,12 @@ def test_vector_cosine_search(owner_engine: Engine) -> None:
             )
         query = [1.0] + [0.0] * 1535
         connection.execute(text("set local enable_seqscan = off"))
+        connection.execute(text("set local hnsw.iterative_scan = 'strict_order'"))
         statement = (
-            select(m.vectors.c.id).order_by(m.vectors.c.embedding.cosine_distance(query)).limit(1)
+            select(m.vectors.c.id)
+            .where(m.vectors.c.id.in_(ids))
+            .order_by(m.vectors.c.embedding.cosine_distance(query))
+            .limit(1)
         )
         assert connection.execute(statement).scalar_one() == ids[0]
         plan = (
