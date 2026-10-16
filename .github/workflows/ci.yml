@@ -1,0 +1,71 @@
+# Every PR and every push to main. Any failure blocks the merge.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      db:
+        image: pgvector/pgvector:0.8.7-pg18
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust  # throwaway CI database: no password to keep
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -h localhost" --health-interval 2s
+          --health-timeout 5s --health-retries 30
+    env:
+      CRAFT_DATABASE_HOST: localhost
+      CRAFT_DATABASE_PORT: "5432"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          version: "0.12.23"
+      - name: Throwaway database passwords
+        run: |
+          echo "CRAFT_OWNER_DB_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+          echo "CRAFT_APP_DB_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+      - name: Lock
+        run: uv sync --locked
+      - name: Lint and format
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Types
+        run: uv run pyright
+      - name: Database init
+        run: bash docker/initdb.sh
+        env:
+          PGHOST: localhost
+      - name: Migrations
+        run: uv run alembic upgrade head && uv run alembic check
+      - name: Tests
+        run: uv run pytest
+      - name: Contract tests
+        run: |
+          if [ -d api ]; then echo "api/ exists: wire the contract tests into this step"; exit 1; fi
+          echo "Skipped: api/ does not exist yet."
+      - name: Full stack
+        env:
+          CRAFT_DATABASE_PORT: "5433"  # the CI service holds 5432
+        run: |
+          export CRAFT_DB_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+          docker compose up --build --wait --wait-timeout 180
+          curl -fsi localhost:8000/health/ready | tee ready.txt
+          grep -qi '^x-request-id:' ready.txt
+          test "$(docker compose exec -T app id -u)" = 10001
+          test "$(docker compose exec -T app env | grep -c PASSWORD)" = 1
+          docker compose down -v

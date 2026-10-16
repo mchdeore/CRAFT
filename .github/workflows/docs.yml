@@ -1,0 +1,89 @@
+# Build documents on every PR. Publish downloads from public main only.
+name: Documents
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || 'macos-15' }}
+    timeout-minutes: 15
+    concurrency:
+      group: documents-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # each PDF shows the date of its source's last change
+          persist-credentials: false
+          sparse-checkout: docs
+      - name: Tools (Linux)
+        if: runner.os == 'Linux'
+        env:
+          PANDOC: "3.11"
+          PANDOC_SHA256: 89d4c9d97818c62a97157f0072844e4602c6cee795bf84abd1aee7273abcda99
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" \
+            "https://github.com/jgm/pandoc/releases/download/$PANDOC/pandoc-$PANDOC-1-amd64.deb"
+          echo "$PANDOC_SHA256  $RUNNER_TEMP/pandoc.deb" | sha256sum -c -
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends \
+            "$RUNNER_TEMP/pandoc.deb" poppler-utils fonts-sil-charis
+      - name: Tools (macOS)
+        if: runner.os == 'macOS'
+        env:
+          PANDOC: "3.11"
+          PANDOC_SHA256: 15806bedf9517bfead72e88fe6a6696635c3691efbb6e152173440e9c5bb50b4
+          SHELL_VERSION: "155.0.8059.79"
+          SHELL_SHA256: 5f51504ead3d41815111cd73e79c4979df3a4e6aedc7cf6fe2b042ae037363b5
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.zip" \
+            "https://github.com/jgm/pandoc/releases/download/$PANDOC/pandoc-$PANDOC-arm64-macOS.zip"
+          echo "$PANDOC_SHA256  $RUNNER_TEMP/pandoc.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/pandoc.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/pandoc-$PANDOC-arm64/bin" >> "$GITHUB_PATH"
+          brew install --quiet poppler
+          # Chrome's headless shell, made for printing from scripts (the full browser hangs here).
+          curl -fsSL -o "$RUNNER_TEMP/shell.zip" \
+            "https://storage.googleapis.com/chrome-for-testing-public/$SHELL_VERSION/mac-arm64/chrome-headless-shell-mac-arm64.zip"
+          echo "$SHELL_SHA256  $RUNNER_TEMP/shell.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/shell.zip" -d "$RUNNER_TEMP"
+          echo "CHROME=$RUNNER_TEMP/chrome-headless-shell-mac-arm64/chrome-headless-shell" >> "$GITHUB_ENV"
+      - name: Build
+        run: docs/tools/build.sh "$RUNNER_TEMP/site"
+      - name: Only the public files
+        run: |
+          cd "$RUNNER_TEMP/site"
+          extra="$(ls | grep -Ev '^(index\.html|CRAFT-[A-Za-z0-9-]+\.pdf)$' || true)"
+          if [ -n "$extra" ]; then echo "Not public, not deployed: $extra"; exit 1; fi
+          ls -l
+      - if: github.event_name != 'pull_request' && github.event.repository.private == false
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site/
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: documents-pages
+      cancel-in-progress: false
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1

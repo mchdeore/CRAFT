@@ -1,0 +1,10 @@
+*
+!app
+!migrations
+!pyproject.toml
+!uv.lock
+!.python-version
+!alembic.ini
+**/__pycache__
+**/tests
+**/conftest.py

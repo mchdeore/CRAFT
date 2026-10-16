@@ -1,0 +1,274 @@
+# CRAFT Dependencies and Integration
+
+<p class="meta">Version 1.0 | 14 October 2026</p>
+
+The S0 application skeleton implements database setup, health routes, request identifiers, error mapping, settings and transactions. Continuous integration (CI) runs the code and document checks. Application operations, account sessions, the agent runtime, approvals, executable API contracts and a front end are later slices.
+
+This document uses application programming interface (API), Hypertext Transfer Protocol (HTTP), JavaScript Object Notation (JSON), Asynchronous Server Gateway Interface (ASGI), Model Context Protocol (MCP), Agent-User Interaction (AG-UI), Transmission Control Protocol (TCP) Portable Document Format (PDF) and Hypertext Markup Language (HTML).
+
+## 1. Dependencies
+
+`pyproject.toml` declares direct dependencies and their allowed versions. `uv.lock` records the resolved versions. `uv sync --locked` creates the project-local `.venv` and refuses an outdated lock. Install dependencies with uv; direct `pip install` is not permitted. Dependency changes use `uv add` in a separate pull request with the affected compatibility checks. The lock also contains transitive dependencies; it remains the complete dependency inventory.
+
+| Dependency | Current declaration or pin | Why this version is held |
+|---|---|---|
+| Python | `==3.12.*` | The project and lock require the same runtime series. |
+| uv | `0.12.23` | CI uses one environment and lock tool version. |
+| uv_build | `>=0.12,<0.13` | The build backend remains within the declared compatible series. |
+| Database image | `pgvector/pgvector:0.8.7-pg18` | Compose and CI use the same PostgreSQL 18 image with the vector extension. |
+| FastAPI | `>=0.141,<0.142`; lock `0.141.1` | The selected AG-UI adapter requires the older compatible FastAPI series. |
+| uvicorn | `0.54.0` | The ASGI server remains fixed for local and container execution. |
+| msgspec | `0.22.0` | Strict shapes and the agent dependencies share this compatible version (the agent framework requires msgspec `>=0.20,<0.23`). |
+| SQLAlchemy | `2.0.54` | Tables, queries and transactions use the tested 2.0 interfaces. Results must be loaded before the session closes. |
+| psycopg[binary] | `3.3.6` | The PostgreSQL driver and binary package resolve together. Connections use `postgresql+psycopg`. |
+| Alembic | `1.20.0` | Schema changes and drift checks use one migration tool version. Generated revisions require review before upgrade. |
+| pgvector, Python | `0.5.1` | SQLAlchemy vector column support is separate from the database extension version. |
+| agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. An agent runtime remains planned. |
+| agent-framework-foundry | `1.14.1` | The compatibility probe imports `FoundryChatClient`. Model calls remain planned. |
+| agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application stream remains planned. |
+| mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
+| argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
+| pytest | `9.1.1` | Collection and execution use one test runner version. |
+| Ruff | `0.16.10` | CI uses one lint and formatting rule set. |
+| Pyright | `1.1.414` | CI checks Python 3.12 types with one checker version. |
+
+The development interpreter selection and both Docker stages use Python `3.12.13`. The Dockerfile copies uv `0.12.23`. These are tracked in `.python-version` and `Dockerfile`; the Python series requirement remains in `pyproject.toml` and `uv.lock`.
+
+| Selected transitive dependency | Current lock | Consequence |
+|---|---|---|
+| ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Future browser event compatibility needs explicit verification. |
+| jsonschema | `4.26.0` | It is installed through MCP. Its presence does not provide the planned TypeScript contract pipeline. |
+| azure-identity | `1.26.0` | It is installed through the Foundry dependency. Managed identity integration remains deferred. |
+
+Browser integration selects `@ag-ui/core` and its browser adapter at `1.0.2`, and `ts-json-schema-generator` at `2.9.0`. These packages require a package manifest, lock, commands and CI wiring in the executable contract slice. Browser protocol 1.0 compatibility with the Python adapter must be checked there. Deployment authentication requires a fixed version with compatibility checks.
+
+## 2. Local development
+
+Prerequisites are Git, uv `0.12.23`, and a running Docker engine with the Compose and Buildx plugins. Run commands from the repository root. Keep the checkout and `.venv` outside folders that download file contents on demand. Use a new local database volume for the first setup. A previously initialized volume keeps its original database passwords.
+
+On Windows, run under the Windows Subsystem for Linux (WSL) with line feed (LF) line endings; this platform has not been tested.
+
+Copy the environment template once. Set `CRAFT_DB_ADMIN_PASSWORD`, `CRAFT_OWNER_DB_PASSWORD` and `CRAFT_APP_DB_PASSWORD` to separate local values before starting. Keep `.env` untracked. The template selects `localhost`, port `5432`, database `craft_dev` and log level `INFO`. If the host port is occupied, change `CRAFT_DATABASE_PORT` to a free port.
+
+```bash
+cp .env.example .env
+uv sync --locked
+docker compose up -d --wait db
+uv run alembic upgrade head
+uv run alembic check
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+uv run craft --version
+```
+
+Start the development server in a terminal. It stays running until interrupted.
+
+```bash
+uv run uvicorn app.main:app --reload
+```
+
+Check readiness from another terminal.
+
+```bash
+curl -fsS localhost:8000/health/ready
+```
+
+The successful response is `{"status":"ok"}`. Stop the development server before starting the full Compose application, since both use port 8000. The full stack builds and runs the deployment image locally.
+
+```bash
+docker compose up --build --wait --wait-timeout 180
+curl -fsS localhost:8000/health/ready
+docker compose down
+```
+
+`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These commands remain future work. Model settings and the development-page switch are also later settings. Adding them to the S0 environment causes its strict settings parser to reject unknown fields.
+
+## 3. Architecture rules and their checks
+
+The following checks are defined in the S0 suite. The Scope column describes their assertions.
+
+| Current rule or behavior | Collected test | Scope |
+|---|---|---|
+| Selected libraries can be used together | `test_dependencies_work_together` | Strict probe shapes, a separate MCP probe app, agent adapter imports, vector type construction and password hashing. It does not prove the application agent is implemented. |
+| App construction makes no database request | `test_main_builds_the_app_without_a_database_call` | Imports the application entry point and checks its type. |
+| Migration filenames follow the revision rule | `test_migration_names_follow_rule` | Names use `NNNN_<verb>_<thing>.py` and matching revision strings. The revision directory is empty in S0. |
+| Migrations require the owner password | `test_migrations_refuse_to_run_without_the_owner_password` | Missing owner credentials stop migration setup. |
+| A unit of work commits, rolls back and rejects writes when read-only | `test_unit_of_work_commits_and_rolls_back` | Uses real PostgreSQL and a synthetic probe table. Operation-level enforcement is future work. |
+| Application credentials cannot create tables | `test_app_login_cannot_create_tables` | PostgreSQL denies a schema write from the application login. |
+| Checks use a separate database | `test_test_database_is_separate` | Verifies the configured name and PostgreSQL's current database are `craft_test`. |
+| Invalid settings name the failing field | `test_settings_fail_fast_names_field` | Covers an invalid port, missing application password, unknown field and invalid log level. |
+| Settings do not expose secret values | `test_settings_never_print_secrets` | Checks representation and validation errors. |
+| Administrative passwords are not application settings | `test_admin_and_owner_passwords_are_not_app_settings` | The parser excludes the two database setup credentials. |
+| Responses carry a request identifier | `test_request_id_on_every_response` | Covers success, missing routes, wrong methods and an internal failure. |
+| Request context reaches synchronous handlers | `test_request_id_reaches_thread_pool` | Checks propagation into FastAPI's thread pool. |
+| HTTP logs are JSON and exclude content | `test_log_line_is_json_without_content` | Verifies allowed HTTP fields and omission of query, body and exception secrets. It does not check future operation log rows. |
+| Errors use the intended status and code | `test_each_error_has_its_status_and_code` | Checks seven error classes and the request identifier. |
+| Invalid input includes field errors | `test_invalid_input_lists_fields` | Checks the field error representation. |
+| Liveness does not need the database | `test_health_live` | Returns HTTP 200 and an ok body with the database unavailable. |
+| Readiness checks the database and migration head | `test_health_ready_checks_db_and_head` | Checks the ready response on the initialized test database. |
+| Readiness fails with an unavailable database | `test_health_ready_503_when_db_down` | Returns HTTP 503 and an unavailable body. |
+| Readiness has a bounded database wait | `test_health_ready_503_within_3_s_when_db_hangs` | The current assertion allows less than 3.5 seconds for the simulated hung connection. |
+| Readiness fails behind the migration head | `test_health_ready_503_when_migrations_are_behind` | Supplies a synthetic expected revision missing from the target database. |
+| The command-line version command works | `test_craft_command_prints_version` | Checks successful exit and the version prefix. |
+
+Each later feature adds the following invariant checks with its implementation.
+
+| Planned invariant | Planned verification |
+|---|---|
+| Identity comes only from the server cookie or run token | Reject body-supplied identity and compare HTTP, MCP and Python access behavior. |
+| Every handler declares access and accepts trusted caller context | Reject incomplete declarations at import. Check resource permissions within the trusted context. |
+| Routes come only from the operation registry | Compare all exposed routes with the registry and verify undeclared functions expose neither a route nor a tool. |
+| Every tool also has a route and a model-safe unique name | Validate registry relationships and tool-name syntax at startup. |
+| Read-only operations cannot write | Invoke a read-only operation that attempts a PostgreSQL write and require rejection. |
+| Cross-feature calls enter through handlers | Check imports and access/logging behavior for nested calls. |
+| The requester decides an effectful action; the agent cannot approve | Allow the requester to approve or reject and refuse agent decisions. Expanded approver policy is deferred. |
+| Effectful agent calls need approved, unexecuted requests matching run, tool and argument hash | Refuse missing or mismatched approval and verify execution occurs once. |
+| Append-only approval records never change | Verify update/delete are denied across access roles, including administrative access; operational traces remain separate. |
+| Services select short transactions; storage receives a Session and never commits independently | Check transaction ownership, rollback and storage boundaries. Hold no transaction across a model call, search or approval wait. |
+| Operations include observation; observe is private and grants no access | Check exposure and privilege boundaries and observe outside calls beneath the current operation. |
+| Every call is logged and linked without content | Verify one operation row on success, one on failure, user/session/request fields, run/tool-call links, counted database work, observed outside calls and absence of payload. |
+| All declared input and output shapes use msgspec | Enumerate registered shapes and reject incompatible types. The S0 probe checks only its own shape. |
+| Back end and front end follow the executable API contract | Compare routes both ways, Python shapes with TypeScript types, responses and examples with generated JSON Schema, and stream events with the browser event library. |
+| Schema changes use reviewed migrations | Upgrade an empty database, reject drift, preserve applied revisions and check append-only grants. The current filename guard alone does not enforce these rules. |
+| The browser cannot supply history, tools or instructions | Attempt injection through the stream input and verify server-loaded state is used. |
+| Search reveals only readable passages | Verify the permission filter runs before ranking and unreadable content never reaches results or model input. |
+
+Future acceptance also checks all six confidence inputs (coverage, citation quality, traceability, source agreement, retrieval quality and unsupported claims), the normalized 0.7 semantic/0.3 lexical baseline, and conversation archive deletion of its workspace. Sign-out deletes nothing. These checks arrive with their features.
+
+## 4. Test levels and databases
+
+S0 collects 30 cases across eight files. The command below lists them without executing fixtures.
+
+```bash
+uv run pytest --collect-only -q -o addopts=
+```
+
+Unit checks cover settings, errors and entry points. API checks use FastAPI's `TestClient` for health and middleware behavior. Database checks use real PostgreSQL and synthetic probe data. The architecture check covers migration names, with an empty revision directory in S0. The dependency probe exercises installed libraries in a separate test application.
+
+The autouse migration fixture points to `craft_test` and upgrades it to the current head before suite execution. There are no application migrations in S0. An owner connection creates and removes synthetic probe tables; an application connection exercises grants and transactions. `craft_dev` is for development, never the test corpus. Disposable CI databases may use trust authentication. Persistent development volumes use the passwords from `.env`.
+
+Future component checks run handlers and storage against real `craft_test`, rather than a mocked database. Future contract checks validate generated schema, examples, responses and stream events. Future agent checks use a scripted fake model and deterministic embeddings with the real in-process MCP path. Real-model evaluation is deferred and runs after changes to models or instructions. The fake model needs no model key when that feature exists.
+
+The scripted model uses the real agent, tools, middleware and stream. A search request invokes document search and cites a result; a draft request invokes the approval-gated save operation. Other scripted replies carry a citation. Fake embeddings derive from a hash. These behaviors arrive with the agent slice.
+
+Fakes are reserved for outside services. Deterministic checks do not call external model services. Local PostgreSQL connections and a local synthetic hung socket are part of the present suite. No coverage percentage is specified. Each feature owns component and API checks under its `tests/` folder; fixtures use the real `craft_test` database. Each implemented rule needs a failing check for its breach; future invariants remain pending until their feature and verification exist.
+
+## 5. CI workflow
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. The job uses Ubuntu `24.04`, a 20-minute limit and a disposable `pgvector/pgvector:0.8.7-pg18` service on port 5432. Checkout and uv setup actions are pinned to commit hashes. uv setup selects `0.12.23`. Owner and application passwords are generated for each job; database-service authentication is trust-based.
+
+| Step | Command or action | Fails when |
+|---|---|---|
+| Checkout | Pinned checkout action with credentials persistence disabled | Source retrieval fails. |
+| Environment | Pinned uv setup action, version `0.12.23` | The selected tool cannot be installed. |
+| Disposable passwords | Generate owner and application passwords into the job environment | Random generation or environment-file writing fails. |
+| Lock | `uv sync --locked` | The lock differs from the declaration or installation fails. |
+| Lint and format | `uv run ruff check .` and `uv run ruff format --check .` | Code violates the configured checks or formatting. |
+| Types | `uv run pyright` | A type error is reported. |
+| Database initialization | `bash docker/initdb.sh`, with `PGHOST=localhost` | Role, database, extension or default-grant setup fails. This runs against the job's fresh service, not an initialized development database. |
+| Migrations | `uv run alembic upgrade head` and `uv run alembic check` | Upgrade fails or schema drift is found. |
+| Tests | `uv run pytest` | A collected check fails or fixture setup fails. |
+| Contract guard | The shell block below | `api/` exists before its contract checks are wired. An absent directory reports a skip. |
+| Full stack | The Compose block below | Build, startup, readiness, request header, user identity or password-variable assertions fail. |
+
+The contract guard currently performs no schema validation. Its successful absent-directory path is runnable in S0.
+
+```bash
+if [ -d api ]; then
+  echo "api/ exists: wire the contract tests into this step"
+  exit 1
+fi
+echo "Skipped: api/ does not exist yet."
+```
+
+For local repetition after section 2's environment setup, run the lock, lint, format, type, migration and test commands there. Do not rerun `docker/initdb.sh` directly against an existing Compose database: Compose already invokes it on first boot. The workflow invokes it directly only because its CI database service has not loaded the project's initialization script.
+
+The full-stack step reserves host port 5433 while CI's database service occupies 5432. These assertions can also run locally with the configured development port. The following complete block uses a separate disposable Compose project. It supplies temporary database passwords to both services and removes only that project's volume after the check.
+
+```bash
+(
+  set -eu
+  export COMPOSE_PROJECT_NAME=craft-ci-check
+  export CRAFT_DATABASE_PORT=5433
+  export CRAFT_DB_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+  export CRAFT_OWNER_DB_PASSWORD="$(openssl rand -hex 16)"
+  export CRAFT_APP_DB_PASSWORD="$(openssl rand -hex 16)"
+  trap 'docker compose down -v' EXIT
+  docker compose up --build --wait --wait-timeout 180
+  curl -fsi localhost:8000/health/ready | tee ready.txt
+  grep -qi '^x-request-id:' ready.txt
+  curl -fsS localhost:8000/health/ready | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"status":"ok"}'
+  test "$(docker compose exec -T app id -u)" = 10001
+  test "$(docker compose exec -T app env | grep -c PASSWORD)" = 1
+)
+```
+
+Stop any development server or application container occupying port 8000 before this block. Port 5433 must also be free. `ready.txt` contains a synthetic health response and may be removed after inspection. The shell trap stops the disposable project on success or failure. The tracked CI job currently performs cleanup at the end of its success path; the local wrapper adds cleanup for failed checks.
+
+A completed passing CI run is required before merge. Repository enforcement depends on its configured rules and plan. Secret and dependency scans remain deferred. Deployment automation remains deferred.
+
+## 6. Documents build and publishing
+
+Public documents are Markdown under `docs/`. The build tools prepare metadata, render HTML with Pandoc, print PDFs with Chrome or Chromium and use Poppler to count pages and build the download index. The frozen print style uses Charter and Menlo on macOS. Linux builds check generation with the available fallback fonts; macOS builds provide the publication PDFs.
+
+Build prerequisites are Git, Python 3, Pandoc `3.11`, Poppler and Chrome or Chromium. `CHROME` can select the browser executable. The documents workflow verifies downloaded tools with recorded SHA-256 values. On macOS it selects Chrome Headless Shell `155.0.8059.79`. Poppler and the Linux browser come from the runner environment rather than exact project version pins.
+
+```bash
+docs/tools/build.sh
+```
+
+The output directory is `docs/build`. The build produces `CRAFT-Dependencies-and-Integration.pdf` alongside `CRAFT-Specification.pdf`, `CRAFT-API-Contract.pdf` and `index.html`. Dates come from each source's last Git change. Uncommitted sources use the current date and draft revision. The specification index receives page numbers in a second pass.
+
+The documents workflow builds on every pull request, pushes to `main` and manual dispatch. Pull requests use Linux and verify only. Other events use macOS. The output check permits only the HTML index and named CRAFT PDFs. Private notes, source material and import packages stay outside publication.
+
+Artifact upload requires a non-pull-request event in a public repository. Deployment additionally requires `main`. The private repository therefore builds documents without publishing them. Public document publishing requires repository settings and explicit approval. README document links are maintained by hand. A behavior change updates the specification in the same pull request.
+
+## 7. Integration
+
+Compose contains two services. `db` uses `pgvector/pgvector:0.8.7-pg18`. Its named volume mounts at `/var/lib/postgresql`, the PostgreSQL 18 image path. The host port defaults to 5432. Its health check uses TCP and becomes healthy after initialization, rather than during the image's first-boot setup.
+
+`docker/initdb.sh` runs once on an empty volume as the database superuser. It creates `craft_owner` and `craft_app`, databases `craft_dev` and `craft_test`, and the vector extension in both. Default grants give the application login schema usage, table reads and sequence usage. Later migrations grant writes per table. Migrations use the owner login; the application uses its own login.
+
+`app` builds from `Dockerfile`. The build stage installs locked runtime dependencies. The run stage omits uv, development dependencies and build tools, and runs as numeric user `10001`. Compose gives it only its application password and database/log settings. The database service receives the administrative, owner and application passwords. App liveness is the container health check. The separate readiness route checks database access and migration head.
+
+The current settings are `CRAFT_APP_DB_PASSWORD`, `CRAFT_DATABASE_HOST`, `CRAFT_DATABASE_PORT`, `CRAFT_DATABASE_NAME` and `CRAFT_LOG_LEVEL`. `.env` supplies local values, with process environment values taking precedence. Validation rejects unknown application fields. The two setup password variables are explicitly excluded from application settings.
+
+Future model integration uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. The planned settings select a main model, groundedness model and embeddings through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`; the subagent selection remains deferred. A scripted fake selection supports deterministic demonstrations. These fields are absent from S0. Endpoint, credential and deployment settings need reviewed configuration with the model feature; an installed Foundry library is not an active endpoint.
+
+The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions and examples are planned. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
+
+Future simulated seed sets supply labelled demonstration data. Demonstrations use a seed set. A separate demonstration repository or branch is not required. A temporary development page at `/dev`, enabled by the planned `CRAFT_DEV_PAGE=1` setting, is planned for sign-in (S2), chat (S3) and approval (S4). It exercises the real browser cookie, Origin checks, stream and approval path while keeping contract adherence. It is removed in S5 when the front end is integrated. Neither seeds nor that page are active S0 features.
+
+Browser verification covers the Secure host cookie on localhost, particularly Safari. Use local Hypertext Transfer Protocol Secure (HTTPS) if the selected browser requires it.
+
+Use a suitable Docker Desktop licence or a compatible container engine. Colima needs Compose and Buildx plugins and a shared checkout location. Podman and Rancher Desktop remain alternatives whose compatibility must be verified on the selected platform.
+
+Deployment remains a consideration. The same application image and tools are intended for hosted operation, with environment-specific database and model configuration. Managed identity, data handling, transport protection, private networking, migrations, secret handling and database recovery require review before deployment. A worker and queue become relevant when runs must survive disconnects or scale. Registry, staging and production automation, telemetry export and retention remain deferred. Hosted verification runs against the deployment environment.
+
+A deadline for each application transaction is added with the transaction-using feature. Readiness already has its own three-second deadline.
+
+## 8. Datacube measures and component checks
+
+The datacube is a later application component. The following commands are added with their named build steps. These are acceptance targets; they are not executions on the S0 skeleton.
+
+| Measure | Exact executable acceptance or planned build check | Expected result |
+|---|---|---|
+| Parametric set | Fixture state at January date with mass/power conjunction | Exactly the two expected readable missions |
+| Append-only values | Fixture insert as craft_app then UPDATE/DELETE | INSERT succeeds; both mutation attempts denied |
+| Option context | Fixture option from another mission | Foreign key violation caught |
+| Access and counts | Fixture mission/silo/evidence restrictions and empty account | Only authorized records counted; empty account count zero |
+| Time | Fixture three dates around two mass changes | Exact expected synthetic value on each date |
+| Similarity baseline | Known same, near, partial and far pairs with 0.6/0.4 weights, 10/20 scales and 0.6 coverage floor | Exact order, per-parameter shares and zero-distance behavior |
+| B09 schema/access | uv run pytest app/datacube/tests/test_schema_access.py | Empty upgrade, grants, composite keys and no leakage pass |
+| B10 parser | uv run pytest app/documents/tests/test_intake.py | Literal-only intake; locators and inert executable contents pass |
+| B11 metadata | uv run pytest app/documents/tests/test_metadata.py | Evidence-backed identity and duplicate-hash behavior pass |
+| B12 dictionary/filters | uv run pytest app/datacube/tests/test_parametric.py | Units, markers, logical-cell state before filtering, exact conjunction pass |
+| B15 candidate intake | uv run pytest app/datacube/tests/test_intake.py | Typed batch, unit recipe, idempotency and errors pass |
+| B16 comparison/evidence | uv run pytest app/datacube/tests/test_compare.py | Fixed times, option/class scope, computed delta and readable evidence pass |
+| B17 similarity | uv run pytest app/datacube/tests/test_similarity.py | Frozen sigma, reference-set access, shares, coverage and cutoff pass |
+| B23 write gate | uv run pytest app/datacube/tests/test_approval_gate.py | Requester approve/reject, hash/replay, revoked access, transactional once pass |
+| B24 bounded view | uv run pytest app/datacube/tests/test_views.py | Labelled JSON workspace view and existing external-export gate pass |
+
+Record the median and 95th-percentile elapsed time and encoded bytes for fixed synthetic queries and corpus sizes. Measure tool selection, argument validity, permission leaks, arithmetic support, citations, unsupported claims, clarification/refusal and approval correctness. Adversarial acceptance requires zero observed permission leaks and unapproved effects. Parser failures are grouped by format and representation. Contract checks compare actual registered routes and Python/TypeScript forms, including nested GET scope decoding. The label set fixes thresholds before real-model acceptance. No SQL result establishes browser or agent behavior.

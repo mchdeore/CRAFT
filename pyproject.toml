@@ -1,0 +1,51 @@
+[project]
+name = "craft"
+version = "0.1.0"
+description = "CRAFT backend"
+requires-python = "==3.12.*"
+dependencies = [
+  "fastapi>=0.141,<0.142",
+  "uvicorn[standard]==0.54.0",
+  "msgspec==0.22.0",
+  "sqlalchemy==2.0.54",
+  "psycopg[binary]==3.3.6",
+  "alembic==1.20.0",
+  "pgvector==0.5.1",
+  "agent-framework-core==1.21.0",
+  "agent-framework-foundry==1.14.1",
+  "agent-framework-ag-ui==1.5.1",
+  "mcp==1.30.0",
+  "argon2-cffi==25.1.0",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.10", "pyright==1.1.414"]
+
+[project.scripts]
+craft = "app.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+include = ["app", "migrations"]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["app"]
+addopts = "-q"
