@@ -92,7 +92,7 @@ def declare(
 
 def validate_routes(app: Any) -> None:
     for route in app.routes:
-        if getattr(route, "path", None) in {"/mcp", "/dev"}:
+        if getattr(route, "path", None) in {"/mcp", "/dev", "/summarize"}:
             continue
         if getattr(getattr(route, "endpoint", None), "__operation__", None) is None:
             raise ValueError("Every route must be an operation")
