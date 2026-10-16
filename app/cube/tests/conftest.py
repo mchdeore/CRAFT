@@ -139,6 +139,17 @@ def cube_source(settings, owner_engine, tmp_path):
     }
     app.state.engine.dispose()
     with owner_engine.begin() as connection:
+        facets = list(
+            connection.execute(
+                select(m.facet_texts.c.id).where(m.facet_texts.c.mission_key == mission)
+            ).scalars()
+        )
+        connection.execute(
+            m.vectors.delete().where(
+                m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets)
+            )
+        )
+        connection.execute(m.facet_texts.delete().where(m.facet_texts.c.mission_key == mission))
         connection.execute(m.cube_values.delete().where(m.cube_values.c.mission_key == mission))
         connection.execute(m.elements.delete().where(m.elements.c.mission_key == mission))
         connection.execute(m.mission_grants.delete().where(m.mission_grants.c.user_id == user))
