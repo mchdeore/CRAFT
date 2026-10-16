@@ -40,3 +40,12 @@ def test_invalid_enum_value_is_not_echoed() -> None:
     with pytest.raises(SystemExit) as raised:
         Settings.from_env({"CRAFT_APP_DB_PASSWORD": "synthetic", "CRAFT_LOG_LEVEL": marker})
     assert marker not in str(raised.value)
+
+
+def test_invalid_enum_cannot_inject_a_diagnostic_path() -> None:
+    marker = "$.private_payload_marker"
+    with pytest.raises(SystemExit) as raised:
+        Settings.from_env({"CRAFT_APP_DB_PASSWORD": "synthetic", "CRAFT_LOG_LEVEL": marker})
+    diagnostic = str(raised.value)
+    assert "private_payload_marker" not in diagnostic
+    assert "log_level" in diagnostic

@@ -34,7 +34,11 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             return msgspec.convert(raw, cls, strict=False)  # "5432" → 5432
         except msgspec.ValidationError as error:
             message = str(error)
-            match = re.search(r"(?:\$\.|(?:unknown|required) field `)([a-z_]+)", message)
+            match = re.search(r" - at `\$\.([a-z_]+)`$", message)
+            if match is None:
+                match = re.fullmatch(
+                    r"Object (?:contains unknown|missing required) field `([a-z_]+)`", message
+                )
             field = match[1] if match else "configuration"
             raise SystemExit(f"bad setting: {field}: invalid configuration") from None
 
