@@ -118,7 +118,6 @@ chunks = Table(
         TSVECTOR,
         Computed("to_tsvector('english', heading_path || ' ' || text)", persisted=True),
         nullable=False,
-        nullable=False,
     ),
     UniqueConstraint("doc_version_id", "block"),
     CheckConstraint("kind in ('text','table','slide','sheet')", name="kind"),
