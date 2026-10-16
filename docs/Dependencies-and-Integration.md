@@ -478,9 +478,9 @@ The targeted suite checks deterministic facets, generated summaries, vector reci
 
 `POST /api/agent/runs` and `GET /api/tools` use signed-in operation checks. The actual
 framework agent, function middleware and AG-UI adapter run over server-loaded
-messages, instructions and session state. Registry read tools call checked Python
-handlers. Authenticated HTTP MCP follows in the next slice; approval and durable
-conversation routes are not claimed by these checks.
+messages, instructions and session state. Registry read tools enter checked Python
+handlers through the native HTTP MCP transport in section 24. Approval and durable
+conversation routes are absent.
 
 The browser contract pins `@ag-ui/core` to `0.0.59`, the stable pre-1 schema release.
 Python keeps `ag-ui-protocol` `0.1.22`; no server dependency was upgraded. The newer
