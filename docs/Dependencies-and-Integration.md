@@ -26,7 +26,7 @@ This document uses application programming interface (API), Hypertext Transfer P
 | agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. The read-only runtime uses the actual Agent and server-owned AgentSession. |
 | agent-framework-foundry | `1.14.1` | The adapter uses `FoundryChatClient` for configured Responses calls. HTTP interception checks the endpoint, model roles, storage flag and budget. |
 | agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application emits adapter events and checks their browser schemas. |
-| mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
+| mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application mounts the same registry server with stateless JSON HTTP and run authentication. |
 | anyio | `4.15.1` | Streaming finalization shields its short cleanup work from disconnect cancellation. The held transitive version is declared directly. |
 | argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
 | python-docx | `1.2.0` | Reads Word paragraphs and tables in source order. |
@@ -282,6 +282,7 @@ Each build step adds its checks. A step that changes behavior updates section 8 
 | B16 candidate values | `uv run pytest app/cube/tests/test_intake.py` | Header synonyms, unit conversion and every problem case pass |
 | B17 facets and similarity | `uv run pytest app/library/tests/test_facets.py app/cube/tests/test_similarity.py` | Facet validator, facet vectors, ranking and not-comparable cases pass |
 | B19 built API contract | `uv run pytest -q app/tests/test_contract.py` | Built routes and tools equal the contract; every JSON route has a schema-valid example |
+| B20 native HTTP MCP | `uv run pytest -q app/infrastructure/mcp/tests/test_mcp.py` | Native clients, run-token refusal and revocation, transport parity and tool-call linkage pass |
 | B23 values through the gate | `uv run pytest app/cube/tests/test_approval_gate.py` | Values are written once, only after the requester approves |
 | B24 saved views | `uv run pytest app/cube/tests/test_views.py` | A labelled, cited JSON view saves through approval |
 | B25 evaluation | `uv run craft eval` | Fused recall at 8 is at least keyword-only recall on the demo ground truth |
@@ -497,4 +498,27 @@ or domain transaction remains after the disconnected request returns.
 
 `uv run pytest -q app/agent/tests/test_model_adapter.py` retains configured-call
 interception and fake adapter coverage. These are local synthetic tests; live model
-quality, authenticated agent MCP and approval resume are separate later criteria.
+quality is measured separately. The native MCP checks are described in section 24.
+
+## 24. Native HTTP MCP
+
+The registry server serves standard input/output and stateless JSON HTTP. The runtime
+uses the held `MCPStreamableHTTPTool` with run-token headers. Pins are unchanged.
+`CRAFT_MCP_URL` defaults to `http://127.0.0.1:8000/mcp` and accepts only loopback.
+Compose forwards this setting. Credentials stay in the backend, outside browser
+state and model arguments.
+
+`uv run pytest -q app/infrastructure/mcp/tests/test_mcp.py` uses real TCP connections
+and the native framework wrapper. It checks registry tools, the runtime allowlist,
+schemas, invalid arguments, credential/run/account refusals, digest-only storage,
+replacement and pause revocation, cookie HTTP/MCP/Python permission and logging
+parity, run/tool-call/operation/observation links, and effectful refusal without writes.
+The fixture owns an already-bound socket and guarantees shutdown.
+
+`uv run pytest -q app/agent/tests/test_chat_stream.py app/infrastructure/operations/tests/test_operation_logging.py`
+checks native fake-model tools, event order, citations, server history, budgets,
+ASGI disconnects, saved state and safe logs. One bounded producer owns native task
+scopes. Connection time counts toward the run deadline. Short final writes precede
+terminal events; credentials revoke on every terminal path. Private transport fields
+are excluded from top-level AG-UI events, which validate against the held browser
+schemas. Resume returns conflict. Configured live quality is measured separately.

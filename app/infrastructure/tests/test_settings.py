@@ -62,3 +62,20 @@ def test_malformed_allowed_origin_has_a_safe_diagnostic() -> None:
         )
     diagnostic = str(raised.value)
     assert marker not in diagnostic and "allowed_origins" in diagnostic
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://remote.invalid/mcp",
+        "http://synthetic:private@localhost/mcp",
+        "http://localhost/mcp?private_marker",
+        "http://[private_marker]/mcp",
+    ],
+    ids=["external", "credentials", "query", "invalid"],
+)
+def test_mcp_target_has_safe_loopback_validation(value):
+    with pytest.raises(SystemExit) as stopped:
+        Settings.from_env({**VALID, "CRAFT_MCP_URL": value})
+    safe = value not in str(stopped.value) and "mcp_url" in str(stopped.value)
+    assert safe

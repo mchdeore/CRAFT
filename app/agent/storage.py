@@ -116,3 +116,81 @@ def finish(session: Session, user, identifier, conversation, status, state):
             token_expires_at=None,
         )
     )
+
+
+def issue_token(session, user, identifier, digest, expires, context):
+    row = session.execute(
+        select(agent_runs.c.conversation_id)
+        .where(
+            agent_runs.c.id == identifier,
+            agent_runs.c.started_by == user,
+            agent_runs.c.status == "running",
+        )
+        .with_for_update()
+    ).first()
+    if row is None:
+        from app.infrastructure.errors import NotFound
+
+        raise NotFound()
+    session.execute(
+        agent_runs.update()
+        .where(agent_runs.c.id == identifier)
+        .values(token_sha256=digest, token_expires_at=expires)
+    )
+    state = (
+        session.execute(
+            select(agent_sessions.c.state)
+            .where(agent_sessions.c.conversation_id == row.conversation_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        or {}
+    )
+    state = state | {"craftTransport": context}
+    statement = insert(agent_sessions).values(conversation_id=row.conversation_id, state=state)
+    session.execute(
+        statement.on_conflict_do_update(
+            index_elements=[agent_sessions.c.conversation_id],
+            set_={"state": state, "updated_at": func.now()},
+        )
+    )
+
+
+def revoke_token(session, user, identifier):
+    session.execute(
+        agent_runs.update()
+        .where(agent_runs.c.id == identifier, agent_runs.c.started_by == user)
+        .values(token_sha256=None, token_expires_at=None)
+    )
+
+
+def principal(session, digest, at):
+    users = metadata.tables["users"]
+    conversations = metadata.tables["conversations"]
+    roles = metadata.tables["user_roles"]
+    row = (
+        session.execute(
+            select(agent_runs, agent_sessions.c.state)
+            .join(users, users.c.id == agent_runs.c.started_by)
+            .join(conversations, conversations.c.id == agent_runs.c.conversation_id)
+            .outerjoin(agent_sessions, agent_sessions.c.conversation_id == conversations.c.id)
+            .where(
+                agent_runs.c.token_sha256 == digest,
+                agent_runs.c.token_expires_at > at,
+                agent_runs.c.status == "running",
+                users.c.disabled_at.is_(None),
+                conversations.c.archived_at.is_(None),
+                conversations.c.owner_id == agent_runs.c.started_by,
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    return dict(row) | {
+        "roles": list(
+            session.execute(
+                select(roles.c.role).where(roles.c.user_id == row["started_by"])
+            ).scalars()
+        )
+    }

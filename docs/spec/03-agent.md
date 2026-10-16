@@ -5,12 +5,11 @@ Agent-User Interaction (AG-UI) carries stream events. The Model Context Protocol
 ## 3.1 Now: one agent
 
 The current read-only runtime uses the real framework agent and stream adapter with
-server-owned conversation history and session state. Tool bindings come from the
-operation registry and enter checked Python handlers as the signed-in caller.
-The authenticated HTTP MCP path below is the adopted next transport; this slice
-uses neither a run token nor a cookie in a model request. Approval pause and resume
-are not implemented yet. A supplied resume entry returns conflict.
-
+server-owned conversation history and session state. Native `MCPStreamableHTTPTool`
+connections call the same registry server as local standard input and output.
+The server validates a run-token digest and current account/run state before each
+request and tool call; it never authenticates from a browser cookie. The transport
+exposes only allowlisted read tools. A supplied resume entry returns conflict.
 
 - One agent per conversation: Microsoft Agent Framework (open source).
 - Runs inside the CRAFT backend, on a local machine: tools, approvals and records are proven end to end before anything is deployed.
@@ -80,6 +79,9 @@ MCP (Model Context Protocol): the standard way an agent lists and calls tools. I
 - Server side: the low-level `mcp` `Server`, mounted at `/mcp` in the same FastAPI app. Stateless, JSON responses.
 - Auth: `Authorization: Bearer <run token>`. The token is random, short-lived and bound to the signed-in account and the run. Only its digest is stored on `agent_runs`; it is revoked at run end or pause. The agent never holds the cookie or a password.
 - Allowlist: `allowed_tools` per agent. A tool not on it doesn't exist for that agent.
+- Current local transport: stateless JSON HTTP at `/mcp`. The token is 32 random bytes; its SHA-256 digest and expiry are stored. Paused, finished, failed, cancelled, expired or disabled principals are refused. Completion and disconnect revoke the token before the runtime exits.
+- Trusted log context: parent request/call and sign-in session identifiers come from server-owned run state. MCP metadata supplies the model tool-call identifier only; it grants no identity or parent authority. The private outbound tool observation and checked operation share that identifier.
+- The loopback target defaults to `http://127.0.0.1:8000/mcp`, configurable through `CRAFT_MCP_URL`. Remote hosts, credentials, query strings and fragments are refused. DNS rebinding protection stays enabled.
 - Hosting: Now inside the CRAFT app on the laptop (`http://localhost:8000/mcp`), called by the in-process agent. Deferred: the same app on Azure, optionally called by a Foundry-hosted agent over a private network path + TLS (run token handed over by the backend). Tool code unchanged.
 
 ## 3.4 Human approval
@@ -156,7 +158,10 @@ is appended. Run identifiers are globally unique; reuse and an active conversati
 return conflict, while a fourth active run for an account returns rate limited.
 Starts use a short account-serialized transaction. Model and tool waits occur after
 it ends. Terminal events follow durable message and session saves. Disconnects close
-the primed stream and cancel the run, including before the first body chunk.
+the primed stream and cancel the run, including before the first body chunk. A
+bounded in-request producer keeps native MCP connection, calls and close on their
+owning task. The consumer cancels and awaits it on disconnect. This lifetime has no
+work that continues after the request.
 
 Each model call uses the configured output budget, at most 4,000 tokens. The fake
 model bounds its lexical token count and byte envelope before emitting an update.

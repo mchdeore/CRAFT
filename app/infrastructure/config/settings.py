@@ -29,6 +29,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     model_endpoint: str = ""
     model_key: str = ""
     model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=4000)] = 4000
+    mcp_url: str = "http://127.0.0.1:8000/mcp"
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -55,6 +56,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             if not valid:
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
             validate_models(settings)
+            validate_mcp_url(settings.mcp_url)
             return settings
         except msgspec.ValidationError as error:
             message = str(error)
@@ -70,6 +72,27 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"
 
     __str__ = __repr__
+
+
+def validate_mcp_url(value: str) -> None:
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(value)
+        valid = (
+            parsed.scheme == "http"
+            and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+            and parsed.path in {"/mcp", "/mcp/"}
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+            and (parsed.port is None or 0 < parsed.port <= 65535)
+        )
+    except (ValueError, TypeError):
+        valid = False
+    if not valid:
+        raise SystemExit("bad setting: mcp_url: invalid configuration")
 
 
 def validate_models(settings: Settings) -> None:

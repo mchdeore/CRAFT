@@ -278,6 +278,8 @@ def test_chat_stream_closed_stream_cancels_run(chat, monkeypatch):
             await task
         await iterator.aclose()
         assert row(chat, data.run_id)["status"] == "cancelled"
+        cleared = row(chat, data.run_id)["token_sha256"] is None
+        assert cleared
         assert current_call.get() is None
         monkeypatch.setattr(FakeChatClient, "_inner_get_response", original)
 
@@ -305,12 +307,16 @@ def test_chat_stream_tool_and_time_budgets(chat, monkeypatch):
     data = request(chat)
     events = collect(chat["caller"], data)
     assert events[-1]["type"] == "RUN_ERROR" and row(chat, data.run_id)["status"] == "failed"
+    cleared = row(chat, data.run_id)["token_sha256"] is None
+    assert cleared
 
     monkeypatch.setattr(runtime, "TOOL_LIMIT", 20)
     monkeypatch.setattr(runtime, "RUN_SECONDS", 0.000001)
     data = request(chat)
     events = collect(chat["caller"], data)
     assert events[-1]["type"] == "RUN_ERROR" and row(chat, data.run_id)["status"] == "failed"
+    cleared = row(chat, data.run_id)["token_sha256"] is None
+    assert cleared
 
 
 def test_chat_stream_output_budget(chat, monkeypatch):
@@ -328,6 +334,8 @@ def test_chat_stream_output_budget(chat, monkeypatch):
     data = request(chat)
     events = collect(caller, data)
     assert events[-1]["type"] == "RUN_ERROR" and row(chat, data.run_id)["status"] == "failed"
+    cleared = row(chat, data.run_id)["token_sha256"] is None
+    assert cleared
     with chat["owner"].connect() as connection:
         result = (
             connection.execute(

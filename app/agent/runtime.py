@@ -2,10 +2,8 @@
 
 import asyncio
 import hashlib
-import inspect
 from collections.abc import AsyncGenerator
 from dataclasses import replace
-from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4, uuid5
 
@@ -14,20 +12,17 @@ import msgspec
 from agent_framework import (
     Agent,
     AgentSession,
-    FunctionInvocationContext,
-    FunctionMiddleware,
-    FunctionTool,
 )
 from agent_framework_ag_ui import AgentFrameworkAgent
 from starlette.concurrency import run_in_threadpool
 
 from app.agent import model, service
-from app.agent.handlers import AGUIEvent
+from app.agent.handlers import AGUIEvent, RunRef, issue_run_token, revoke_run_token
 from app.conversations import handlers as conversations
 from app.infrastructure.errors import ApiError, Conflict, InvalidInput
-from app.infrastructure.mcp.server import input_schema
+from app.infrastructure.mcp.client import ToolCallMiddleware
+from app.infrastructure.mcp.client import client as mcp_client
 from app.infrastructure.operations.context import current_call
-from app.infrastructure.operations.registry import registry
 from app.infrastructure.paths import ROOT
 
 RUN_SECONDS = 120
@@ -44,11 +39,6 @@ class RunLimit(ApiError):
     code, message = "run_limit", "Run limit reached."
 
 
-class ToolCallMiddleware(FunctionMiddleware):
-    async def process(self, context, call_next):
-        await call_next()
-
-
 class StatefulAgent(Agent):
     def __init__(self, *args, saved, **kwargs):
         super().__init__(*args, **kwargs)
@@ -59,50 +49,6 @@ class StatefulAgent(Agent):
             session.state.update(self.saved.state)
             self.saved = session
         return super().run(messages, stream=stream, session=self.saved, **kwargs)
-
-
-def tools(caller, trace, budget, results):
-    bindings = []
-
-    def bind(op):
-        async def invoke(ctx: FunctionInvocationContext, **arguments):
-            budget["calls"] += 1
-            if budget["calls"] > TOOL_LIMIT:
-                budget["exceeded"] = True
-                raise RunLimit()
-            identifier = ctx.metadata.get("call_id")
-            if not isinstance(identifier, str) or not identifier:
-                raise ApiError()
-            trusted = replace(caller, origin="python", tool_call_id=identifier)
-            entry = {
-                "tool": op.tool_name,
-                "operation": op.name,
-                "arguments": arguments,
-                "at": datetime.now(UTC).isoformat(),
-                "toolCallId": identifier,
-            }
-            trace.append(entry)
-            value = (
-                await op.function(trusted, arguments)
-                if inspect.iscoroutinefunction(op.function)
-                else await run_in_threadpool(op.function, trusted, arguments)
-            )
-            encoded = msgspec.to_builtins(value)
-            results.append(encoded)
-            return encoded
-
-        return FunctionTool(
-            name=op.tool_name,
-            description=inspect.getdoc(op.function) or "",
-            input_model=input_schema(op),
-            func=invoke,
-            approval_mode="never_require",
-        )
-
-    for op in sorted(registry.values(), key=lambda o: o.tool_name):
-        if op.tool and op.effects == "NONE":
-            bindings.append(bind(op))
-    return bindings
 
 
 def citations(results, text):
@@ -139,7 +85,7 @@ def citations(results, text):
     return found
 
 
-async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
+async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     if request.resume is not None:
         raise Conflict()
     newest = next(
@@ -160,8 +106,10 @@ async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     parent = current_call.get()
     if parent is not None:
         parent.caller = trusted
+    deadline = asyncio.get_running_loop().time() + RUN_SECONDS
     status = "failed"
     selected = None
+    transport = None
     agent = None
     saved = AgentSession()
     history = []
@@ -189,6 +137,10 @@ async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                 return identifier
             return mappings.setdefault(identifier, str(uuid5(request.run_id, identifier)))
 
+        token = await run_in_threadpool(issue_run_token, trusted, RunRef(run=request.run_id))
+        transport = mcp_client(caller.settings.mcp_url, token.token, results)
+        async with asyncio.timeout_at(deadline):
+            await transport.connect()
         selected = model.client(caller.settings)
         agent = StatefulAgent(
             selected,
@@ -196,8 +148,8 @@ async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             name="craft",
             saved=saved,
             context_providers=[],
-            tools=tools(trusted, trace, budget, results),
-            middleware=[ToolCallMiddleware()],
+            tools=[transport],
+            middleware=[ToolCallMiddleware(trace, budget, TOOL_LIMIT)],
             default_options={"max_tokens": caller.settings.model_max_output_tokens},
         )
         adapter = AgentFrameworkAgent(
@@ -211,9 +163,15 @@ async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             "context": [],
             "state": {},
         }
-        async with asyncio.timeout(RUN_SECONDS):
+        async with asyncio.timeout_at(deadline):
             async for event in adapter.run(data):
-                value = event.model_dump(mode="json", by_alias=True, exclude_none=True)
+                value = {
+                    key: value
+                    for key, value in event.model_dump(
+                        mode="json", by_alias=True, exclude_none=True
+                    ).items()
+                    if not key.startswith("_")
+                }
                 if budget["exceeded"]:
                     raise RunLimit()
                 kind = value["type"]
@@ -286,45 +244,94 @@ async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         fault("internal_error")
         yield AGUIEvent(type="RUN_ERROR", code="internal_error", message="Run failed.")
     finally:
-        with anyio.CancelScope(shield=True):
-            if agent is not None:
-                saved = agent.saved
-            saved.state["craft"] = {
-                "retrievalPath": trace,
-                "model": caller.settings.model_main,
-                "instructionsVersion": version,
-            }
-            if snapshot is not None:
-                output = list(
-                    {
-                        message["id"]: message
-                        for message in [
-                            message for message in snapshot if message.get("id") not in existing
-                        ]
-                        + output
-                    }.values()
-                )
-            try:
-                if output:
-                    await run_in_threadpool(
-                        conversations.append_for_run,
-                        trusted,
-                        conversations.AppendMessages(
-                            id=request.thread_id, run=request.run_id, messages=output
-                        ),
+        try:
+            with anyio.CancelScope(shield=True):
+                if agent is not None:
+                    saved = agent.saved
+                saved.state["craft"] = {
+                    "retrievalPath": trace,
+                    "model": caller.settings.model_main,
+                    "instructionsVersion": version,
+                }
+                if snapshot is not None:
+                    output = list(
+                        {
+                            message["id"]: message
+                            for message in [
+                                message for message in snapshot if message.get("id") not in existing
+                            ]
+                            + output
+                        }.values()
                     )
-            except Exception:
-                status = "failed"
-                raise ApiError() from None
-            finally:
                 try:
-                    await run_in_threadpool(
-                        service.finish, trusted, request, status, saved.to_dict()
-                    )
+                    if output:
+                        await run_in_threadpool(
+                            conversations.append_for_run,
+                            trusted,
+                            conversations.AppendMessages(
+                                id=request.thread_id, run=request.run_id, messages=output
+                            ),
+                        )
+                except Exception:
+                    status = "failed"
+                    raise ApiError() from None
                 finally:
-                    if selected is not None:
-                        await selected.close()
+                    try:
+                        await run_in_threadpool(
+                            service.finish, trusted, request, status, saved.to_dict()
+                        )
+                    finally:
+                        await run_in_threadpool(
+                            revoke_run_token, trusted, RunRef(run=request.run_id)
+                        )
+        finally:
+            try:
+                if transport is not None:
+                    await transport.close()
+            finally:
+                if selected is not None:
+                    await selected.close()
     if status == "finished":
         yield AGUIEvent(
             type="RUN_FINISHED", thread_id=str(request.thread_id), run_id=str(request.run_id)
         )
+
+
+async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
+    """A bounded producer keeps native MCP task scopes on their owning task."""
+    queue = asyncio.Queue(maxsize=1)
+
+    async def produce():
+        iterator = _run(caller, request)
+        error = None
+        try:
+            async for event in iterator:
+                await queue.put(event)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as failure:
+            error = failure
+        finally:
+            await iterator.aclose()
+        if error is not None:
+            await queue.put(error)
+        await queue.put(None)
+
+    producer = asyncio.create_task(produce())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                await producer
+                break
+            if isinstance(event, BaseException):
+                raise event
+            yield event
+    finally:
+        if not producer.done():
+            producer.cancel()
+        with anyio.CancelScope(shield=True):
+            try:
+                await producer
+            except asyncio.CancelledError:
+                pass

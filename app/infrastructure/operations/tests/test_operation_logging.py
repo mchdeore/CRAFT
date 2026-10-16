@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app import create_app
+from app.agent.tests.test_chat_stream import chat as chat
+from app.cube.tests.conftest import cube_source as cube_source
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import ApiError, InvalidInput
@@ -200,3 +202,58 @@ def test_malformed_protocol_logging_has_no_input() -> None:
         assert refused and safe
 
     anyio.run(execute)
+
+
+def test_native_mcp_logs_have_no_payload(chat, capsys, caplog) -> None:
+    from dataclasses import replace
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from app.agent import service
+    from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
+    from app.agent.tests.test_chat_stream import request
+    from app.infrastructure.database import metadata as m
+    from app.infrastructure.mcp.tests.test_mcp import session_stream
+
+    data = request(chat)
+    service.start(chat["caller"], data, "simulated")
+    caller = replace(chat["caller"], conversation_id=data.thread_id, run_id=data.run_id)
+    raw = issue_run_token(caller, RunRef(run=data.run_id)).token
+    marker = uuid4().hex
+    stream = io.StringIO()
+    configure_logging("DEBUG", stream)
+    logging.getLogger().addHandler(caplog.handler)
+
+    async def execute():
+        async with session_stream(chat["settings"].mcp_url, raw) as session:
+            result = await session.call_tool("search", {"query": marker})
+            assert not result.isError
+
+    try:
+        asyncio.run(execute())
+        captured = capsys.readouterr()
+        logs = m.metadata.tables["call_log"]
+        with chat["owner"].connect() as connection:
+            recorded = (
+                connection.execute(select(logs).where(logs.c.run_id == data.run_id))
+                .mappings()
+                .all()
+            )
+        text = stream.getvalue() + captured.out + captured.err + caplog.text
+        safe = all(
+            value not in text
+            and all(value not in str(cell) for record in recorded for cell in record.values())
+            for value in [raw, marker]
+        )
+        assert safe
+        calls = [record for record in recorded if record["name"] == "library.search"]
+        assert len(calls) == 1 and calls[0]["origin"] == "mcp" and calls[0]["outcome"] == "ok"
+        events = [json.loads(line) for line in stream.getvalue().splitlines()]
+        assert all(
+            not {"password", "token", "query", "body", "arguments"}.intersection(event)
+            for event in events
+        )
+    finally:
+        revoke_run_token(caller, RunRef(run=data.run_id))
+        service.finish(caller, data, "cancelled", {})

@@ -19,7 +19,7 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 | Prefix | `/api`. Health checks are outside it. There is no generic run-any-operation route. |
 | Format | JSON, `camelCase` field names, UUID identifiers, ISO 8601 UTC times |
 | Sign-in | Cookie `__Host-craft_session` (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), set by `POST /api/session`. Send requests with `credentials: "include"`. No tokens in browser storage |
-| Writes | `POST`, `PUT`, `PATCH` and `DELETE` must carry an `Origin` header from the allowed list |
+| Writes | Ordinary `/api` requests using `POST`, `PUT`, `PATCH` and `DELETE` must carry an `Origin` header from the allowed list |
 | Request ID | Every response has `X-Request-Id`. The same value appears in error bodies and server logs |
 | Unreadable records | `404`, the same as a missing record |
 | Lists | Operation-specific limits; no paging. The conversation list agreement is newest first, at most 100 items |
@@ -123,7 +123,7 @@ These agreements include approval decisions and standard AG-UI interrupt/resume.
 
 ## 6. Agent tools
 
-Input types in this table include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The current runtime calls the registered read tools directly. All built tool effects are `NONE`.
+Input types in this table include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The runtime calls the registered read tools through native HTTP MCP. All built tool effects are `NONE`.
 
 | Tool | Route | Input type | Effects |
 |---|---|---|---|
@@ -142,6 +142,10 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
+
+`/mcp` is a stateless JSON MCP mount outside the ordinary route map. It reuses the same registry server as standard input and output. The server lists every `tool=True` operation; the native framework transport applies its read-tool allowlist. Private handlers and observations are absent. Effectful calls return `approval_required`; a run credential grants no write approval.
+
+Authentication requires `Authorization: Bearer` with the current run credential. Missing, malformed, unknown, expired or revoked credentials return HTTP 401 and `WWW-Authenticate: Bearer` before a protocol tool executes. A browser cookie alone is refused. Tool errors carry safe code/message objects in structured and text content. `craft/toolCallId` metadata links the model call; identity and parent context load from server-owned state. Raw credentials stay outside browser storage and model arguments. The loopback target and lifetime follow section 3 of the specification.
 
 ## 7. Chat stream
 

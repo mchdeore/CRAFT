@@ -79,6 +79,66 @@ class ToolInfo(Shape):
     route: str
 
 
+class RunRef(Shape):
+    run: UUID
+
+
+class RunTokenDigest(Shape):
+    digest: Annotated[bytes, msgspec.Meta(min_length=32, max_length=32)]
+
+
+class RunToken(Shape):
+    token: str
+
+
+class RunPrincipal(Shape):
+    user: UUID
+    conversation: UUID
+    run: UUID
+    roles: list[str]
+    request_id: UUID | None = None
+    parent_call_id: UUID | None = None
+    auth_session_id: UUID | None = None
+
+
+@operation(SIGNED_IN)
+def issue_run_token(caller: Caller, request: RunRef) -> RunToken:
+    """Issue an ephemeral credential for an owned active run through a private entry."""
+    from app.agent import service
+
+    return RunToken(token=service.issue_token(caller, request.run))
+
+
+@operation(SIGNED_IN)
+def revoke_run_token(caller: Caller, request: RunRef) -> None:
+    """Revoke an owned run credential through a private entry."""
+    from app.agent import service
+
+    service.revoke_token(caller, request.run)
+
+
+@operation(PUBLIC)
+def resolve_run_token(caller: Caller, request: RunTokenDigest) -> RunPrincipal:
+    """Resolve a digest into a current run principal through a private entry."""
+    from dataclasses import replace
+
+    from app.agent import service
+    from app.infrastructure.operations.context import current_call
+
+    principal = RunPrincipal(**service.principal(caller, request.digest))
+    context = current_call.get()
+    if context is not None:
+        context.caller = replace(
+            caller,
+            user_id=principal.user,
+            roles=frozenset(principal.roles),
+            conversation_id=principal.conversation,
+            run_id=principal.run,
+            auth_session_id=principal.auth_session_id,
+        )
+    return principal
+
+
 @operation(SIGNED_IN, get="/tools")
 def list_tools(caller: Caller) -> list[ToolInfo]:
     """List generated tool names and effects; for example readable library search."""
