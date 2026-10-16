@@ -35,7 +35,12 @@ def evidence(value):
         except (ValueError, TypeError):
             return None
     if isinstance(value, dict):
-        if isinstance(value.get("text"), str) and "handle" in value:
+        handle = value.get("handle")
+        if (
+            isinstance(value.get("text"), str)
+            and isinstance(handle, dict)
+            and hashlib.sha256(value["text"].encode()).hexdigest() == handle.get("quoteSha256")
+        ):
             return value
         for child in value.values():
             found = evidence(child)

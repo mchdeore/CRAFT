@@ -1,6 +1,7 @@
 """Offline framework clients, actual intercepted HTTP requests and real transaction boundaries."""
 
 import asyncio
+import hashlib
 import io
 import json
 from typing import Any
@@ -446,7 +447,18 @@ def test_fake_framework_tool_invocation(settings):
     @tool
     def search(query: str) -> dict:
         calls.append(True)
-        return {"hits": [{"text": "Simulated evidence only.", "handle": {"simulated": True}}]}
+        source = "Simulated evidence only."
+        return {
+            "hits": [
+                {
+                    "text": source,
+                    "handle": {
+                        "simulated": True,
+                        "quoteSha256": hashlib.sha256(source.encode()).hexdigest(),
+                    },
+                }
+            ]
+        }
 
     selected = model.client(settings)
 
