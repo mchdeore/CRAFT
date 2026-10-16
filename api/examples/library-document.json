@@ -1,0 +1,24 @@
+{
+  "item": "synthetic-empty-document",
+  "version": 1,
+  "title": "Synthetic empty document",
+  "path": "synthetic/empty.txt",
+  "tags": {
+    "mission": null,
+    "silo": null,
+    "stage": null
+  },
+  "summary": "",
+  "summaryKind": "extract",
+  "outline": [],
+  "versions": [
+    {
+      "version": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "indexedAt": "2026-10-16T00:00:00Z"
+    }
+  ],
+  "simulated": true,
+  "classification": "unclassified",
+  "deleted": false
+}

@@ -9,11 +9,11 @@ export interface Routes {
   "GET /health/live": { response: T.Health };
   "GET /health/ready": { response: T.Health };
   "POST /api/library/search": { body: T.LibrarySearch; response: T.LibraryHits };
-  "GET /api/library/documents/:item": { response: T.LibraryDocument };
-  "GET /api/library/documents/:item/chunks": { response: T.ChunkPage };
+  "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
+  "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
-  "GET /api/library/documents/:item/preview": { response: Blob };
-  "GET /api/library/documents/:item/download": { response: Blob };
+  "GET /api/library/documents/:item/preview": { query: { version: number; locator?: string }; response: Blob };
+  "GET /api/library/documents/:item/download": { query: { version: number; locator?: string }; response: Blob };
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };

@@ -7,6 +7,7 @@ from pathlib import Path
 import msgspec
 
 from app.accounts.handlers import Me, SignIn
+from app.cube.handlers import MissionRef, ValueRef
 from app.infrastructure.paths import ROOT
 from app.infrastructure.shapes import ApiErrorBody
 
@@ -58,7 +59,7 @@ def root_schema(schema: dict) -> dict:
 def test_python_shapes_match_compiled_typescript() -> None:
     import jsonschema
 
-    for shape in [Me, SignIn]:
+    for shape in [Me, SignIn, MissionRef, ValueRef]:
         compiled = typescript_schema(shape.__name__)
         declared = root_schema(compiled)
         python = root_schema(msgspec.json.schema(shape))
@@ -118,3 +119,92 @@ def test_chat_stream_example_matches_browser_contract() -> None:
     assert events and validate_chat_events(events)
     assert events[0]["type"] == "RUN_STARTED" and events[-1]["type"] == "RUN_FINISHED"
     assert any(event.get("activityType") == "craft.answer" for event in events)
+
+
+def contract_section(text: str, heading: str) -> str:
+    import re
+
+    matched = re.search(
+        r"^" + re.escape(heading) + r"\n(.*?)(?=^#{2,3} |\Z)", text, flags=re.M | re.S
+    )
+    assert matched is not None, "Required contract section is missing"
+    return matched[1]
+
+
+def test_contract_routes_match_app(settings) -> None:
+    import re
+
+    from app import create_app
+
+    document = (ROOT / "docs/API-Contract.md").read_text()
+    table = contract_section(document, "### 5.1 Built")
+    rows = re.findall(r"^\| `((?:GET|POST|PUT|PATCH|DELETE)) ([^`]+)` \|", table, re.M)
+    declared = {
+        (method, re.sub(r":([A-Za-z][A-Za-z0-9_]*)", r"{\1}", path)) for method, path in rows
+    }
+    app = create_app(settings)
+    try:
+        actual = {
+            (method, getattr(route, "path", ""))
+            for route in app.routes
+            for method in (getattr(route, "methods", None) or [])
+            if method not in {"HEAD", "OPTIONS"}
+        }
+        assert declared == actual
+        assert len(rows) == len(declared), "Duplicate built route"
+    finally:
+        app.state.engine.dispose()
+
+
+def test_contract_tools_match_registry(settings) -> None:
+    import re
+
+    from app import create_app
+    from app.infrastructure.operations.registry import registry
+
+    app = create_app(settings)
+    try:
+        document = (ROOT / "docs/API-Contract.md").read_text()
+        section = contract_section(document, "## 6. Agent tools")
+        rows = re.findall(r"^\| `([a-z0-9_]+)` \|", section, re.M)
+        expected = {op.tool_name for op in registry.values() if op.tool}
+        assert set(rows) == expected
+        assert len(rows) == len(expected), "Duplicate tool name"
+    finally:
+        app.state.engine.dispose()
+
+
+def test_contract_json_examples() -> None:
+    import re
+
+    import jsonschema
+
+    document = (ROOT / "docs/API-Contract.md").read_text()
+    section = contract_section(document, "## 15. Examples")
+    rows = re.findall(
+        r"^\| `([A-Z]+ /[^`]+)` \| `([A-Za-z]+(?:\[\])?)` \| `([^`]+)` \|", section, re.M
+    )
+    expected = {
+        route: shape
+        for route, shape in re.findall(
+            r'"([A-Z]+ /[^"]+)": [^\n]*?response: T\.([A-Za-z]+(?:\[\])?)',
+            (ROOT / "api/routes.ts").read_text(),
+        )
+    }
+    assert {route: shape for route, shape, _ in rows} == expected
+    assert len(rows) == len(expected), "Duplicate response example"
+    schemas = {}
+    for _, shape, path in rows:
+        name = shape.removesuffix("[]")
+        if name not in schemas:
+            schemas[name] = typescript_schema(name)
+        schema = schemas[name]
+        if shape.endswith("[]"):
+            schema = {
+                "type": "array",
+                "items": {"$ref": schema["$ref"]},
+                "definitions": schema["definitions"],
+            }
+        example = ROOT / path
+        assert example.parent == ROOT / "api/examples" and example.is_file()
+        assert jsonschema.Draft7Validator(schema).is_valid(json.loads(example.read_text()))

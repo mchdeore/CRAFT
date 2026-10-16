@@ -42,6 +42,8 @@ export interface CubeValue {
 export interface FoundMissions {
   missions: { mission: Mission; matched: CubeValue[] }[]; at: string; knownAt: string; truncated: boolean;
 }
+export interface MissionRef { key: string; silo?: string; stage?: string; at?: string; knownAt?: string }
+export interface ValueRef { id: Id }
 export interface MissionState {
   mission: Mission; values: CubeValue[]; gaps: string[];         // parameter keys without a value
   at: string; knownAt: string;

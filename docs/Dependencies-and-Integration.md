@@ -281,6 +281,7 @@ Each build step adds its checks. A step that changes behavior updates section 8 
 | B15 version differences and citations | `uv run pytest app/library/tests/test_versions.py` | Edits, moves, deletes, block differences and citation status pass |
 | B16 candidate values | `uv run pytest app/cube/tests/test_intake.py` | Header synonyms, unit conversion and every problem case pass |
 | B17 facets and similarity | `uv run pytest app/library/tests/test_facets.py app/cube/tests/test_similarity.py` | Facet validator, facet vectors, ranking and not-comparable cases pass |
+| B19 built API contract | `uv run pytest -q app/tests/test_contract.py` | Built routes and tools equal the contract; every JSON route has a schema-valid example |
 | B23 values through the gate | `uv run pytest app/cube/tests/test_approval_gate.py` | Values are written once, only after the requester approves |
 | B24 saved views | `uv run pytest app/cube/tests/test_views.py` | A labelled, cited JSON view saves through approval |
 | B25 evaluation | `uv run craft eval` | Fused recall at 8 is at least keyword-only recall on the demo ground truth |
