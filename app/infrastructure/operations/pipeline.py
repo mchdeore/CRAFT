@@ -33,7 +33,7 @@ def decode(operation: Operation, value: Any) -> Any:
         return None
     try:
         if isinstance(value, operation.input):
-            return value
+            return msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
         if isinstance(value, (bytes, bytearray)):
             return msgspec.json.decode(value, type=operation.input)
         return msgspec.convert(value, operation.input, strict=True)
