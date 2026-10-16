@@ -222,3 +222,23 @@ def test_slide_tables_follow_header_window_rule(tmp_path) -> None:
     tables = [block for block in read(path) if block.kind == "table"]
     assert [len(block.text.splitlines()) - 2 for block in tables] == [30, 30, 15]
     assert all(block.locator.startswith("slide=1;table=1;rows=") for block in tables)
+
+
+def test_html_cells_keep_literal_boundaries_and_one_row():
+    source = (
+        b"<table><tr><th>Mass (kg)</th><th>Label|literal</th></tr>"
+        b"<tr><td>1|2</td><td>A<br>B<script>inactive</script></td></tr></table>"
+    )
+    tables = [block for block in convert(source, "synthetic.html") if block.kind == "table"]
+    expected = [r"| Mass (kg) | Label\|literal |", "|---|---|", r"| 1\|2 | A B |"]
+    preserved = len(tables) == 1 and tables[0].text.splitlines() == expected
+    assert preserved
+    assert tables[0].locator.endswith(";rows=1-1")
+
+
+def test_html_optional_end_tags_keep_rows():
+    source = b"<table><tr><th>Mass (kg)<th>Label<tr><td>1<td>A</table>"
+    tables = [block for block in convert(source, "synthetic.html") if block.kind == "table"]
+    expected = ["| Mass (kg) | Label |", "|---|---|", "| 1 | A |"]
+    preserved = len(tables) == 1 and tables[0].text.splitlines() == expected
+    assert preserved

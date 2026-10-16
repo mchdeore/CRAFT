@@ -26,40 +26,87 @@ class VisibleHTML(HTMLParser):
         self.hidden = 0
         self.first_row = False
         self.row_cells = 0
+        self.table_depth = 0
+        self.cell: list[str] | None = None
+        self.row_open = False
+
+    def flush_cell(self):
+        if self.cell is not None:
+            value = " ".join("".join(self.cell).split())
+            value = value.replace("\\", "\\\\").replace("|", "\\|")
+            self.parts.append(("| " if self.row_cells == 1 else " | ") + value)
+            self.cell = None
+
+    def flush_row(self):
+        if self.row_open:
+            self.flush_cell()
+            if self.row_cells:
+                self.parts.append(" |\n")
+                if self.first_row:
+                    self.parts.append("|" + "---|" * self.row_cells + "\n")
+                    self.first_row = False
+            self.row_open = False
+
+    def start_row(self):
+        self.flush_row()
+        if self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
+        self.row_cells = 0
+        self.row_open = True
 
     def handle_starttag(self, tag, attrs):
         if tag in {"script", "style"}:
             self.hidden += 1
         elif not self.hidden:
-            if re.fullmatch(r"h[1-6]", tag):
-                self.parts.append("\n" + "#" * int(tag[1]) + " ")
-            elif tag == "table":
-                self.parts.append("\n")
-                self.first_row = True
-            elif tag == "tr":
-                if self.parts and not self.parts[-1].endswith("\n"):
+            if tag == "table":
+                self.table_depth += 1
+                if self.table_depth == 1:
                     self.parts.append("\n")
-                self.row_cells = 0
+                    self.first_row = True
+                elif self.cell is not None:
+                    self.cell.append(" ")
+            elif self.table_depth == 1 and tag in {"td", "th"}:
+                if not self.row_open:
+                    self.start_row()
+                self.flush_cell()
+                self.row_cells += 1
+                self.cell = []
+            elif self.table_depth == 1 and tag == "tr":
+                self.start_row()
+            elif self.cell is not None:
+                if tag in {"p", "div", "br", "tr", "td", "th"} or re.fullmatch(r"h[1-6]", tag):
+                    self.cell.append(" ")
+            elif re.fullmatch(r"h[1-6]", tag):
+                self.parts.append("\n" + "#" * int(tag[1]) + " ")
             elif tag in {"p", "div", "br"}:
                 self.parts.append("\n")
-            elif tag in {"td", "th"}:
-                self.parts.append(" | ")
-                self.row_cells += 1
 
     def handle_endtag(self, tag):
         if tag in {"script", "style"}:
             self.hidden = max(0, self.hidden - 1)
-        elif not self.hidden and tag == "tr":
-            self.parts.append(" |\n")
-            if self.first_row:
-                self.parts.append("|" + "---|" * self.row_cells + "\n")
-                self.first_row = False
-        elif not self.hidden and (tag in {"p", "div"} or re.fullmatch(r"h[1-6]", tag)):
-            self.parts.append("\n")
+        elif not self.hidden:
+            if self.table_depth == 1 and tag in {"td", "th"}:
+                self.flush_cell()
+            elif self.table_depth == 1 and tag == "tr":
+                self.flush_row()
+            elif tag == "table":
+                if self.table_depth == 1:
+                    self.flush_row()
+                self.table_depth = max(0, self.table_depth - 1)
+                if self.cell is not None:
+                    self.cell.append(" ")
+            elif self.cell is not None:
+                if tag in {"p", "div", "tr", "td", "th"}:
+                    self.cell.append(" ")
+            elif tag in {"p", "div"} or re.fullmatch(r"h[1-6]", tag):
+                self.parts.append("\n")
 
     def handle_data(self, data):
         if not self.hidden:
-            self.parts.append(data)
+            if self.cell is not None:
+                self.cell.append(data)
+            else:
+                self.parts.append(data)
 
 
 def text_parts(text: str, size: int = 300):
