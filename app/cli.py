@@ -31,6 +31,10 @@ def main(argv: list[str] | None = None) -> None:
     users.add_argument("mission", nargs="?")
     users.add_argument("--silo")
     users.add_argument("--as", dest="actor", default="admin")
+    missions = commands.add_parser("missions")
+    missions.add_argument("action", choices=["stage"])
+    missions.add_argument("mission")
+    missions.add_argument("stage")
     args = parser.parse_args(argv)
     if args.command == "mcp":
         from app.infrastructure.mcp.stdio import run_stdio
@@ -48,7 +52,7 @@ def main(argv: list[str] | None = None) -> None:
                 operation.access,
                 operation.effects,
             )
-    elif args.command in {"seed", "index", "provider", "call", "users"}:
+    elif args.command in {"seed", "index", "provider", "call", "users", "missions"}:
         import json
         import sys
         from pathlib import Path
@@ -60,7 +64,11 @@ def main(argv: list[str] | None = None) -> None:
 
         settings = Settings.from_env()
         configure_logging(settings.log_level, sys.stderr)
-        if args.command == "seed":
+        if args.command == "missions":
+            from app.cube.handlers import change_stage
+
+            change_stage(settings, args.mission, args.stage)
+        elif args.command == "seed":
             from app.seed.base import seed
 
             print(json.dumps(seed(settings)))

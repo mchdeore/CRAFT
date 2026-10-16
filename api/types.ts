@@ -2,6 +2,8 @@ export type Id = string;
 export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
 export interface Me { id: Id; username: string; displayName: string; roles: Role[] }
+export interface Mission { key: string; title: string; currentStage: string; aliases: string[]; simulated: boolean }
+export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }
 export interface FieldError { path: string; message: string }
 export interface ApiError { code: string; message: string; requestId: string; fields?: FieldError[] }

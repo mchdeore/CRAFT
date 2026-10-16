@@ -8,18 +8,20 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     Computed,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     LargeBinary,
     MetaData,
+    Numeric,
     Table,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 
 metadata = MetaData(
     naming_convention={
@@ -214,4 +216,131 @@ Index(
     "ix_workspace_files_conversation_id_created_at",
     workspace_files.c.conversation_id,
     workspace_files.c.created_at.desc(),
+)
+
+
+silos = Table(
+    "silos",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("label", Text, nullable=False),
+    Column("seq", Integer, nullable=False, unique=True),
+)
+stages = Table(
+    "stages",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("label", Text, nullable=False),
+    Column("seq", Integer, nullable=False, unique=True),
+    Column("gate", Text, nullable=False),
+)
+missions = Table(
+    "missions",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("title", Text, nullable=False),
+    Column("current_stage", Text, ForeignKey("stages.key"), nullable=False),
+    Column("simulated", Boolean, nullable=False),
+    timestamp("created_at"),
+    CheckConstraint("key ~ '^msn-[a-z0-9-]{1,40}$'", name="key"),
+)
+mission_aliases = Table(
+    "mission_aliases",
+    metadata,
+    Column("alias", Text, primary_key=True),
+    Column("mission_key", Text, ForeignKey("missions.key"), nullable=False),
+    CheckConstraint("alias = lower(alias)", name="alias"),
+)
+elements = Table(
+    "elements",
+    metadata,
+    identifier(),
+    Column("mission_key", Text, ForeignKey("missions.key"), nullable=False),
+    Column("silo", Text, ForeignKey("silos.key"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("parent_id", UUID, ForeignKey("elements.id")),
+    UniqueConstraint("mission_key", "silo", "name"),
+)
+parameters = Table(
+    "parameters",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("label", Text, nullable=False),
+    Column("unit", Text, nullable=False),
+    Column("min_value", Numeric),
+    Column("max_value", Numeric),
+    Column("whole", Boolean, nullable=False, server_default=text("false")),
+    CheckConstraint("key ~ '^[a-z][a-z0-9_]{1,40}$'", name="key"),
+)
+unit_conversions = Table(
+    "unit_conversions",
+    metadata,
+    Column("parameter", Text, ForeignKey("parameters.key"), primary_key=True),
+    Column("unit", Text, primary_key=True),
+    Column("multiplier", Numeric, nullable=False),
+    Column("value_offset", Numeric, nullable=False, server_default=text("0")),
+)
+header_synonyms = Table(
+    "header_synonyms",
+    metadata,
+    Column("header", Text, primary_key=True),
+    Column("parameter", Text, ForeignKey("parameters.key"), primary_key=True),
+    Column("language", Text, nullable=False),
+    CheckConstraint("header = lower(header)", name="header"),
+    CheckConstraint("language in ('en','fr')", name="language"),
+)
+cube_values = Table(
+    "cube_values",
+    metadata,
+    identifier(),
+    Column("mission_key", Text, ForeignKey("missions.key"), nullable=False),
+    Column("silo", Text, ForeignKey("silos.key"), nullable=False),
+    Column("stage", Text, ForeignKey("stages.key")),
+    Column("element_id", UUID, ForeignKey("elements.id")),
+    Column("parameter", Text, ForeignKey("parameters.key"), nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("low", Numeric),
+    Column("high", Numeric),
+    Column("source_number", Text),
+    Column("source_unit", Text),
+    Column("valid_from", Date, nullable=False),
+    timestamp("recorded_at"),
+    Column("item", Text, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("block", Integer, nullable=False),
+    Column("locator", Text, nullable=False),
+    Column("quote_sha256", LargeBinary, nullable=False),
+    Column("approval_request_id", UUID, ForeignKey("approval_requests.id")),
+    Column("simulated", Boolean, nullable=False),
+    CheckConstraint("kind in ('exact','range','unknown','not_applicable')", name="kind"),
+    CheckConstraint("octet_length(quote_sha256) = 32", name="quote_sha256"),
+    CheckConstraint(
+        "(kind in ('exact','range') and low is not null and high is not null) or "
+        "(kind in ('unknown','not_applicable') and low is null and high is null)",
+        name="numbers",
+    ),
+    CheckConstraint("kind <> 'exact' or low = high", name="exact"),
+    CheckConstraint("low is null or low <= high", name="range"),
+)
+Index(
+    "ix_cube_values_mission_key_parameter_valid_from_recorded_at",
+    cube_values.c.mission_key,
+    cube_values.c.parameter,
+    cube_values.c.valid_from.desc(),
+    cube_values.c.recorded_at.desc(),
+)
+facet_texts = Table(
+    "facet_texts",
+    metadata,
+    identifier(),
+    Column("mission_key", Text, ForeignKey("missions.key"), nullable=False),
+    Column("facet", Text, nullable=False),
+    Column("text", Text, nullable=False),
+    Column("sources", ARRAY(Text), nullable=False),
+    Column("model", Text, nullable=False),
+    timestamp("built_at"),
+    UniqueConstraint("mission_key", "facet"),
+    CheckConstraint(
+        "facet in ('purpose','design','operations','program','cost_and_risk')", name="facet"
+    ),
 )

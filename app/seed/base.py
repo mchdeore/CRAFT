@@ -27,8 +27,27 @@ def seed(settings: Settings) -> dict[str, int]:
     sessions, engine = make_owner_sessions(settings)
     users = metadata.tables["users"]
     roles = metadata.tables["user_roles"]
+    missions = metadata.tables["missions"]
+    aliases = metadata.tables["mission_aliases"]
     try:
         with unit_of_work(sessions) as session:
+            for number, stage in [(1, "st3-design"), (2, "st2-definition")]:
+                key = f"msn-sim-{number:02}"
+                session.execute(
+                    insert(missions)
+                    .values(
+                        key=key,
+                        title=f"Simulated mission {number:02}",
+                        current_stage=stage,
+                        simulated=True,
+                    )
+                    .on_conflict_do_nothing()
+                )
+                session.execute(
+                    insert(aliases)
+                    .values(alias=f"sim-{number:02}", mission_key=key)
+                    .on_conflict_do_nothing()
+                )
             for row in json.loads((ROOT / "seeds/base/users.json").read_text()):
                 session.execute(
                     insert(users)

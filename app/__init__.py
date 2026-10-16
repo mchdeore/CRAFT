@@ -10,6 +10,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from app.accounts import handlers as account_handlers
+from app.cube import handlers as cube_handlers
 from app.health.handlers import migration_head
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.engine import make_engine, make_sessions
@@ -41,7 +42,7 @@ def close_on_exit(engine: Engine) -> Callable[[FastAPI], AbstractAsyncContextMan
 
 def create_app(settings: Settings) -> FastAPI:
     """Build the app: logging, the pool, error bodies, health routes, request IDs."""
-    _ = library_handlers, account_handlers
+    _ = library_handlers, account_handlers, cube_handlers
     configure_logging(settings.log_level)
     engine = make_engine(settings)
     instrument_sql(engine)

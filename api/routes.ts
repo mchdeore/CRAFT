@@ -11,4 +11,5 @@ export interface Routes {
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
+  "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
 }

@@ -374,3 +374,16 @@ uv run pytest -q app/accounts/tests/test_sessions.py app/tests/test_contract.py
 ```
 
 A Chromium-based in-app browser on macOS exercised sign-in, search, literal markup-title rendering and sign-out. Real HTTP checks verified cookie flags, foreign-Origin rejection and revoked-session read denial. The exact embedded browser version, native browser cookie inspection, Safari and Windows/WSL have not been verified. Stop the host server with Ctrl-C before restarting `docker compose up --build --wait`.
+
+## 15. Cube schema and mission access
+
+Revisions 0009 through 0011 create mission reference rows, the parameter dictionary, append-only values and derived facet texts. Value constraints require both numbers for exact/range and neither for unknown/not applicable. Kind and facet are required. The application reads reference and facet tables and inserts values; stage maintenance uses the owner pool. Mission grants filter lists before name matching, ordering and limits.
+
+```bash
+uv run alembic upgrade head
+uv run alembic check
+uv run craft seed base
+uv run craft missions stage msn-sim-01 st3-design
+uv run craft call cube.list_missions --as demo '{}'
+uv run pytest -q app/cube/tests/test_schema_access.py
+```

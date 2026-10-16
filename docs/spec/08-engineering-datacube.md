@@ -141,25 +141,26 @@ create table unit_conversions (parameter text references parameters, unit text n
   multiplier numeric not null, value_offset numeric not null default 0,
   primary key (parameter, unit));                         -- the standard unit has multiplier 1
 create table header_synonyms (header text check (header = lower(header)),
-  parameter text references parameters, language text check (language in ('en','fr')),
+  parameter text references parameters, language text not null check (language in ('en','fr')),
   primary key (header, parameter));
 create table cube_values (id, mission_key text not null references missions,
   silo text not null references silos, stage text null references stages,
   element_id uuid null references elements, parameter text not null references parameters,
-  kind text check (kind in ('exact','range','unknown','not_applicable')),
+  kind text not null check (kind in ('exact','range','unknown','not_applicable')),
   low numeric null, high numeric null, source_number text null, source_unit text null,
   valid_from date not null, recorded_at ts,
   item text not null, version int not null, block int not null, locator text not null,
   quote_sha256 bytea not null check (octet_length(quote_sha256) = 32),
   approval_request_id uuid null references approval_requests, simulated boolean not null,
-  check ((kind in ('exact','range')) = (low is not null and high is not null)),
+  check ((kind in ('exact','range') and low is not null and high is not null)
+    or (kind in ('unknown','not_applicable') and low is null and high is null)),
   check (kind <> 'exact' or low = high), check (low is null or low <= high));
 create index on cube_values (mission_key, parameter, valid_from desc, recorded_at desc);
 -- seeded values have no approval request; every other value names the request that accepted it
 
 -- 0011_create_facet_texts                          craft_app: SELECT (indexing writes as craft_owner)
 create table facet_texts (id, mission_key text not null references missions,
-  facet text check (facet in ('purpose','design','operations','program','cost_and_risk')),
+  facet text not null check (facet in ('purpose','design','operations','program','cost_and_risk')),
   text text not null, sources text[] not null, model text not null, built_at ts,
   unique (mission_key, facet));
 ```
@@ -348,7 +349,7 @@ A condition names a parameter, an operator (`eq`, `ge`, `le` or `between`), a va
 
 | Rule | Applies to |
 |---|---|
-| An account is granted missions in `mission_grants`; a grant with a silo covers that silo only, a grant without one covers every silo | Every library and cube operation |
+| Every account, including an admin, needs mission grants for cube reads. A grant in `mission_grants` with a silo covers that silo only; a grant without one covers every silo | Every library and cube operation |
 | Reference material (no mission) is readable by every account; an admin reads everything | Library |
 | A chunk, document version or value is readable only if its mission and silo are readable | Library and cube |
 | Access applies before filtering, ranking and counting | Search, find, compare, similar |
