@@ -12,4 +12,9 @@ export interface Routes {
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
   "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
+  "GET /api/cube/parameters": { response: T.Parameter[] };
+  "POST /api/cube/find": { body: T.FindMissions; response: T.FoundMissions };
+  "GET /api/cube/missions/:key": { query: {silo?: string; stage?: string; at?: string; knownAt?: string}; response: T.MissionState };
+  "POST /api/cube/compare": { body: T.CompareMissions; response: T.Comparison };
+  "GET /api/cube/values/:id": { response: T.ValueEvidence };
 }

@@ -1,0 +1,45 @@
+{
+  "mission": {
+    "key": "msn-sim-01",
+    "title": "Synthetic mission",
+    "currentStage": "st3-design",
+    "aliases": [
+      "sim-01"
+    ],
+    "simulated": true
+  },
+  "values": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "mission": "msn-sim-01",
+      "silo": "engineering",
+      "stage": "st3-design",
+      "element": null,
+      "parameter": "power_peak",
+      "kind": "exact",
+      "low": 450,
+      "high": 450,
+      "unit": "W",
+      "sourceNumber": "0.45",
+      "sourceUnit": "kW",
+      "validFrom": "2026-03-01",
+      "recordedAt": "2026-10-01T00:00:00+00:00",
+      "citation": {
+        "item": "itm_123456789abc",
+        "version": 1,
+        "block": 1,
+        "locator": "section=1;table=1;row=1",
+        "quoteSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "simulated": true
+      },
+      "withdrawn": false,
+      "approvalId": null,
+      "simulated": true
+    }
+  ],
+  "gaps": [
+    "mass_dry"
+  ],
+  "at": "2026-03-15",
+  "knownAt": "2026-10-16T00:00:00+00:00"
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "key": "power_peak",
+    "label": "Peak power",
+    "unit": "W",
+    "min": 0,
+    "max": null,
+    "whole": false,
+    "units": [
+      {
+        "unit": "kW",
+        "multiplier": "1000",
+        "offset": "0"
+      }
+    ]
+  }
+]

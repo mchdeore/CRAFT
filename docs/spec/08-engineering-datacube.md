@@ -317,6 +317,8 @@ Example: peak power 400 W valid from 1 January (version 1) and 450 W valid from 
 
 A condition names a parameter, an operator (`eq`, `ge`, `le` or `between`), a value and its unit. Values and units convert before the query is built. An unknown value never matches. A range matches only if its whole interval satisfies the condition.
 
+All conditions match within one mission, silo, stage and element. Comparison uses a mission aggregate when present. Otherwise, elements must have the same name and silo. An ambiguous selection is a gap.
+
 ## 8.13 Similar missions
 
 `similar_missions` ranks readable missions by their facet texts.

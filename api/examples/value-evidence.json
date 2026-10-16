@@ -1,0 +1,32 @@
+{
+  "value": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "mission": "msn-sim-01",
+    "silo": "engineering",
+    "stage": "st3-design",
+    "element": null,
+    "parameter": "power_peak",
+    "kind": "exact",
+    "low": 450,
+    "high": 450,
+    "unit": "W",
+    "sourceNumber": "0.45",
+    "sourceUnit": "kW",
+    "validFrom": "2026-03-01",
+    "recordedAt": "2026-10-01T00:00:00+00:00",
+    "citation": {
+      "item": "itm_123456789abc",
+      "version": 1,
+      "block": 1,
+      "locator": "section=1;table=1;row=1",
+      "quoteSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "simulated": true
+    },
+    "withdrawn": false,
+    "approvalId": null,
+    "simulated": true
+  },
+  "quote": "| Peak power | 0.45 | kW |",
+  "conversion": "0.45 kW × 1000 = 450 W",
+  "citationStatus": "current"
+}

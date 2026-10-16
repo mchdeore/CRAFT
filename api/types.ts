@@ -19,3 +19,41 @@ export interface LibraryDocument { item: string; version: number; title: string;
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
 export interface ChunkPage { chunks: ChunkText[]; truncated: boolean }
+export type ValueKind = "exact" | "range" | "unknown" | "not_applicable";
+export interface Parameter {
+  key: string; label: string; unit: string; min: number | null; max: number | null; whole: boolean;
+  units: { unit: string; multiplier: string; offset: string }[];
+}
+export interface Condition {
+  parameter: string; op: "eq" | "ge" | "le" | "between"; value: string; high?: string; unit: string;
+}
+export interface FindMissions {
+  conditions: Condition[]; silo?: string; stage?: string;        // stage "current" = each mission's current stage
+  at?: string; knownAt?: string; limit?: number;
+}
+export interface CubeValue {
+  id: Id; mission: string; silo: string; stage: string | null; element: string | null; parameter: string;
+  kind: ValueKind; low: number | null; high: number | null; unit: string;
+  sourceNumber: string | null; sourceUnit: string | null;
+  validFrom: string; recordedAt: string; citation: CitationHandle;
+  withdrawn: boolean;                  // true: shown as unknown, source withdrawn
+  approvalId: Id | null; simulated: boolean;
+}
+export interface FoundMissions {
+  missions: { mission: Mission; matched: CubeValue[] }[]; at: string; knownAt: string; truncated: boolean;
+}
+export interface MissionState {
+  mission: Mission; values: CubeValue[]; gaps: string[];         // parameter keys without a value
+  at: string; knownAt: string;
+}
+export interface CompareMissions {
+  keys: string[]; parameters: string[]; silo?: string; stage?: string; at?: string; knownAt?: string;
+}
+export interface Comparison {
+  parameters: string[]; rows: { mission: Mission; values: (CubeValue | null)[] }[];
+  at: string; knownAt: string;
+}
+export interface ValueEvidence {
+  value: CubeValue; quote: string; conversion: string;
+  citationStatus: "current" | "changed" | "newer_version" | "withdrawn";
+}
