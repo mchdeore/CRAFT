@@ -30,7 +30,7 @@ def revoke(caller: Caller, request: GrantMission) -> None:
 
 
 class SignIn(Shape):
-    username: Annotated[str, msgspec.Meta(min_length=1, max_length=100)]
+    username: Annotated[str, msgspec.Meta(min_length=1)]
     password: Annotated[str, msgspec.Meta(min_length=1)]
 
 

@@ -343,3 +343,13 @@ def test_reset_password_can_sign_in_without_an_unadopted_upper_limit(account) ->
     password = "s" * 1001
     reset(account.admin, ResetPassword(username=account.username, password=password))
     assert login(account, password=password).status_code == 200
+
+
+def test_long_username_can_sign_in(account, owner_engine) -> None:
+    username = "synthetic_" + "u" * 101
+    with owner_engine.begin() as connection:
+        connection.execute(
+            storage.users.update().where(storage.users.c.id == account.id).values(username=username)
+        )
+    account.username = username
+    assert login(account).status_code == 200
