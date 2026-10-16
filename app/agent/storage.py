@@ -50,6 +50,20 @@ def start(session: Session, user, conversation, identifier, model, version):
         text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": "run-account:" + str(user)},
     )
+    conversations = metadata.tables["conversations"]
+    if (
+        session.execute(
+            select(conversations.c.id).where(
+                conversations.c.id == conversation,
+                conversations.c.owner_id == user,
+                conversations.c.archived_at.is_(None),
+            )
+        ).first()
+        is None
+    ):
+        from app.infrastructure.errors import NotFound
+
+        raise NotFound()
     if session.execute(select(agent_runs.c.id).where(agent_runs.c.id == identifier)).first():
         raise Conflict()
     active = agent_runs.c.status.in_(["running", "paused"])
