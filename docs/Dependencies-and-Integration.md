@@ -28,6 +28,11 @@ This document uses application programming interface (API), Hypertext Transfer P
 | agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application stream remains planned. |
 | mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application's tool endpoint remains planned. |
 | argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
+| python-docx | `1.2.0` | Reads Word paragraphs and tables in source order. |
+| pypdf | `6.19.0` | Reads PDF text layers and page locators. Input-derived parser diagnostics are suppressed. |
+| python-pptx | `1.0.2` | Reads slides, explicit tables and speaker notes. |
+| openpyxl | `3.1.5` | Reads literal and cached spreadsheet values with links disabled. |
+| fpdf2, test group | `2.8.9` | Builds synthetic text-layer and image-only PDF fixtures during tests. |
 | pytest | `9.1.1` | Collection and execution use one test runner version. |
 | Ruff | `0.16.10` | CI uses one lint and formatting rule set. |
 | Pyright | `1.1.414` | CI checks Python 3.12 types with one checker version. |
@@ -386,4 +391,15 @@ uv run craft seed base
 uv run craft missions stage msn-sim-01 st3-design
 uv run craft call cube.list_missions --as demo '{}'
 uv run pytest -q app/cube/tests/test_schema_access.py
+```
+
+## 16. Office conversion
+
+The reader versions were released at least two weeks before 16 October 2026 and support Python 3.12. Tests generate made-up files inside their temporary folders; no binary fixture is tracked. Office package roots and the PDF signature must match the extension. Word paragraphs and tables retain source order. Slides keep speaker notes; tables in every format repeat their header for each window of at most 30 data rows. PDF table extraction uses aligned text columns. Scanned documents return `no text layer`.
+
+Spreadsheet reads use `data_only=True` and `keep_links=False`. Formulas, macros and remote links never execute. Multiline cells render on one line; literal pipe and backslash characters are escaped so a cell cannot become an extra column. Conversion failures expose fixed reasons.
+
+```bash
+uv run python -c "import docx, pypdf, pptx, openpyxl; print('ok')"
+uv run pytest -q app/library/tests/test_convert.py
 ```

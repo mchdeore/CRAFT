@@ -86,6 +86,8 @@ One converter turns each allowed format into chunks. A format not listed is refu
 | Excel (xlsx), CSV | One table region per sheet: its header row and up to 30 rows. Literal cell values only; formulas, macros and links never run | `sheet=Power;range=A4:D9` |
 | A table in any other format | Its header row and up to 30 rows; the header repeats when the table is split | the format's locator plus `;rows=1-30` |
 
+Tables use pipe-delimited rows with repeated headers. Cell line breaks become spaces; literal pipes and backslashes are escaped. A spreadsheet range names the source table region, and `rows` identifies its data-row window.
+
 Each chunk keeps three text fields: `text` (the words exactly as in the source), `heading_path` (the headings above it, such as `2 Power > 2.3 Margins`, or the slide title, or the sheet name) and `locator`.
 
 Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. With the fake model (section 4), the summary is the first 150 words of the document, labelled `extract`.

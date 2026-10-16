@@ -16,10 +16,19 @@ dependencies = [
   "agent-framework-ag-ui==1.5.1",
   "mcp==1.30.0",
   "argon2-cffi==25.1.0",
+  "python-docx==1.2.0",
+  "pypdf==6.19.0",
+  "python-pptx==1.0.2",
+  "openpyxl==3.1.5",
 ]
 
 [dependency-groups]
-dev = ["pytest==9.1.1", "ruff==0.16.10", "pyright==1.1.414"]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.10",
+    "pyright==1.1.414",
+    "fpdf2==2.8.9",
+]
 
 [project.scripts]
 craft = "app.cli:main"
