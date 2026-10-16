@@ -1,5 +1,6 @@
 """Typed, validated settings. A bad value stops startup and names the field, never the value."""
 
+import re
 from collections.abc import Mapping
 from typing import Literal
 
@@ -15,6 +16,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "craft_dev"
+    provider_root: str = "var/provider"
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -31,7 +33,10 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
         try:
             return msgspec.convert(raw, cls, strict=False)  # "5432" → 5432
         except msgspec.ValidationError as error:
-            raise SystemExit(f"bad setting: {error}") from None
+            message = str(error)
+            match = re.search(r"(?:\$\.|(?:unknown|required) field `)([a-z_]+)", message)
+            field = match[1] if match else "configuration"
+            raise SystemExit(f"bad setting: {field}: invalid configuration") from None
 
     def __repr__(self) -> str:
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"

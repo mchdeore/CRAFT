@@ -54,7 +54,7 @@ Errors from ordinary `/api` routes use this body. Readiness returns `Health` wit
 | Workspace | 25 MB per file, 50 files per conversation |
 | Conversation or draft title | 1 to 200 characters |
 | Draft body | 100,000 characters |
-| Search query | 1 to 500 characters, at most 20 results |
+| Search query | 1 to 500 characters, at most 8 library results |
 | Sign-in attempts | 5 per minute per username, then `429` |
 | Agent runs | 1 active per conversation (`409`), 3 per user (`429`) |
 | One run | 20 tool calls, 120 seconds |

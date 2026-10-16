@@ -38,3 +38,19 @@ def conninfo(settings: Settings) -> str:
 
 def make_sessions(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(engine, expire_on_commit=False)
+
+
+def make_owner_sessions(settings: Settings):
+    """Explicit owner pool for seed and index orchestration, never application requests."""
+    from app.infrastructure.config.env import read_env
+
+    url = URL.create(
+        "postgresql+psycopg",
+        username="craft_owner",
+        password=read_env()["CRAFT_OWNER_DB_PASSWORD"],
+        host=settings.database_host,
+        port=settings.database_port,
+        database=settings.database_name,
+    )
+    engine = create_engine(url)
+    return sessionmaker(engine, expire_on_commit=False), engine

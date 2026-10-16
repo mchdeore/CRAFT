@@ -320,3 +320,19 @@ Start the command in the repository folder. An MCP application configuration use
 ```
 
 MCP structured content requires an object. List results use an object with an `items` field; their text content remains the original JSON list.
+
+## 12. Provider and library
+
+The provider keeps original bytes and immutable versions outside the database. Indexing runs as the owner, converts text before short writes, and creates extract summaries and deterministic token-hash vectors. Mission grants apply before candidates, scores and counts. Reading and exploration remain within one readable version. Preview follows the file contract: sandboxed, no MIME sniffing, inline only for PDF, images and plain text. Other originals download.
+
+Compose mounts the provider folder read-only at `/provider`. Host indexing uses `CRAFT_PROVIDER_ROOT` (default `var/provider`); the application only reads it. Seed and index orchestration use an explicit owner pool, separate from request credentials.
+
+```bash
+uv run craft seed base
+uv run craft index
+uv run craft operations
+uv run craft call library.search --as demo '{"query":"radiator margin"}'
+uv run pytest -q app/infrastructure/provider/tests app/library/tests app/tests/test_cli.py
+```
+
+Library read transactions use strict iterative HNSW scans so permission filters and dead index entries do not exhaust an initial candidate scan.

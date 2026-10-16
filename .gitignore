@@ -24,3 +24,5 @@ instance/
 # iCloud/Finder conflict copies ("file 2.md")
 * 2
 * 2.*
+
+/var/

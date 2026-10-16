@@ -33,3 +33,10 @@ def test_settings_never_print_secrets() -> None:
 def test_admin_and_owner_passwords_are_not_app_settings() -> None:
     env = {**VALID, "CRAFT_DB_ADMIN_PASSWORD": "a", "CRAFT_OWNER_DB_PASSWORD": "o"}
     assert Settings.from_env(env).database_name == "craft_dev"
+
+
+def test_invalid_enum_value_is_not_echoed() -> None:
+    marker = "CRAFT_SECRET_INVALID_LEVEL"
+    with pytest.raises(SystemExit) as raised:
+        Settings.from_env({"CRAFT_APP_DB_PASSWORD": "synthetic", "CRAFT_LOG_LEVEL": marker})
+    assert marker not in str(raised.value)
