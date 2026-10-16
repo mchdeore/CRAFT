@@ -62,7 +62,7 @@ Errors from ordinary `/api` routes use this body. Readiness returns `Health` wit
 | Similarity | At most 10 results; one to five distinct facets |
 | Source decimal | At most 100 characters; no exponent, NaN or Infinity |
 
-The agreed workspace, draft, candidate submission and saved-view limits are described in sections 8 and 9 and table 5.2. They are separate from the enforced read limits.
+The workspace, draft, candidate submission and saved-view limits are described in sections 8 and 9 and table 5.2. They are separate from the enforced read limits.
 
 ## 5. Routes
 
@@ -71,7 +71,7 @@ The agreed workspace, draft, candidate submission and saved-view limits are desc
 | Route | Request body or query | Response | Access | Agent tool |
 |---|---|---|---|---|
 | `GET /api/tools` | — | `ToolInfo[]` | signed in; live resource access | — |
-| `POST /api/agent/runs` | `RunAgentInput` | `AG-UI event stream` | signed in; owned active conversation | — |
+| `POST /api/agent/runs` | `RunAgentInput` | `AG-UI event stream` | signed in; live resource access | — |
 | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | signed in; live resource access | `prepare_values` |
 | `POST /api/library/citations/check` | `CitationCheck` | `CitationStatus` | signed in; live resource access | `check_citation` |
 | `GET /api/library/documents/:item/compare` | —; query `{ fromVersion: number; toVersion: number }` | `VersionDiff` | signed in; live resource access | `compare_versions` |
@@ -96,19 +96,19 @@ The agreed workspace, draft, candidate submission and saved-view limits are desc
 | `POST /api/summarize/upload` | `Blob` | `SummaryResult` | signed in; live resource access | — |
 | `POST /api/cube/similar` | `SimilarMissions` | `SimilarPage` | signed in; live resource access | `similar_missions` |
 | `POST /api/cube/similar/explain` | `ExplainSimilarity` | `SimilarityExplanation` | signed in; live resource access | `explain_similarity` |
+| `GET /api/conversations` | — | `ConversationSummary[]` | signed in; owned conversation | — |
+| `POST /api/conversations` | `NewConversation` | `ConversationSummary` | signed in; owned conversation | — |
+| `GET /api/conversations/:id` | — | `Conversation` | signed in; owned conversation | — |
+| `PATCH /api/conversations/:id` | `ConversationUpdate` | `ConversationSummary` | signed in; owned conversation | — |
+| `GET /api/conversations/:id/files` | — | `WorkspaceFile[]` | signed in; owned conversation | — |
+| `POST /api/conversations/:id/files` | `Blob`; query `{ classification?: T.Classification }` | `WorkspaceFile` | signed in; owned conversation | — |
+| `GET /api/conversations/:id/files/:fileId/content` | — | `Blob` | signed in; owned conversation | — |
+| `DELETE /api/conversations/:id/files/:fileId` | — | `void` | signed in; owned conversation | — |
 
 ### 5.2 Agreed, not built yet
 
 | Route | Request | Response | Access and tool | Step |
 |---|---|---|---|---|
-| `GET /api/conversations` | — | `ConversationSummary[]` | own; no tool | B21 |
-| `POST /api/conversations` | `NewConversation` | `ConversationSummary` | signed in; no tool | B21 |
-| `GET /api/conversations/:id` | — | `Conversation` | owner; no tool | B21 |
-| `PATCH /api/conversations/:id` | `ConversationUpdate` | `ConversationSummary` | owner; no tool | B21 |
-| `GET /api/conversations/:id/files` | — | `WorkspaceFile[]` | owner; no tool | B21 |
-| `POST /api/conversations/:id/files` | The file's bytes | `WorkspaceFile` | owner; no tool | B21 |
-| `GET /api/conversations/:id/files/:fileId/content` | — | The file, as an attachment | owner; no tool | B21 |
-| `DELETE /api/conversations/:id/files/:fileId` | — | `204` | owner; no tool | B21 |
 | `POST /api/conversations/:id/files/:fileId/export` | `ExportRequest` | `WorkspaceFile`; creates an approval request | owner; no tool | B25 |
 | `GET /api/drafts` | — | `DraftSummary[]` | own; `list_drafts` | B25 |
 | `GET /api/drafts/:id` | — | `Draft` | owner; `read_draft` | B25 |
@@ -164,14 +164,16 @@ The complete synthetic stream is `api/examples/chat-answer.sse`.
 
 ## 8. Conversation workspace
 
-The workspace forms belong to the agreements in table 5.2. Files have upload or generated origins. The workspace endpoints are absent from the current app.
+Conversation and file routes use owned PostgreSQL records. Saved history includes standard AG-UI text, tool and activity messages. A separate `craft.retrieval` activity records the answer message, run, model, instruction version and ordered tool/arguments/time path. Later runs retain earlier answer paths. Private transport fields are excluded from public message envelopes.
 
 1. Upload: `POST /api/conversations/:id/files` with the raw bytes and the name in `X-File-Name`. The file is `uploading`, then `processing` while it is read, then `ready` or `failed`; `statusDetail` says why.
 2. Listing, downloading and deleting are for the conversation's owner. Every download is recorded in the call log.
 3. A file is labelled by what went into it: `simulated` only if all of it is, and the highest `classification` among it.
-4. Archiving the conversation deletes its workspace. Sign-out deletes nothing. Export needs approval. `POST …/export` creates an approval request and sets `export-pending`; approved execution sets `exported`.
+4. Archive refuses an active or paused run and deletes its workspace. History remains readable. Sign-out deletes nothing. Export needs approval. `POST …/export` creates an approval request and sets `export-pending`; approved execution sets `exported`.
 
-The agreed limits are 25 MB per file and 50 files per conversation. Conversation and draft titles contain 1 to 200 characters; draft bodies contain at most 100,000 characters.
+The enforced limits are 25 MiB per file and 50 files per conversation. Conversation and draft titles contain 1 to 200 characters; draft bodies contain at most 100,000 characters.
+
+Uploads carry `X-Simulated`; their sole source classification is a validated query value, defaulting to unclassified. Bytes stay in PostgreSQL, and filenames never select a filesystem path. Upload records pass through uploading, processing and ready. Downloads return exact bytes as an attachment with nosniff.
 
 ## 9. Datacube
 
@@ -207,7 +209,7 @@ Problem names are unknown header, no unit, unknown unit, not a number, outside t
 
 ## 13. `api/types.ts`
 
-Built forms match `api/types.ts`. The final group records only the forms referenced by table 5.2. It does not add exports or endpoints to the application. Plain interfaces, string unions, arrays, optional fields and records compile to JSON Schema. AG-UI messages use the protocol package schema.
+Built forms match `api/types.ts`. The final group records the remaining table 5.2 agreements. AG-UI messages use the protocol package schema.
 
 ```ts
 import type { Message as AgUiMessage } from "@ag-ui/core";
@@ -316,34 +318,18 @@ export interface Citation {
 }
 export interface AnswerMeta { messageId: string; citations: Citation[]; confidence: Confidence }
 
-// Forms for the agreements in table 5.2.
-export type Timestamp = string;   // ISO 8601, UTC
-
-export interface NewConversation { title?: string }                                      // S3
-
+export interface NewConversation { title?: string }
 export interface ConversationUpdate { title?: string; archived?: boolean }
+export interface ConversationSummary { id: Id; title: string; updatedAt: string; archived: boolean; pendingApprovals: number }
+export interface Conversation extends ConversationSummary { messages: AgUiMessage[] }
+export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
+export type RetrievalPath = RetrievalStep[];
+export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
+export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
+export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }
 
-export interface ConversationSummary {
-  id: Id; title: string; updatedAt: Timestamp; archived: boolean; pendingApprovals: number;
-}
-
-export interface Conversation extends ConversationSummary {
-  messages: AgUiMessage[];             // user, assistant (with toolCalls), tool, activity
-}
-
-export type WorkspaceFileState =
-  | "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
-
-export interface WorkspaceFile {
-  id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number;
-  origin: "upload" | "agent";          // added by the user or made by the agent
-  state: WorkspaceFileState;
-  simulated: boolean;                  // only if everything put in it is simulated
-  classification: Classification;      // the highest of what was put in it
-  createdAt: Timestamp;
-  statusDetail?: string;               // e.g. "Parsed 14 pages"
-  exportApprovalId?: Id;               // set once an export is requested
-}
+// Remaining forms for table 5.2.
+export type Timestamp = string;   // ISO 8601, UTC
 
 export interface ExportRequest { destination: string; justification: string }            // S4
 
@@ -359,14 +345,6 @@ export interface Approval {
   id: Id; conversationId: Id; runId: Id; tool: string; summary: string;
   status: ApprovalStatus; requestedAt: Timestamp;
 }
-
-export interface RetrievalStep {
-  tool: string;                        // e.g. "search"
-  arguments: Record<string, unknown>;  // the parameters it was called with
-  at: Timestamp;
-}
-
-export type RetrievalPath = RetrievalStep[];    // in order; its length is the iteration count
 
 export interface ApprovalDetail extends Approval {
   arguments: Record<string, unknown>; evidence: Citation[]; confidence?: Confidence;
@@ -428,12 +406,21 @@ export interface Routes {
   "POST /api/summarize/upload": { body: Blob; response: T.SummaryResult };
   "POST /api/cube/similar": { body: T.SimilarMissions; response: T.SimilarPage };
   "POST /api/cube/similar/explain": { body: T.ExplainSimilarity; response: T.SimilarityExplanation };
+
+  "GET /api/conversations": { response: T.ConversationSummary[] };
+  "POST /api/conversations": { body: T.NewConversation; response: T.ConversationSummary };
+  "GET /api/conversations/:id": { response: T.Conversation };
+  "PATCH /api/conversations/:id": { body: T.ConversationUpdate; response: T.ConversationSummary };
+  "GET /api/conversations/:id/files": { response: T.WorkspaceFile[] };
+  "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };
+  "GET /api/conversations/:id/files/:fileId/content": { response: Blob };
+  "DELETE /api/conversations/:id/files/:fileId": { response: void };
 }
 ```
 
 ## 15. Examples
 
-Every built route that returns JSON names a synthetic response file. Binary routes and `204` have no JSON body; the chat route uses `api/examples/chat-answer.sse`.
+Every built JSON route has a synthetic response example. Binary and `204` responses have no JSON body. Chat uses `api/examples/chat-answer.sse`.
 
 | Route | Response type | File |
 |---|---|---|
@@ -459,6 +446,12 @@ Every built route that returns JSON names a synthetic response file. Binary rout
 | `POST /api/summarize/upload` | `SummaryResult` | `api/examples/summarize-uploaded.json` |
 | `POST /api/cube/similar` | `SimilarPage` | `api/examples/similar-missions.json` |
 | `POST /api/cube/similar/explain` | `SimilarityExplanation` | `api/examples/similarity-explanation.json` |
+| `GET /api/conversations` | `ConversationSummary[]` | `api/examples/conversations.json` |
+| `POST /api/conversations` | `ConversationSummary` | `api/examples/conversation-summary.json` |
+| `GET /api/conversations/:id` | `Conversation` | `api/examples/conversation.json` |
+| `PATCH /api/conversations/:id` | `ConversationSummary` | `api/examples/conversation-summary.json` |
+| `GET /api/conversations/:id/files` | `WorkspaceFile[]` | `api/examples/workspace-files.json` |
+| `POST /api/conversations/:id/files` | `WorkspaceFile` | `api/examples/workspace-file.json` |
 
 ## 16. Stand-ins and contract tests
 

@@ -84,6 +84,8 @@ Settings validate at startup. `CRAFT_DEV_PAGE=1` mounts the single temporary `/d
 
 Every access checks the owner; a conversation identifier grants no permission. History comes only from `messages`. CRAFT stores conversation history and agent state under section 7. Model response storage follows section 4.1; run tokens follow section 3.3. Workspace labels and export approval follow section 7.3.
 
+Conversation routes list at most 100 owned records in descending update order. Create and rename accept titles of 1 to 200 characters. Missing or foreign identifiers return 404. Archived history remains readable; runs and file operations require an active conversation. Sign-out preserves all records. Upload state and classification follow section 7.3. Downloads record linked metadata without names or bytes.
+
 ## 9.6 Deferred access
 
 | Later | What changes | What stays |

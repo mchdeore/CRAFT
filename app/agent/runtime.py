@@ -202,8 +202,24 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         "activityType": "craft.answer",
                         "content": answer,
                     }
+                    retrieval = {
+                        "id": str(uuid4()),
+                        "role": "activity",
+                        "activityType": "craft.retrieval",
+                        "content": {
+                            "messageId": value["messageId"],
+                            "runId": str(request.run_id),
+                            "model": caller.settings.model_main,
+                            "instructionsVersion": version,
+                            "path": [dict(step) for step in trace],
+                        },
+                    }
                     output.extend(
-                        [{"id": value["messageId"], "role": "assistant", "content": text}, activity]
+                        [
+                            {"id": value["messageId"], "role": "assistant", "content": text},
+                            activity,
+                            retrieval,
+                        ]
                     )
                     yield AGUIEvent(
                         type="ACTIVITY_SNAPSHOT",
@@ -213,7 +229,10 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                     )
                     continue
                 if kind == "MESSAGES_SNAPSHOT":
-                    snapshot = value["messages"]
+                    snapshot = [
+                        {key: field for key, field in message.items() if not key.startswith("_")}
+                        for message in value["messages"]
+                    ]
                     for message in snapshot:
                         if message.get("id"):
                             message["id"] = mapped(message["id"])

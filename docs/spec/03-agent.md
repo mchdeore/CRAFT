@@ -170,6 +170,8 @@ operation outcomes. Logs contain identifiers, timings and outcome codes only.
 Citations carry current library handles. Confidence stays zero and low until the
 six-input calibration exists; cited extracts remain visible and drafting is stopped.
 
+Each completed text answer also saves a `craft.retrieval` activity. It names the answer message, run, selected model, instruction version and ordered tool/arguments/time path. The record is append-only conversation history. Later runs preserve it. Public and newly saved message envelopes exclude private transport fields.
+
 ## 3.8 Deferred: more agents
 
 | Stage | Shape | Trigger |

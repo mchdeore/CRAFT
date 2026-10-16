@@ -50,6 +50,6 @@ Each milestone ends with a demonstration from a fresh clone and its tag.
 | S0 Skeleton | Start Compose and receive HTTP 200 from readiness. Stop the database and receive HTTP 503 within three seconds while liveness returns 200. CI passes. |
 | S1 Data and operations | Seed and index, then search with `craft call library.search --as demo` and receive cited hits with one operation log row. The same search runs as the `search` tool through `craft mcp --as demo`. The unsigned HTTP route returns 401. |
 | S2 Sign-in | Sign in and search on `/dev`. Sign out; the next signed-in request returns 401. |
-| S3 Chat with the fake model | Chat streams text, a tool step and a citation. Log rows link the run, tool call and operation. |
+| S3 Chat with the fake model | Chat streams text, a tool step and a citation. Saved conversations reload citations and per-answer retrieval activities. Owned files upload, download and disappear on archive. Log rows link the run, tool call and operation. |
 | S4 Approvals | Save a draft and pause for approval. Restart the server before the requester approves. The draft executes once and appears in `GET /api/drafts`. |
 | S5 Real answers | Produce cited answers with confidence over the simulated documents in the front end. |

@@ -1,3 +1,5 @@
+import type { Message as AgUiMessage } from "@ag-ui/core";
+
 export type Id = string;
 export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
@@ -101,3 +103,13 @@ export interface Citation {
   classification: Classification; quote: string;
 }
 export interface AnswerMeta { messageId: string; citations: Citation[]; confidence: Confidence }
+
+export interface NewConversation { title?: string }
+export interface ConversationUpdate { title?: string; archived?: boolean }
+export interface ConversationSummary { id: Id; title: string; updatedAt: string; archived: boolean; pendingApprovals: number }
+export interface Conversation extends ConversationSummary { messages: AgUiMessage[] }
+export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
+export type RetrievalPath = RetrievalStep[];
+export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
+export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
+export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }

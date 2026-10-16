@@ -27,4 +27,13 @@ export interface Routes {
   "POST /api/summarize/upload": { body: Blob; response: T.SummaryResult };
   "POST /api/cube/similar": { body: T.SimilarMissions; response: T.SimilarPage };
   "POST /api/cube/similar/explain": { body: T.ExplainSimilarity; response: T.SimilarityExplanation };
+
+  "GET /api/conversations": { response: T.ConversationSummary[] };
+  "POST /api/conversations": { body: T.NewConversation; response: T.ConversationSummary };
+  "GET /api/conversations/:id": { response: T.Conversation };
+  "PATCH /api/conversations/:id": { body: T.ConversationUpdate; response: T.ConversationSummary };
+  "GET /api/conversations/:id/files": { response: T.WorkspaceFile[] };
+  "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };
+  "GET /api/conversations/:id/files/:fileId/content": { response: Blob };
+  "DELETE /api/conversations/:id/files/:fileId": { response: void };
 }

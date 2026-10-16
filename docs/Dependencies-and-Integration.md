@@ -282,6 +282,7 @@ Each build step adds its checks. A step that changes behavior updates section 8 
 | B16 candidate values | `uv run pytest app/cube/tests/test_intake.py` | Header synonyms, unit conversion and every problem case pass |
 | B17 facets and similarity | `uv run pytest app/library/tests/test_facets.py app/cube/tests/test_similarity.py` | Facet validator, facet vectors, ranking and not-comparable cases pass |
 | B19 built API contract | `uv run pytest -q app/tests/test_contract.py` | Built routes and tools equal the contract; every JSON route has a schema-valid example |
+| B21 conversations and files | `uv run pytest -q app/conversations/tests app/tests/test_contract.py` | Owned history, per-answer paths, file bytes, state, limits and metadata-only download logs pass |
 | B20 native HTTP MCP | `uv run pytest -q app/infrastructure/mcp/tests/test_mcp.py` | Native clients, run-token refusal and revocation, transport parity and tool-call linkage pass |
 | B23 values through the gate | `uv run pytest app/cube/tests/test_approval_gate.py` | Values are written once, only after the requester approves |
 | B24 saved views | `uv run pytest app/cube/tests/test_views.py` | A labelled, cited JSON view saves through approval |
@@ -522,3 +523,11 @@ scopes. Connection time counts toward the run deadline. Short final writes prece
 terminal events; credentials revoke on every terminal path. Private transport fields
 are excluded from top-level AG-UI events, which validate against the held browser
 schemas. Resume returns conflict. Configured live quality is measured separately.
+
+## 25. Conversations and workspace
+
+Conversation and file operations use the existing PostgreSQL tables. A completed answer adds a typed `craft.retrieval` activity to append-only message history with its run, model, instruction version and ordered path. No migration is added. Standard AG-UI message envelopes exclude native private fields.
+
+`uv run pytest -q app/conversations/tests/test_conversations.py app/conversations/tests/test_workspace.py app/tests/test_contract.py` checks persisted reload, compiled and protocol forms, path retention, ownership, titles, file states, exact downloads, labels, limits, traversal refusal and archive deletion. Shared synthetic fixtures own all their records and clean them after the checks.
+
+`CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests/test_chat_stream.py app/infrastructure/mcp/tests/test_mcp.py` checks the unchanged stream and native tool log chain. The temporary `/dev` page supports chat streaming, saved-history reload, rename, archive and workspace upload/download/delete. The page uses the same cookie and Origin paths.
