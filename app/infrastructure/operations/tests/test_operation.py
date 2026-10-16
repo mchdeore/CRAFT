@@ -1,0 +1,273 @@
+"""Real HTTP and Python exercise the same declared pipeline."""
+
+import json
+import socket
+import subprocess
+import threading
+import time
+from dataclasses import replace
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import pytest
+import uvicorn
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import select, text
+
+from app import create_app
+from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
+from app.infrastructure.config.settings import Settings
+from app.infrastructure.database.unit_of_work import unit_of_work
+from app.infrastructure.errors import ApiError, Forbidden, InvalidInput
+from app.infrastructure.operations import DATA, operation
+from app.infrastructure.operations.context import current_call
+from app.infrastructure.operations.registry import registry
+from app.infrastructure.operations.storage import call_log
+from app.infrastructure.shapes import Shape
+
+
+class ProbeInput(Shape):
+    value: int
+
+
+class ProbeOutput(Shape):
+    value: int
+    result_value: int
+
+
+class ProbeId(Shape):
+    id: UUID
+
+
+def trusted(app: FastAPI, roles: frozenset[str] = frozenset({"member"})) -> Caller:
+    return Caller(
+        user_id=uuid4(), roles=roles, sessions=app.state.sessions, settings=app.state.settings
+    )
+
+
+def rows(app: FastAPI, name: str):
+    with app.state.engine.connect() as connection:
+        return (
+            connection.execute(
+                select(call_log).where(call_log.c.name == name).order_by(call_log.c.id)
+            )
+            .mappings()
+            .all()
+        )
+
+
+def test_operation_python_http_same_function(settings: Settings) -> None:
+    @operation(PUBLIC, get="/probe")
+    def probe(caller: Caller, request: ProbeInput) -> ProbeOutput:
+        return ProbeOutput(value=request.value, result_value=request.value + 1)
+
+    app = create_app(settings)
+    caller = trusted(app)
+    before = len(rows(app, "probe.probe"))
+    result = probe(caller, ProbeInput(value=7))
+    assert result.value == 7 and result.result_value == 8
+    with TestClient(app) as client:
+        response = client.get("/api/probe?value=7")
+    assert response.json() == {"value": 7, "resultValue": 8}
+    records = rows(app, "probe.probe")[before:]
+    assert len(records) == 2 and {r["origin"] for r in records} == {"python", "http"}
+
+
+def test_operation_validation_is_strict(settings: Settings) -> None:
+    @operation(PUBLIC, post="/probe")
+    def probe(caller: Caller, request: ProbeInput) -> ProbeOutput:
+        return ProbeOutput(value=request.value, result_value=request.value)
+
+    @operation(PUBLIC, get="/probe/{id}")
+    def by_id(caller: Caller, request: ProbeId) -> None:
+        return None
+
+    app = create_app(settings)
+    caller = trusted(app)
+    with TestClient(app) as client:
+        assert client.post("/api/probe", json={"value": 7}).status_code == 200
+        for body in [{"value": "7"}, {"value": 7, "unknown": True}]:
+            response = client.post("/api/probe", json=body)
+            assert response.status_code == 400 and response.json()["fields"]
+            with pytest.raises(InvalidInput):
+                probe(caller, body)
+        assert client.post("/api/probe", content=b"{").json()["code"] == "invalid_input"
+        assert client.get("/api/probe/not-a-uuid").json()["code"] == "invalid_input"
+
+
+def test_operation_curl_without_session(settings: Settings, tmp_path: Path) -> None:
+    @operation(SIGNED_IN, get="/probe")
+    def probe(caller: Caller) -> None:
+        return None
+
+    app = create_app(settings)
+    listener = socket.create_server(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_config=None, access_log=False, lifespan="off"))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    before = len(rows(app, "probe.probe"))
+    thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert server.started
+        headers = tmp_path / "headers.txt"
+        body = tmp_path / "body.json"
+        result = subprocess.run(
+            [
+                "curl",
+                "-sS",
+                "-D",
+                str(headers),
+                "-o",
+                str(body),
+                "-w",
+                "%{http_code}",
+                f"http://127.0.0.1:{port}/api/probe",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout == "401"
+        payload = json.loads(body.read_text())
+        assert payload["code"] == "not_signed_in"
+        request_id = next(
+            line.partition(":")[2].strip()
+            for line in headers.read_text().splitlines()
+            if line.lower().startswith("x-request-id:")
+        )
+        assert payload["requestId"] == request_id
+        recorded = rows(app, "probe.probe")[before:]
+        assert (
+            len(recorded) == 1
+            and recorded[0]["origin"] == "http"
+            and recorded[0]["outcome"] == "error"
+        )
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        listener.close()
+        assert not thread.is_alive()
+
+
+def test_operation_access_across_transports(settings: Settings) -> None:
+    @operation("accounts.manage", get="/manage")
+    def manage(caller: Caller) -> None:
+        return None
+
+    app = create_app(settings)
+    with pytest.raises(Forbidden):
+        manage(trusted(app))
+    manage(trusted(app, frozenset({"admin"})))
+    with TestClient(app) as client:
+        assert client.get("/api/manage").status_code == 401
+        assert client.get("/health/live").status_code == 200
+        assert (
+            client.request("GET", "/api/manage", json={"userId": str(uuid4())}).status_code == 401
+        )
+
+
+def test_operation_nested_call_restores_context(app: FastAPI) -> None:
+    seen = []
+
+    @operation(SIGNED_IN)
+    def inner(caller: Caller) -> None:
+        seen.append(current_call.get())
+        return None
+
+    @operation(SIGNED_IN)
+    def outer(caller: Caller) -> None:
+        parent = current_call.get()
+        inner(caller)
+        assert current_call.get() is parent
+        try:
+            inner(replace(caller, user_id=None))
+        except ApiError:
+            pass
+        assert current_call.get() is parent
+
+    caller = trusted(app)
+    outer(caller)
+    assert current_call.get() is None
+    parent = rows(app, "probe.outer")[-1]
+    child = rows(app, "probe.inner")[-2:]
+    assert len(child) == 2 and all(r["parent_call_id"] == parent["call_id"] for r in child)
+    assert len({r["call_id"] for r in [parent, *child]}) == 3
+
+
+def test_operation_read_only_and_rollback(app: FastAPI) -> None:
+    name = "test_" + uuid4().hex
+
+    @operation(PUBLIC)
+    def read(caller: Caller) -> None:
+        assert caller.sessions is not None
+        with unit_of_work(caller.sessions, read_only=True) as session:
+            session.execute(
+                text("insert into users (username,display_name) values (:name,'Test')"),
+                {"name": name},
+            )
+
+    @operation(PUBLIC, effects=DATA)
+    def write(caller: Caller) -> None:
+        assert caller.sessions is not None
+        with unit_of_work(caller.sessions) as session:
+            session.execute(
+                text("insert into users (username,display_name) values (:name,'Test')"),
+                {"name": name},
+            )
+            raise RuntimeError("Synthetic failure")
+
+    caller = trusted(app)
+    for fn in [read, write]:
+        with pytest.raises(ApiError):
+            fn(caller)
+    with app.state.engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("select count(*) from users where username=:name"), {"name": name}
+            ).scalar()
+            == 0
+        )
+    assert rows(app, "probe.write")[-1]["outcome"] == "error"
+
+
+def test_operation_registration_rejects_invalid_signature() -> None:
+    def no_caller() -> None:
+        pass
+
+    def no_output(caller: Caller):
+        pass
+
+    def probe(caller: Caller) -> None:
+        pass
+
+    for fn in [no_caller, no_output]:
+        with pytest.raises(ValueError):
+            operation(PUBLIC, get="/bad")(fn)
+    with pytest.raises(ValueError):
+        operation(PUBLIC, get="/a", post="/b")(probe)
+    with pytest.raises(ValueError):
+        operation(PUBLIC, tool=True)(probe)
+    with pytest.raises(ValueError):
+        operation(PUBLIC, get="/a", tool=True)(probe)
+    operation(PUBLIC, get="/a")(probe)
+    with pytest.raises(ValueError):
+        operation(PUBLIC, get="/a")(probe)
+    assert all(o.access for o in registry.values())
+
+
+class OptionalProbe(Shape):
+    value: int | None = None
+
+
+def test_optional_query_shape(settings: Settings) -> None:
+    @operation(PUBLIC, get="/optional")
+    def optional(caller: Caller, request: OptionalProbe) -> ProbeOutput:
+        return ProbeOutput(value=request.value or 0, result_value=request.value or 0)
+
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/optional?value=7").json()["value"] == 7
+        assert client.get("/api/optional?value=nope").status_code == 400

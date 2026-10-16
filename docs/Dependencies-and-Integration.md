@@ -293,3 +293,13 @@ Conversation history and approval records use append-only application grants. Pa
 ```bash
 uv run pytest -q app/infrastructure/tests/test_append_only.py app/infrastructure/tests/test_migrations.py
 ```
+
+## 10. Operation pipeline
+
+The operation registry generates HTTP routes and validates names, access, input and output shapes. Sync handlers run in the thread pool; context follows nested calls and resets after errors. Services choose domain transactions. The log service appends only metadata in a separate short transaction. Observation steps remain private, and SQL counters read no statements or parameters. Health probe logging follows section 5's availability exceptions.
+
+```bash
+uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture.py
+uv run pytest -q app/infrastructure/operations/tests/test_operation.py -k test_operation_curl_without_session
+uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py -k "one_row or payload or observe"
+```

@@ -1,5 +1,7 @@
 """Append-only call metadata. This table never holds request or result content."""
 
+from typing import Any
+
 from sqlalchemy import (
     UUID,
     BigInteger,
@@ -13,6 +15,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.orm import Session
 
 from app.infrastructure.database.metadata import metadata
 
@@ -45,3 +48,16 @@ Index("ix_call_log_at", call_log.c.at)
 Index("ix_call_log_user_id_at", call_log.c.user_id, call_log.c.at)
 Index("ix_call_log_run_id", call_log.c.run_id)
 Index("ix_call_log_request_id", call_log.c.request_id)
+
+
+def append_call(session: Session, fields: dict[str, Any]) -> None:
+    """Append only declared metadata using the orchestration's explicit session."""
+    session.execute(
+        call_log.insert().values(
+            **{
+                name: fields[name]
+                for name in call_log.c.keys()
+                if name in fields and name not in {"id", "at"}
+            }
+        )
+    )

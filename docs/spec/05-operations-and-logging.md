@@ -87,3 +87,5 @@ Each operation declares a permission. Account roles are rows in `user_roles` (§
 - Never logged: passwords, tokens, bodies, prompts, conversation or document text, query strings, exception messages. Uvicorn's access log is off; Outbound HTTP and Alembic loggers stay at `WARNING` (they print URLs).
 - Logs aren't audit: approvals keep their own records.
 - Deferred: OpenTelemetry export (Agent Framework already emits traces) to Azure Monitor; retention.
+
+Health probes preserve availability when log storage is unavailable. Liveness emits its operation event to stdout without database work. Readiness emits a database row only when the database is ready; an unavailable result emits stdout only and keeps the three-second deadline.

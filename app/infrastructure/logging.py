@@ -9,6 +9,9 @@ from typing import IO, Any
 
 ALLOWED_FIELDS = (
     "method", "path", "status", "duration_ms", "request_id", "error_type",
+    "kind", "name", "origin", "outcome", "error_code", "db_statements", "db_ms",
+    "call_id", "parent_call_id", "user_id", "auth_session_id",
+    "conversation_id", "run_id", "tool_call_id",
 )  # fmt: skip
 QUIET = ("httpx", "httpx2", "httpcore", "alembic")  # chatty at INFO; URLs include query strings
 
@@ -23,7 +26,7 @@ class JsonFormatter(logging.Formatter):
         }
         fields = getattr(record, "fields", {})
         line.update((key, fields[key]) for key in ALLOWED_FIELDS if key in fields)
-        return json.dumps(line, separators=(",", ":"))
+        return json.dumps(line, separators=(",", ":"), default=str)
 
 
 def configure_logging(level: str, stream: IO[str] | None = None) -> None:
@@ -44,3 +47,20 @@ def configure_logging(level: str, stream: IO[str] | None = None) -> None:
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
+
+
+def instrument_sql(engine: Any) -> None:
+    """Count statements and elapsed time without reading SQL or parameters."""
+    from sqlalchemy import event
+
+    from app.infrastructure.operations.context import end_statement, start_statement
+
+    def before(*_: Any) -> None:
+        start_statement()
+
+    def after(*_: Any) -> None:
+        end_statement()
+
+    event.listen(engine, "before_cursor_execute", before)
+    event.listen(engine, "after_cursor_execute", after)
+    event.listen(engine, "handle_error", after)
