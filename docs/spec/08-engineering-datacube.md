@@ -103,6 +103,10 @@ A citation handle names everything needed to show and re-check a quote. It survi
 
 Tags filter; embeddings rank. Mission, silo and stage tags come from the provider path and are copied to each document version and chunk. Tags are never embedded.
 
+![Datacube tables, their relations and what is embedded](images/datacube-tables.svg)
+
+Thick blue arrows go into `vectors`: chunks, document versions and facet texts are the only embedded records. Access grants (section 8.15) are not shown.
+
 | Record | Tags | Embeddings | What is embedded |
 |---|---|---|---|
 | Chunk | Mission, silo, stage, simulated, from its document | 1 | `chunk-v1`: title, heading path and text |

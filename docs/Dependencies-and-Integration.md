@@ -219,6 +219,12 @@ Build prerequisites are Git, Python 3, Pandoc `3.11`, Poppler and Chrome or Chro
 docs/tools/build.sh
 ```
 
+Diagrams are Mermaid sources in `docs/spec/images/*.mmd`, each committed with the Scalable Vector Graphics (SVG) file rendered from it. `docs/tools/diagrams.sh` renders them with Mermaid CLI `11.12.0` and Mermaid `11.12.0` through `npm exec`, using `docs/tools/mermaid.json` (Charter, no HTML labels) and the Chrome that `CHROME` selects. It needs Node.js and npm. The documents build embeds each SVG in the PDF; it never runs Mermaid.
+
+```bash
+docs/tools/diagrams.sh
+```
+
 The output directory is `docs/build`. The build produces `CRAFT-Dependencies-and-Integration.pdf` alongside `CRAFT-Specification.pdf`, `CRAFT-API-Contract.pdf` and `index.html`. Dates come from each source's last Git change. Uncommitted sources use the current date and draft revision. The specification index receives page numbers in a second pass.
 
 The documents workflow builds on every pull request, pushes to `main` and manual dispatch. Pull requests use Linux and verify only. Other events use macOS. The output check permits only the HTML index and named CRAFT PDFs. Private notes, source material and import packages stay outside publication.

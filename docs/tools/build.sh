@@ -29,6 +29,7 @@ pdf() {  # pdf <prepared.md> <label> <out.pdf>
     echo "  font: 7.5pt Charter, \"Charis SIL\", Charis, Georgia, serif; color: #555; } }"
     echo "</style>"; } > "$head"
   pandoc -f gfm -t html5 -s --columns=10000 --syntax-highlighting=none \
+    --embed-resources --resource-path="$ROOT/docs/spec" \
     --metadata pagetitle="CRAFT $2" -H "$head" "$1" -o "$html"
   # The keychain and first-run flags keep Chrome from waiting on a prompt on a macOS CI runner;
   # perl's alarm stops a Chrome that hangs anyway, and its log is shown.
