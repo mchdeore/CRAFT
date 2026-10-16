@@ -400,6 +400,17 @@ def test_summarize_foreign_admin_and_disabled(cube_source, monkeypatch):
             connection.execute(
                 m.provider_items.delete().where(m.provider_items.c.item == item["item"])
             )
+            facets = list(
+                connection.execute(
+                    select(m.facet_texts.c.id).where(m.facet_texts.c.mission_key == other)
+                ).scalars()
+            )
+            connection.execute(
+                m.vectors.delete().where(
+                    m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets)
+                )
+            )
+            connection.execute(m.facet_texts.delete().where(m.facet_texts.c.mission_key == other))
             connection.execute(m.missions.delete().where(m.missions.c.key == other))
 
 
