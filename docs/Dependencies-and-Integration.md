@@ -287,3 +287,9 @@ uv run pytest -q app/infrastructure/tests/test_migrations.py app/infrastructure/
 CRAFT_DATABASE_NAME=craft_test uv run alembic upgrade head
 CRAFT_DATABASE_NAME=craft_test uv run alembic check
 ```
+
+Conversation history and approval records use append-only application grants. Partial unique indexes enforce one approval decision and one execution outcome. The read-only status view selects the latest event. Run-token digests and runtime state remain separate from message content.
+
+```bash
+uv run pytest -q app/infrastructure/tests/test_append_only.py app/infrastructure/tests/test_migrations.py
+```

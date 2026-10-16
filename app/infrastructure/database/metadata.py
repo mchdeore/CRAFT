@@ -17,7 +17,13 @@ def register_tables() -> None:
     """Import the table declarations without opening a connection."""
     from importlib import import_module
 
-    for module in ("app.accounts.storage", "app.infrastructure.operations.storage"):
+    for module in (
+        "app.accounts.storage",
+        "app.infrastructure.operations.storage",
+        "app.conversations.storage",
+        "app.agent.storage",
+        "app.approvals.storage",
+    ):
         import_module(module)
 
 

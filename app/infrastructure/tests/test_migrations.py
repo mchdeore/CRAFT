@@ -56,3 +56,15 @@ def test_accounts_call_log_migration_roundtrip(
     assert inspector.get_foreign_keys("call_log") == []
     command.upgrade(config, "head")
     assert_models(connection)
+
+
+def test_conversation_run_approval_roundtrip(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0002")
+    assert "approval_requests" not in inspect(connection).get_table_names()
+    command.upgrade(config, "0005")
+    assert "approval_status" in inspect(connection).get_view_names()
+    command.upgrade(config, "head")
+    assert_models(connection)
