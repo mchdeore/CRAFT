@@ -297,3 +297,24 @@ def test_native_output_constraints_are_checked_for_shapes_and_lists(settings: Se
             assert response.status_code == 500 and response.json()["code"] == "internal_error"
     assert rows(app, "probe.bad_output")[-1]["error_code"] == "internal_error"
     assert rows(app, "probe.bad_output_list")[-1]["error_code"] == "internal_error"
+
+
+def test_default_shape_input_on_http_and_python(app):
+    from fastapi.testclient import TestClient
+
+    from app import create_app
+    from app.infrastructure.shapes import Shape
+
+    class DefaultInput(Shape):
+        value: int = 7
+
+    @operation(PUBLIC, get="/default-input-probe")
+    def default_input_probe(caller: Caller, request: DefaultInput) -> DefaultInput:
+        return request
+
+    assert default_input_probe(trusted(app)).value == 7
+    with pytest.raises(InvalidInput):
+        default_input_probe(trusted(app), {"value": "invalid"})
+    with TestClient(create_app(app.state.settings)) as http:
+        result = http.get("/api/default-input-probe")
+        assert result.status_code == 200 and result.json() == {"value": 7}

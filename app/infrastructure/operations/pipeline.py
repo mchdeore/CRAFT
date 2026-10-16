@@ -54,6 +54,8 @@ def decode(operation: Operation, value: Any) -> Any:
             raise InvalidInput(fields=[FieldError(path="$", message="No input is accepted.")])
         return None
     try:
+        if value is None:
+            value = {}
         if isinstance(value, operation.input):
             return msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
         if isinstance(value, (bytes, bytearray)):
