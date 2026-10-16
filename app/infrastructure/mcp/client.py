@@ -60,7 +60,11 @@ def client(url, raw_token, results, allowed=None):
     allowlist = (
         allowed
         if allowed is not None
-        else [o.tool_name for o in registry.values() if o.tool and o.effects == "NONE" and o.tool_name != "ask_agent"]
+        else [
+            o.tool_name
+            for o in registry.values()
+            if o.tool and o.effects == "NONE" and o.tool_name != "ask_agent"
+        ]
     )
 
     def parse(result):
