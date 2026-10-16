@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app import create_app
 from app.agent import runtime
 from app.agent.fake import FakeChatClient
 from app.agent.handlers import RunAgentInput, run_agent
@@ -34,7 +35,18 @@ def chat(cube_source):
             )
             .returning(table.c.id)
         ).scalar_one()
-    yield source | {"thread": identifier}
+    if getattr(source["settings"], "mcp_url", None):
+        from app.infrastructure.mcp.tests.http_fixture import live_server
+
+        with live_server(source["app"]):
+            configured = source["app"].state.settings
+            yield source | {
+                "thread": identifier,
+                "settings": configured,
+                "caller": replace(source["caller"], settings=configured),
+            }
+    else:
+        yield source | {"thread": identifier}
     with source["owner"].begin() as connection:
         connection.execute(
             m.metadata.tables["messages"]
@@ -144,7 +156,7 @@ def test_chat_stream_valid_events_in_order(chat):
             .all()
         )
     assert set(identifiers) == {message["id"] for message in stored}
-    with TestClient(chat["app"], base_url="https://testserver") as client:
+    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
         assert chat["sign_in"](client).status_code == 200
         response = client.post(
             "/api/agent/runs",
@@ -332,7 +344,7 @@ def test_chat_stream_output_budget(chat, monkeypatch):
 
 def test_http_disconnect_preserves_state_and_cancels(chat):
     data = request(chat)
-    with TestClient(chat["app"], base_url="https://testserver") as client:
+    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
         assert chat["sign_in"](client).status_code == 200
         cookie = client.cookies.get("__Host-craft_session")
     assert cookie is not None
