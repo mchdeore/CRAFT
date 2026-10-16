@@ -1,6 +1,6 @@
 """Readable library queries use explicit sessions and never choose transactions."""
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
@@ -39,6 +39,42 @@ def blocks(session: Session, version_id, first: int = 1, last: int = 2147483647)
         )
         .mappings()
         .all()
+    )
+
+
+def differences(session: Session, before, after):
+    return list(
+        session.execute(
+            select(
+                m.version_diffs.c.change,
+                m.version_diffs.c.from_block,
+                m.version_diffs.c.to_block,
+            )
+            .where(
+                m.version_diffs.c.from_version == before,
+                m.version_diffs.c.to_version == after,
+            )
+            .order_by(m.version_diffs.c.seq)
+            .limit(501)
+        ).mappings()
+    )
+
+
+def provider_readable(session: Session, caller: Caller, record) -> bool:
+    mission = record["mission_key"]
+    if mission is None or "admin" in caller.roles:
+        return True
+    return (
+        session.execute(
+            select(m.mission_grants.c.user_id)
+            .where(
+                m.mission_grants.c.user_id == caller.user_id,
+                m.mission_grants.c.mission_key == mission,
+                or_(m.mission_grants.c.silo.is_(None), m.mission_grants.c.silo == record["silo"]),
+            )
+            .limit(1)
+        ).first()
+        is not None
     )
 
 

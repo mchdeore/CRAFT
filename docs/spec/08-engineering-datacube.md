@@ -45,7 +45,7 @@ The provider is a folder on disk with a sidecar record. The setting `CRAFT_PROVI
 | Concept | Rule | Example |
 |---|---|---|
 | Item | `itm_` and 12 lowercase hexadecimal characters, assigned when the file is first seen. A move or rename keeps it | `itm_4f9c2a0b1c2d` |
-| Version | Numbered from 1. Every content change makes a new version. Old versions stay readable | `itm_4f9c2a0b1c2d` version 3 |
+| Version | Numbered from 1. Every content change makes a new version. Old versions stay readable; each new version records its original filename and media type | `itm_4f9c2a0b1c2d` version 3 |
 | Content hash | SHA-256 of the version's bytes | `sha256:9b1e…` |
 | Move | Same item, new path. A file that vanished and a new file with the same hash in one scan are one move | Path changes; item and versions stay |
 | Delete | The item is marked deleted. Its versions stay | `deleted_at` is set |
@@ -178,6 +178,8 @@ create table facet_texts (id, mission_key text not null references missions,
 5. Rebuild the facet texts and facet vectors of every mission whose documents changed.
 6. Store the new cursor.
 
+Block matching preserves repeated text. Equal hashes at the same position are unchanged; remaining equal hashes pair in ascending position order and are moved. Remaining pairs at the same position are changed; unmatched blocks are added or removed. Differences are stored with the new version in the same transaction.
+
 Running `craft index` twice in a row adds nothing. `craft index --rebuild` empties the library tables and indexes every version of every item again; cube values and their citations are untouched.
 
 | Change in the provider | Library | Cube |
@@ -303,6 +305,10 @@ Example: peak power 400 W valid from 1 January (version 1) and 450 W valid from 
 | `compare_versions` | Lists blocks added, removed, changed or moved between two versions | Write a merged document |
 | `preview` | Streams the original at the cited version, opened at the locator; HTTP only | Store the bytes in CRAFT |
 | `download` | Streams the original at a version as an attachment; HTTP only | Store the bytes in CRAFT |
+
+Version comparisons return at most 500 differences, with a truncation flag. Consecutive comparisons use stored differences; other pairs use the same hash rules on demand. Equal versions have no differences. Missing versions are not found.
+
+Citation checks read the exact provider version after both indexed and live mission access pass. Live deletion gives withdrawn. The freshly converted block or cited table row supplies the quote hash; a missing or mismatched quote gives changed. A matching older quote gives newer_version, including versions not yet indexed. The result includes the latest provider version. Cached chunks remain untouched.
 
 ## 8.12 Parametric search, comparison and evidence
 

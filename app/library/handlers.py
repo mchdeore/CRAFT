@@ -118,6 +118,44 @@ class OriginalRef(Shape):
     locator: str | None = None
 
 
+class CitationCheck(Shape):
+    handle: CitationHandle
+
+
+class CitationStatus(Shape):
+    status: Literal["current", "changed", "newer_version", "withdrawn"]
+    latest_version: int
+
+
+class CompareVersions(Shape):
+    item: str
+    from_version: Annotated[int, msgspec.Meta(ge=1)]
+    to_version: Annotated[int, msgspec.Meta(ge=1)]
+
+
+class DiffBlock(Shape):
+    change: Literal["added", "removed", "changed", "moved"]
+    from_block: int | None
+    to_block: int | None
+
+
+class VersionDiff(Shape):
+    blocks: list[DiffBlock]
+    truncated: bool
+
+
+@operation(SIGNED_IN, post="/library/citations/check", tool=True)
+def check_citation(caller: Caller, request: CitationCheck) -> CitationStatus:
+    """Check a quote against its readable original version; for example a table-row citation."""
+    return service.check_citation(caller, request)
+
+
+@operation(SIGNED_IN, get="/library/documents/{item}/compare", tool=True)
+def compare_versions(caller: Caller, request: CompareVersions) -> VersionDiff:
+    """Compare readable versions by block hash; for example versions one and three."""
+    return service.compare_versions(caller, request)
+
+
 @operation(SIGNED_IN, post="/library/search", tool=True)
 def search(caller: Caller, request: LibrarySearch) -> LibraryHits:
     """Find readable source blocks. Use for document questions; for example radiator margin."""
@@ -192,23 +230,16 @@ def inspect_file(caller: Caller, request: RawFile) -> InspectedFile:
 
 
 def citation_status(caller: Caller, handle: CitationHandle):
-    """Read citation status from authorized library records without re-reading a file."""
-    document = get_document(caller, DocumentRef(item=handle.item, version=handle.version))
-    return (
-        "withdrawn"
-        if document.deleted
-        else "newer_version"
-        if any(v.version > handle.version for v in document.versions)
-        else "current"
-    )
+    """Use the checked fresh-source operation for cross-feature citation status."""
+    return check_citation(caller, CitationCheck(handle=handle)).status
 
 
 def citation_quote(caller: Caller, handle: CitationHandle) -> str:
     """Read the authorized cached block or source row named by a citation."""
     import hashlib
-    import re
 
     from app.infrastructure.errors import NotFound
+    from app.library.citation import quote as locate_quote
 
     page = read_chunks(
         caller,
@@ -219,23 +250,9 @@ def citation_quote(caller: Caller, handle: CitationHandle) -> str:
     if not page.chunks:
         raise NotFound()
     chunk = page.chunks[0]
-    base, marker, number = handle.locator.rpartition(";row=")
-    if marker:
-        if base != chunk.handle.locator or not number.isdigit():
-            raise NotFound()
-        window = re.search(r";rows=(\d+)-(\d+)", base)
-        region = re.search(r";range=[A-Z]+(\d+):", base)
-        ordinal = int(number) - (int(region[1]) if region else 0)
-        first = int(window[1]) if window else 1
-        index = 2 + ordinal - first
-        lines = chunk.text.splitlines()
-        if index < 2 or index >= len(lines):
-            raise NotFound()
-        quote = lines[index]
-    else:
-        if handle.locator != chunk.handle.locator:
-            raise NotFound()
-        quote = chunk.text
+    quote = locate_quote(chunk.text, handle.locator, chunk.handle.locator)
+    if quote is None:
+        raise NotFound()
     if hashlib.sha256(quote.encode()).hexdigest() != handle.quote_sha256:
         raise NotFound()
     return quote

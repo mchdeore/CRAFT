@@ -1,5 +1,7 @@
 import type * as T from "./types";
 export interface Routes {
+  "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
+  "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number }; response: T.VersionDiff };
   "GET /health/live": { response: T.Health };
   "GET /health/ready": { response: T.Health };
   "POST /api/library/search": { body: T.LibrarySearch; response: T.LibraryHits };

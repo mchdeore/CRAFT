@@ -543,3 +543,9 @@ export interface SummaryResult {
 `SummarySource.version` hashes exact original bytes. `blockVersion` hashes the full normalized block quote. A selected citation keeps the provider handle; an upload has no provider handle or version. Every sentence cites complete supporting source context. Provider-path evidence supplies selected tags; upload filing evidence includes source headings and quotes. Missing or conflicting filing values are null.
 
 Until the six-input confidence calibration is defined, scores remain zero, the level is low and status is `insufficient_evidence`. Cited extracts remain visible and no draft or filing is written. Model self-rating is ignored. Upload originals download from the owned File object; exact quoted blocks remain readable on the page. Tokens never enter browser storage.
+
+## 17. Version differences and fresh citations
+
+`CompareVersions` names one readable item and two positive integer versions. The response contains at most 500 ordered added, removed, changed or moved blocks, with nullable source and target positions and a truncation flag. Equal versions return an empty list. Missing or unreadable versions return 404.
+
+`CitationCheck` holds one canonical handle. It returns current, changed, newer_version or withdrawn and the latest provider version. The original is re-read outside database transactions. A row locator checks only its table row. Live source permissions apply before original bytes are read. Nonpositive positions return 400; a missing or mismatched quote returns changed. No source text is returned by these two operations.

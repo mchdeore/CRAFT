@@ -15,6 +15,7 @@ from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library.convert import convert
+from app.library.diff import compare
 from app.library.embed import embed, model_name
 
 
@@ -73,7 +74,8 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                     continue
                 try:
                     blocks = convert(
-                        provider.read_content(item["item"], version["version"]), item["path"]
+                        provider.read_content(item["item"], version["version"]),
+                        version.get("file_name", item["path"]),
                     )
                 except (ValueError, UnicodeDecodeError):
                     counts["unsupported"] += 1
@@ -116,7 +118,9 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                             item=item["item"],
                             version=version["version"],
                             sha256=bytes.fromhex(version["sha256"]),
-                            media_type=mimetypes.guess_type(item["path"])[0] or "text/plain",
+                            media_type=version.get("media_type")
+                            or mimetypes.guess_type(item["path"])[0]
+                            or "text/plain",
                             summary=summary,
                             summary_kind=summary_kind,
                         )
@@ -155,6 +159,33 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                             )
                         )
                         counts["chunks"] += 1
+                    previous = session.execute(
+                        select(m.doc_versions.c.id).where(
+                            m.doc_versions.c.item == item["item"],
+                            m.doc_versions.c.version == version["version"] - 1,
+                        )
+                    ).scalar_one_or_none()
+                    if previous is not None:
+                        old = {
+                            int(position): bytes(value)
+                            for position, value in session.execute(
+                                select(m.chunks.c.block, m.chunks.c.text_sha256).where(
+                                    m.chunks.c.doc_version_id == previous
+                                )
+                            )
+                        }
+                        new = {b.block: hashlib.sha256(b.text.encode()).digest() for b in blocks}
+                        differences = compare(old, new)
+                        for seq, difference in enumerate(differences, 1):
+                            session.execute(
+                                m.version_diffs.insert().values(
+                                    from_version=previous,
+                                    to_version=document,
+                                    seq=seq,
+                                    **difference,
+                                )
+                            )
+                        counts["differences"] += len(differences)
                     counts["versions"] += 1
         with unit_of_work(sessions) as session:
             cursor = 0

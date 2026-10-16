@@ -286,6 +286,83 @@ def explore(caller: Caller, request):
     )
 
 
+def compare_versions(caller: Caller, request):
+    from app.library.diff import compare
+    from app.library.handlers import DiffBlock, VersionDiff
+
+    sessions, _ = scope(caller)
+    with unit_of_work(sessions, read_only=True) as session:
+        _, before, _ = readable_version(session, caller, request.item, request.from_version)
+        _, after, _ = readable_version(session, caller, request.item, request.to_version)
+        stored = (
+            storage.differences(session, before["id"], after["id"])
+            if request.to_version == request.from_version + 1
+            else []
+        )
+        if stored:
+            rows = [dict(row) for row in stored]
+        else:
+            old = {
+                row["block"]: bytes(row["text_sha256"])
+                for row in storage.blocks(session, before["id"])
+            }
+            new = {
+                row["block"]: bytes(row["text_sha256"])
+                for row in storage.blocks(session, after["id"])
+            }
+            rows = compare(old, new)
+    return VersionDiff(blocks=[DiffBlock(**row) for row in rows[:500]], truncated=len(rows) > 500)
+
+
+def check_citation(caller: Caller, request):
+    import hashlib
+
+    from app.library.citation import quote
+    from app.library.convert import convert
+    from app.library.handlers import CitationStatus
+
+    handle = request.handle
+    if handle.version < 1 or handle.block < 1:
+        raise InvalidInput()
+    sessions, settings = scope(caller)
+    with unit_of_work(sessions, read_only=True) as session:
+        item, version, _ = readable_version(session, caller, handle.item, handle.version)
+    provider = SimulatedProvider(settings.provider_root)
+    try:
+        live = provider.get_item(handle.item)
+    except KeyError:
+        raise NotFound() from None
+    with unit_of_work(sessions, read_only=True) as session:
+        if not storage.provider_readable(session, caller, live):
+            raise NotFound()
+    latest = max(row["version"] for row in live["versions"])
+    if live["deleted_at"] is not None:
+        return CitationStatus(status="withdrawn", latest_version=latest)
+    try:
+        source = provider.read_content(handle.item, handle.version)
+    except KeyError:
+        raise NotFound() from None
+    original_version = next(row for row in live["versions"] if row["version"] == handle.version)
+    filename = original_version.get("file_name", item["path"])
+    try:
+        blocks = convert(source, filename)
+    except (ValueError, UnicodeDecodeError):
+        return CitationStatus(status="changed", latest_version=latest)
+    selected = next((block for block in blocks if block.block == handle.block), None)
+    actual = quote(selected.text, handle.locator, selected.locator) if selected else None
+    correct = (
+        actual is not None and hashlib.sha256(actual.encode()).hexdigest() == handle.quote_sha256
+    )
+    return CitationStatus(
+        status="changed"
+        if not correct
+        else "newer_version"
+        if latest > handle.version
+        else "current",
+        latest_version=latest,
+    )
+
+
 def original(caller: Caller, request, attachment: bool) -> Response:
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:

@@ -65,3 +65,8 @@ export interface SummarySentence { text: string; citations: SummaryCitation[] }
 export interface FilingSuggestion { value: string | null; confidence: number; evidence: SummaryCitation[]; path: string | null }
 export interface Confidence { score: number; level: "high" | "medium" | "low"; reason: string }
 export interface SummaryResult { source: SummarySource; sentences: SummarySentence[]; mission: FilingSuggestion; silo: FilingSuggestion; stage: FilingSuggestion; confidence: Confidence; status: "supported" | "insufficient_evidence" }
+
+export interface CitationCheck { handle: CitationHandle }
+export interface CitationStatus { status: "current" | "changed" | "newer_version" | "withdrawn"; latestVersion: number }
+export interface CompareVersions { item: string; fromVersion: number; toVersion: number }
+export interface VersionDiff { blocks: {change: "added" | "removed" | "changed" | "moved"; fromBlock: number | null; toBlock: number | null}[]; truncated: boolean }

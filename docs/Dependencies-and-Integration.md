@@ -449,3 +449,7 @@ curl -s -o /tmp/craft-summary-page.html -w '%{http_code}' http://localhost:8000/
 ```
 
 The page uses text nodes for titles, quotes and suggestions. Selection and uploads clear one another; failures clear stale output and re-enable controls. The password field clears before submission, and requests include the cookie. Upload originals download from the owned File object; exact quoted blocks remain readable on the page. Browser checks are recorded separately from server checks.
+
+## 20. Version differences and citation checks
+
+`uv run pytest -q app/library/tests/test_versions.py` checks stored and arbitrary-pair differences, duplicate blocks, 500-row truncation, live provider versions and withdrawals, row-only hashes, access and compiled request/response forms. The demo check rebuilds all provider versions and verifies every planted version change. `uv run craft operations | grep -cE '^library\.(compare_versions|check_citation) '` returns 2. `uv run alembic upgrade head && uv run alembic check` verifies the existing difference table without a schema change.
