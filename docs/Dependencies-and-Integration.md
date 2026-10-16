@@ -251,24 +251,22 @@ A deadline for each application transaction is added with the transaction-using 
 
 ## 8. Datacube measures and component checks
 
-The datacube is a later application component. The following commands are added with their named build steps. These are acceptance targets; they are not executions on the S0 skeleton.
+Each build step adds its checks. A step that changes behavior updates section 8 of the specification in the same pull request.
 
-| Measure | Exact executable acceptance or planned build check | Expected result |
+| Step | Command | Expected result |
 |---|---|---|
-| Parametric set | Fixture state at January date with mass/power conjunction | Exactly the two expected readable missions |
-| Append-only values | Fixture insert as craft_app then UPDATE/DELETE | INSERT succeeds; both mutation attempts denied |
-| Option context | Fixture option from another mission | Foreign key violation caught |
-| Access and counts | Fixture mission/silo/evidence restrictions and empty account | Only authorized records counted; empty account count zero |
-| Time | Fixture three dates around two mass changes | Exact expected synthetic value on each date |
-| Similarity baseline | Known same, near, partial and far pairs with 0.6/0.4 weights, 10/20 scales and 0.6 coverage floor | Exact order, per-parameter shares and zero-distance behavior |
-| B09 schema/access | uv run pytest app/datacube/tests/test_schema_access.py | Empty upgrade, grants, composite keys and no leakage pass |
-| B10 parser | uv run pytest app/documents/tests/test_intake.py | Literal-only intake; locators and inert executable contents pass |
-| B11 metadata | uv run pytest app/documents/tests/test_metadata.py | Evidence-backed identity and duplicate-hash behavior pass |
-| B12 dictionary/filters | uv run pytest app/datacube/tests/test_parametric.py | Units, markers, logical-cell state before filtering, exact conjunction pass |
-| B15 candidate intake | uv run pytest app/datacube/tests/test_intake.py | Typed batch, unit recipe, idempotency and errors pass |
-| B16 comparison/evidence | uv run pytest app/datacube/tests/test_compare.py | Fixed times, option/class scope, computed delta and readable evidence pass |
-| B17 similarity | uv run pytest app/datacube/tests/test_similarity.py | Frozen sigma, reference-set access, shares, coverage and cutoff pass |
-| B23 write gate | uv run pytest app/datacube/tests/test_approval_gate.py | Requester approve/reject, hash/replay, revoked access, transactional once pass |
-| B24 bounded view | uv run pytest app/datacube/tests/test_views.py | Labelled JSON workspace view and existing external-export gate pass |
+| B03 library tables | `uv run pytest app/infrastructure/tests/test_library_schema.py` | Migration 0006 creates the library tables; `craft_app` reads them and writes only `mission_grants` |
+| B05 MCP adapter | `uv run pytest app/infrastructure/mcp/tests/test_stdio.py` | Every tool operation is listed; calls run the operation pipeline and log `origin=mcp` |
+| B06 provider and library | `uv run pytest app/infrastructure/provider/tests app/library/tests` | Scan, change feed, indexing, search, neighbours and access pass |
+| B09 cube tables | `uv run pytest app/cube/tests/test_schema_access.py` | Migrations 0009 to 0011, append-only values and mission access pass |
+| B10 office formats | `uv run pytest app/library/tests/test_convert.py` | Each format gives ordered chunks with locators; formulas and scripts never run |
+| B11 demo seeder | `uv run pytest app/seed/tests/test_demo.py` | The same seed number gives the same bytes and ground truth |
+| B12 cube reads | `uv run pytest app/cube/tests/test_parametric.py app/cube/tests/test_compare.py` | Units, conditions, state on a date, comparison and evidence pass |
+| B15 version differences and citations | `uv run pytest app/library/tests/test_versions.py` | Edits, moves, deletes, block differences and citation status pass |
+| B16 candidate values | `uv run pytest app/cube/tests/test_intake.py` | Header synonyms, unit conversion and every problem case pass |
+| B17 facets and similarity | `uv run pytest app/library/tests/test_facets.py app/cube/tests/test_similarity.py` | Facet validator, facet vectors, ranking and not-comparable cases pass |
+| B23 values through the gate | `uv run pytest app/cube/tests/test_approval_gate.py` | Values are written once, only after the requester approves |
+| B24 saved views | `uv run pytest app/cube/tests/test_views.py` | A labelled, cited JSON view saves through approval |
+| B25 evaluation | `uv run craft eval` | Fused recall at 8 is at least keyword-only recall on the demo ground truth |
 
-Record the median and 95th-percentile elapsed time and encoded bytes for fixed synthetic queries and corpus sizes. Measure tool selection, argument validity, permission leaks, arithmetic support, citations, unsupported claims, clarification/refusal and approval correctness. Adversarial acceptance requires zero observed permission leaks and unapproved effects. Parser failures are grouped by format and representation. Contract checks compare actual registered routes and Python/TypeScript forms, including nested GET scope decoding. The label set fixes thresholds before real-model acceptance. No SQL result establishes browser or agent behavior.
+Fixed synthetic queries record the median and 95th-percentile time and encoded bytes. Adversarial checks require zero permission leaks and zero unapproved writes.

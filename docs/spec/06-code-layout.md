@@ -10,10 +10,10 @@ app/
   main.py              app = create_app(Settings.from_env())
   cli.py               S0: craft --version; later slices: seed, users, operations, call
   infrastructure/      shared; never imports a feature
-    config/ database/ operations/ mcp/ access.py logging.py requests.py errors.py shapes.py paths.py
+    config/ database/ operations/ mcp/ provider/ access.py logging.py requests.py errors.py shapes.py paths.py
   health/              /health/live, /health/ready
   agent/               runtime, instructions.md, chat + tools-list operations
-  <feature>/           accounts, conversations, documents, drafts, approvals, retrieval
+  <feature>/           accounts, conversations, library, cube, drafts, approvals
     handlers.py        shapes + operations (the only entry points)
     service.py         rules, only when there's logic beyond one query
     storage.py         tables and queries with an explicit Session; never commits
@@ -31,7 +31,7 @@ Create only the files a feature needs. S0 provides configuration, the database p
 
 - Code: reads like a story (short functions, one level of detail, no clever code); start with a plain function, add a decorator for shared behavior, and add a `Protocol` only when two real implementations exist; enforce a rule with a database constraint first, then a type, validation or an assertion when needed.
 - Python: standard Python style, Pyright, Ruff format at 100 columns, docstrings on public functions, narrow `except`, every `noqa` / `type: ignore` has a reason.
-- Names: operation `<feature>.<verb_noun>` (`documents.read_document`), tool `<verb_noun>`, input `VerbNoun`, output `Noun`, errors `snake_case`, names read as sentences.
+- Names: operation `<feature>.<verb_noun>` (`library.get_document`), tool `<verb_noun>`, input `VerbNoun`, output `Noun`, errors `snake_case`, names read as sentences.
 - Dependencies: `uv add`, `uv sync --locked`, never `pip install`. A version changes only in a pull request with verified compatibility.
 - Git uses one long-lived branch, `main`, and reviewed pull requests. Merge and branch cleanup require explicit authorization. A tag marks each milestone.
 - No secrets in code, config, logs, tickets or PRs.

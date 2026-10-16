@@ -91,28 +91,37 @@ create unique index on approval_events (request_id) where kind in ('executed','f
 create view approval_status as select distinct on (request_id) request_id, kind, actor_id, at
   from approval_events order by request_id, at desc, id desc;
 
--- 0006_create_documents                             craft_app: SELECT (the seed writes as craft_owner)
-create table documents (id, title text not null, source text not null, revision int not null,
-  sha256 bytea not null, simulated boolean not null,
+-- 0006_create_library                              craft_app: SELECT (indexing writes as craft_owner);
+--                                                  mission_grants: INSERT, DELETE
+create table provider_items (item text primary key check (item ~ '^itm_[0-9a-f]{12}$'),
+  path text not null, title text not null, mission_key text null, silo text null, stage text null,
+  simulated boolean not null,
   classification text check (classification in ('unclassified','protected-a','protected-b')),
-  required_role text null, created_at ts);                                  -- null = every member
-create table document_files (document_id uuid references documents, revision int,
-  sha256 bytea not null, name text not null, media_type text not null, size_bytes int not null,
-  bytes bytea not null, created_at ts, primary key (document_id, revision),
-  unique (document_id, sha256));                                    -- the original, every version
-create table document_sections (id, document_id uuid not null references documents,
-  revision int not null, seq int not null, heading text not null, locator text not null,
-  body text not null,
-  tsv tsvector generated always as (to_tsvector('english', heading || ' ' || body)) stored,
-  embedding vector(1536) not null, unique (document_id, revision, seq));
-create index on document_sections using gin (tsv);
-create index on document_sections using hnsw (embedding vector_cosine_ops);
-
-create table original_refs (
- document_id uuid not null references documents, sha256 bytea not null check(octet_length(sha256)=32),
- source_key text not null, artifact text not null, primary key(document_id,sha256));
--- document_files remains the original-byte store; this table identifies source artifacts.
-grant select on original_refs to craft_app;
+  deleted_at timestamptz null, updated_at ts);                  -- tags come from the provider path
+create table doc_versions (id, item text not null references provider_items, version int not null,
+  sha256 bytea not null check (octet_length(sha256) = 32), media_type text not null,
+  summary text not null, summary_kind text check (summary_kind in ('extract','generated')),
+  summary_tsv tsvector generated always as (to_tsvector('english', summary)) stored,
+  indexed_at ts, unique (item, version));
+create index on doc_versions using gin (summary_tsv);
+create table chunks (id, doc_version_id uuid not null references doc_versions on delete cascade,
+  block int not null, kind text check (kind in ('text','table','slide','sheet')),
+  heading_path text not null, locator text not null, text text not null,
+  text_sha256 bytea not null check (octet_length(text_sha256) = 32),
+  tsv tsvector generated always as (to_tsvector('english', heading_path || ' ' || text)) stored,
+  unique (doc_version_id, block));
+create index on chunks using gin (tsv);
+create table vectors (id, owner_kind text check (owner_kind in ('chunk','doc_version','facet_text')),
+  owner_id uuid not null, model text not null, recipe text not null,
+  embedding vector(1536) not null, unique (owner_kind, owner_id));
+create index on vectors using hnsw (embedding vector_cosine_ops);
+create table version_diffs (from_version uuid references doc_versions on delete cascade,
+  to_version uuid references doc_versions on delete cascade, seq int not null,
+  change text check (change in ('added','removed','changed','moved')),
+  from_block int null, to_block int null, primary key (from_version, to_version, seq));
+create table index_cursor (provider text primary key, cursor bigint not null, updated_at ts);
+create table mission_grants (id, user_id uuid not null references users, mission_key text not null,
+  silo text null, granted_at ts, unique nulls not distinct (user_id, mission_key, silo));
 
 -- 0007_create_user_documents                        craft_app: INSERT, SELECT only
 create table drafts (id, owner_id uuid not null references users, title text not null,
@@ -140,12 +149,12 @@ create index on workspace_files (conversation_id, created_at desc);    -- delete
 | Conversations | Owned by an account. Sign-out deletes nothing. History comes from `messages` as stream-protocol messages. A later run restores `agent_sessions.state` with `AgentSession.from_dict`. |
 | Agent runs | Only the run-token digest is stored. A running run finishes, fails, cancels or pauses; a decision can resume a paused run. |
 | Approvals | Every step a new row; current state = latest event; the database refuses edits and deletes |
-| Documents | `required_role` drives the permission filter. A section is the unit of search and citation. `simulated` and `classification` label every passage and citation. `document_files` keeps every version of the original; a citation names it by SHA-256 |
+| Library | Derived from the document provider and rebuilt by `craft index` (section 8.6). Never holds an original file. A chunk is the unit of search and citation; a citation names item, version, block, locator and quote hash. `simulated` and `classification` label every chunk and citation. Access comes from `mission_grants` (section 8.15) |
 | Workspace | The files of one conversation, uploaded or made by the agent. A file is simulated only if all its inputs are, and takes the highest classification among them. Deleted when the conversation is archived; keeping one or sending it outside CRAFT is an export, which needs approval. Every download is in the call log |
 | User documents | `drafts` belong to their owner. Append-only. Shared documents (Vision) build on this pattern |
 
 ## 7.4 Seed and health
 
-- Seed (not a migration): `uv run craft seed base` loads demo users + the labelled simulated corpus (fake embeddings in fake-model mode). It loads 20 to 40 labelled, simulated documents with original files, including restricted documents. It runs as `craft_owner`, like a migration, and is idempotent. Account creation through `craft users` uses the application login.
+- Seed (not a migration): `uv run craft seed base` loads demo users, their mission grants and a small provider folder; `uv run craft seed demo` adds the demo set (section 8.17). `uv run craft index` then builds the library (fake embeddings in fake-model mode). Seeding and indexing run as `craft_owner`, like a migration, and are idempotent. Account creation and grants through `craft users` use the application login.
 - Liveness returns HTTP 200 with an ok body while the process runs. Readiness returns HTTP 200 when the database reports the expected migration within three seconds; otherwise it returns HTTP 503 with an unavailable body. Its separate connection has a three-second deadline. Both routes are anonymous, outside `/api`, and reveal no protected information. Hosted probes use the same split.
 - Section 12 defines database deployment, permission, backup, retention and audit extensions. Section 1 defines the workspace and sandbox scope.

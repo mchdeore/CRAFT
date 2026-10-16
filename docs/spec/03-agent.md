@@ -58,10 +58,14 @@ Run states: `running` ends as `finished`, `failed` or `cancelled`, or becomes `p
 
 ## 3.3 Tools over MCP
 
-MCP (Model Context Protocol): the standard way an agent lists and calls tools. In CRAFT, connection 3 only.
+MCP (Model Context Protocol): the standard way an agent lists and calls tools. In CRAFT, connections 3 and 5.
+
+- One adapter, `app/infrastructure/mcp/`, builds the MCP server from the operation registry. Every operation with `tool=True` is a tool; nothing else is. No model runs behind the adapter.
+- Two transports share the adapter: HTTP at `/mcp` with a run token for the agent, and standard input and output through `craft mcp --as <username>` for a local MCP application. The command line names a local account; calls log `origin=mcp`.
+- Over standard input and output there is no run, so a tool with an effect other than `NONE` returns `approval_required`.
 
 - A tool = an operation with `tool=True`. Name, description (the docstring) and JSON Schema (msgspec) are generated.
-- Tool name = the function name (`search_documents`): lowercase letters, digits, `_`, at most 64, unique across the registry (startup check). OpenAI-family models reject dots, so the operation name (`documents.search_documents`) stays for routes and logs only.
+- Tool name = the function name (`search`): lowercase letters, digits, `_`, at most 64, unique across the registry (startup check). OpenAI-family models reject dots, so the operation name (`library.search`) stays for routes and logs only.
 - Agent side: `MCPStreamableHTTPTool(url, header_provider=<run token>, allowed_tools=[…], approval_mode=…)`.
 - Tool-call ID: a function middleware puts the model's tool-call ID in the MCP request's `_meta` (`craft/toolCallId`). The server writes it to `call_log.tool_call_id`.
 - Server side: the low-level `mcp` `Server`, mounted at `/mcp` in the same FastAPI app. Stateless, JSON responses.

@@ -8,5 +8,4 @@
   - Artificial intelligence (AI) edits are candidate changes returned as a diff (`documents.propose_change`); accepting one is a person's action.
   - Export uses Pandoc and a document template to create `.docx`, recording the template version and output hash. Pandoc runs as an external tool under the GNU General Public License.
 - Finance forecasting: mission cost estimates from past missions, with evidence and approval before use.
-- Engineering datacube: mission × silo × stage × time. Silo documents as individually versioned items with baselines at stage gates; cost projections and invoices per revision; several embeddings per record; as-of views and cross-mission similarity.
 - Excel add-in: another front end using the same Hypertext Transfer Protocol (HTTP) routes.

@@ -5,17 +5,17 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 Every call enters through an `@operation` handler. The decorator checks and decodes, records observation, logs and maps errors. Services select short database transactions and pass a Session explicitly to storage.
 
 ```python
-@operation("documents.read", get="/documents/{document_id}", tool=True)
-def read_document(caller: Caller, request: ReadDocument) -> Document:
+@operation(SIGNED_IN, get="/library/documents/{item}", tool=True)
+def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
     """Return one document the caller may read. Use when the user names a document."""
-    return service.read_readable(caller, request.document_id)
+    return service.read_readable(caller, request.item, request.version)
 ```
 
 `@operation(access, *, get|post|put|patch|delete=path, tool=False, effects=NONE)`
 
 | Declaration | Required | Values and rule |
 |---|---|---|
-| `access` (first argument) | yes | A permission (`"documents.read"`), `SIGNED_IN`, `PUBLIC`. No default: a missing one fails at import |
+| `access` (first argument) | yes | A permission (`"accounts.manage"`), `SIGNED_IN`, `PUBLIC`. No default: a missing one fails at import |
 | `caller: Caller` (first parameter) | yes | Every call has a user scope. A handler without it fails at import |
 | input | if the call takes input | Second parameter, a msgspec `Shape`. Path + query + body fill its fields |
 | output | yes | Return type: a `Shape`, `list[Shape]` or `None` (`204`). An async generator = an event stream (chat) |
@@ -41,7 +41,7 @@ What the decorator does on every call:
 | 10 | Log: one JSON line + one `call_log` row, in its own transaction, with the database work counted | Yes | Yes | Yes | |
 | 11 | Map errors to `ApiError` | Status + body | Tool error | Raises | Details only in the server log |
 
-- Python calls run the full pipeline: `read_document(caller, ReadDocument(document_id=…))` is checked and logged (`origin=python`). No bypass. Scripts and the CLI call handlers this way.
+- Python calls run the full pipeline: `get_document(caller, DocumentRef(item=…))` is checked and logged (`origin=python`). No bypass. Scripts and the CLI call handlers this way.
 - Streams call services with short database transactions; none spans a model call or approval wait.
 - `uv run craft operations` prints every operation: name, route, tool, access, effects.
 

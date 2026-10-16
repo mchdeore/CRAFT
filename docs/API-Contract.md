@@ -66,10 +66,14 @@ Errors from ordinary `/api` routes use this body. Readiness returns `Health` wit
 | `GET /health/live` | | `Health` | anyone | | S0 |
 | `GET /health/ready` | | `Health`, `503` when not ready | anyone | | S0 |
 | `GET /api/tools` | | `ToolInfo[]` | signed in | | S1 |
-| `GET /api/documents?query=` | | `DocumentHit[]` | readable documents | `search_documents` | S1 |
-| `GET /api/documents/:id` | | `Document` | readable | `read_document` | S1 |
-| `GET /api/documents/:id/preview` | | The original file, inline | readable | | S1 |
-| `GET /api/documents/:id/download` | | The original file, as an attachment | readable | | S1 |
+| `POST /api/library/search` | `LibrarySearch` | `LibraryHits` | readable missions | `search` | S1 |
+| `GET /api/library/documents/:item?version=` | | `LibraryDocument` | readable | `get_document` | S1 |
+| `GET /api/library/documents/:item/chunks?version=&fromBlock=&toBlock=` | | `ChunkPage` | readable | `read_chunks` | S1 |
+| `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | readable | `explore` | S1 |
+| `GET /api/library/documents/:item/preview?version=&locator=` | | The original file, inline | readable | | S1 |
+| `GET /api/library/documents/:item/download?version=` | | The original file, as an attachment | readable | | S1 |
+| `POST /api/library/citations/check` | `CitationCheck` | `CitationStatus` | readable | `check_citation` | S3 |
+| `GET /api/library/documents/:item/compare?fromVersion=&toVersion=` | | `VersionDiff` | readable | `compare_versions` | S3 |
 | `POST /api/session` | `SignIn` | `Me` and the cookie | anyone | | S2 |
 | `DELETE /api/session` | | `204` | signed in | | S2 |
 | `GET /api/me` | | `Me` | signed in | | S2 |
@@ -109,11 +113,19 @@ Set-Cookie: __Host-craft_session=…; Secure; HttpOnly; SameSite=Lax; Path=/
 ```
 
 ```http
-GET /api/documents?query=radiator%20thermal%20margin
+POST /api/library/search
+Content-Type: application/json
+
+{ "query": "radiator thermal margin", "missions": ["msn-sim-01"] }
 
 200 OK
-[ { "documentId": "0199e7c3-5b1e-7a40-9f0e-3c1d2b8a4e61", "passageId": "0199e7c3-5b1e-7a40-9f0e-3c1d2b8a4e62", "title": "Thermal Control Plan",
-    "section": "4.2 Radiator margins", "snippet": "…a margin of 5 K at end of life…", "score": 0.0325, "simulated": true } ]
+{ "hits": [ { "kind": "chunk", "title": "Thermal Control Plan", "headingPath": "4 Thermal > 4.2 Radiator margins",
+    "text": "…a margin of 5 K at end of life…", "score": 0.0325,
+    "handle": { "item": "itm_4f9c2a0b1c2d", "version": 2, "block": 12, "locator": "heading=4.2;block=1",
+                "quoteSha256": "c41d…", "simulated": true },
+    "tags": { "mission": "msn-sim-01", "silo": "engineering", "stage": "st3-design" },
+    "classification": "unclassified", "before": null, "after": null } ],
+  "truncated": false }
 ```
 
 ```http
@@ -141,16 +153,41 @@ export interface ToolInfo {
   effects: Effects; needsApproval: boolean; route: string;
 }
 export type Classification = "unclassified" | "protected-a" | "protected-b";
-export interface DocumentHit {
-  documentId: Id; passageId: Id; title: string; section: string; snippet: string; score: number;
-  simulated: boolean;                  // from a simulated source
+export interface CitationHandle {
+  item: string; version: number; block: number; locator: string;
+  quoteSha256: string;                 // SHA-256 of the quoted text
+  simulated: boolean;
 }
-export interface Document {
-  id: Id; title: string; source: string;
-  version: string;                     // SHA-256 of the original file
-  simulated: boolean; classification: Classification; sections: Section[];
+export interface Tags { mission: string | null; silo: string | null; stage: string | null }
+export interface LibrarySearch {
+  query: string; missions?: string[]; silos?: string[]; stages?: string[];
+  kinds?: ("chunk" | "document")[]; limit?: number;               // 1 to 8, default 8
 }
-export interface Section { id: Id; heading: string; locator: string; body: string }
+export interface ChunkText { handle: CitationHandle; headingPath: string; text: string; score?: number }
+export interface LibraryHit {
+  kind: "chunk" | "document"; handle: CitationHandle; title: string; headingPath: string;
+  text: string; score: number; tags: Tags; classification: Classification;
+  before: ChunkText | null; after: ChunkText | null;               // neighbours of a chunk
+}
+export interface LibraryHits { hits: LibraryHit[]; truncated: boolean }
+export interface DocumentRef { item: string; version?: number }    // the latest version when omitted
+export interface LibraryDocument {
+  item: string; version: number; title: string; path: string; tags: Tags;
+  summary: string; summaryKind: "extract" | "generated";
+  outline: { block: number; headingPath: string }[];
+  versions: { version: number; sha256: string; indexedAt: Timestamp }[];
+  simulated: boolean; classification: Classification; deleted: boolean;
+}
+export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }  // at most 20
+export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }  // 0 to 10, default 2
+export interface ChunkPage { chunks: ChunkText[]; truncated: boolean }
+export interface CitationCheck { handle: CitationHandle }
+export interface CitationStatus { status: "current" | "changed" | "newer_version" | "withdrawn"; latestVersion: number }
+export interface CompareVersions { item: string; fromVersion: number; toVersion: number }
+export interface VersionDiff {
+  blocks: { change: "added" | "removed" | "changed" | "moved"; fromBlock: number | null; toBlock: number | null }[];
+  truncated: boolean;
+}
 
 export type Role = "member" | "admin";                                                    // S2
 export interface SignIn { username: string; password: string }
@@ -165,11 +202,8 @@ export interface Conversation extends ConversationSummary {
   messages: AgUiMessage[];             // user, assistant (with toolCalls), tool, activity
 }
 export interface Citation {
-  passageId: Id; documentId: Id; title: string; section: string;
-  version: string;                     // SHA-256 of the original file
-  artifact: string;                    // the file's name, for the preview route
-  locator: string;                     // the page, or the section where the file has no pages
-  simulated: boolean;                  // from a simulated source
+  handle: CitationHandle;              // item, version, block, locator, quote hash
+  title: string; headingPath: string;
   classification: Classification;
   quote: string;
 }
@@ -200,7 +234,7 @@ export interface Approval {
   status: ApprovalStatus; requestedAt: Timestamp;
 }
 export interface RetrievalStep {
-  tool: string;                        // e.g. "search_documents"
+  tool: string;                        // e.g. "search"
   arguments: Record<string, unknown>;  // the parameters it was called with
   at: Timestamp;
 }
@@ -230,11 +264,17 @@ export interface Routes {
   "GET /health/live":                 { response: T.Health };
   "GET /health/ready":                { response: T.Health };
   "GET /api/tools":                   { response: T.ToolInfo[] };
-  "GET /api/documents":               { query: { query: string }; response: T.DocumentHit[] };
-  "GET /api/documents/:id":           { response: T.Document };
-  "GET /api/documents/:id/preview":   { query: { version: string; artifact: string; locator: string };
+  "POST /api/library/search":         { body: T.LibrarySearch; response: T.LibraryHits };
+  "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
+  "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number };
+                                        response: T.ChunkPage };
+  "POST /api/library/explore":        { body: T.ExploreInput; response: T.ChunkPage };
+  "GET /api/library/documents/:item/preview":  { query: { version: number; locator?: string };
                                         response: Blob };                  // the original, inline
-  "GET /api/documents/:id/download":  { query: { version: string }; response: Blob };  // attachment
+  "GET /api/library/documents/:item/download": { query: { version: number }; response: Blob };  // attachment
+  "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
+  "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number };
+                                        response: T.VersionDiff };
   "POST /api/session":                { body: T.SignIn; response: T.Me };
   "DELETE /api/session":              { response: void };
   "GET /api/me":                      { response: T.Me };
@@ -263,10 +303,10 @@ The chat route accepts AG-UI's `RunAgentInput`. `threadId` identifies the conver
 
 ```text
 data: {"type":"RUN_STARTED","threadId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61","runId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e62"}
-data: {"type":"TOOL_CALL_START","toolCallId":"call_1","toolCallName":"search_documents"}
+data: {"type":"TOOL_CALL_START","toolCallId":"call_1","toolCallName":"search"}
 data: {"type":"TOOL_CALL_ARGS","toolCallId":"call_1","delta":"{\"query\":\"radiator margin\"}"}
 data: {"type":"TOOL_CALL_END","toolCallId":"call_1"}
-data: {"type":"TOOL_CALL_RESULT","toolCallId":"call_1","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e70","content":"8 passages"}
+data: {"type":"TOOL_CALL_RESULT","toolCallId":"call_1","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e70","content":"8 chunks"}
 data: {"type":"TEXT_MESSAGE_START","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63","role":"assistant"}
 data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63","delta":"The radiator margin is 5 K."}
 data: {"type":"TEXT_MESSAGE_END","messageId":"0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e63"}
@@ -317,75 +357,101 @@ Deferred: `/api/v2` when another front end needs a breaking change; paging; rout
 
 ## 12. Datacube routes and limits
 
-Datacube operations use the existing access, error, request, approval and stream conventions. Section 8 of the specification defines parameter and evidence semantics. Read operations return fixed times and fully resolved scopes. Source numbers are bounded decimal strings; computed scores are finite JSON numbers. Unknown keys, units or markers return `invalid_input`; unreadable handles return `not_found`; stale versions or changed replay bodies return `conflict`.
+Datacube operations use the access, error, request, approval and stream conventions above. Section 8 of the specification defines their behavior. Unknown parameters, units, facets or stages return `invalid_input`; unreadable missions, values or handles return `not_found`.
 
-| Function and operation namespace | HTTP route | Request | Response | Effect |
-|---|---|---|---|---|
-| cube.list_cube_parameters | GET /api/cube/parameters | CubeCatalogInput | CubeDictionary | NONE |
-| cube.list_cube_missions | GET /api/cube/missions | CubeMissionList | CubeMissionPage | NONE |
-| cube.find_cube_missions | POST /api/cube/find | CubeQuery | CubeSearch | NONE |
-| cube.get_cube_mission | GET /api/cube/missions/:missionId | CubeMissionInput | CubeMission | NONE |
-| cube.compare_cube_missions | POST /api/cube/compare | CubeCompareInput | CubeComparison | NONE |
-| cube.similar_cube_missions | POST /api/cube/similar | CubeSimilarInput | CubeSimilarPage | NONE |
-| cube.explain_cube_distance | POST /api/cube/distance | CubeDistanceInput | CubeDistance | NONE |
-| cube.get_cube_value_evidence | GET /api/cube/values/:valueId | CubeValueInput | CubeEvidence | NONE |
-| cube.search_cube_documents | POST /api/cube/documents/search | CubeDocumentQuery | CubeDocumentPage | NONE |
-| cube.export_cube_view | POST /api/cube/views | CubeExportInput | WorkspaceFile | DOCUMENT |
-| cube.submit_cube_values | POST /api/cube/values/candidates | CubeCandidateInput | CubeReceipt | DATA |
-| cube.list_cube_approvals | GET /api/cube/approvals | CubeApprovalInput | CubeApprovalPage | NONE |
-| cube.submit_cube_definition | POST /api/cube/definitions | CubeDefinitionInput | CubeReceipt | DATA |
+| Operation | Route | Request | Response | Tool | Effects | Slice |
+|---|---|---|---|---|---|---|
+| `cube.list_parameters` | `GET /api/cube/parameters` | | `Parameter[]` | `list_parameters` | NONE | S3 |
+| `cube.list_missions` | `GET /api/cube/missions?query=&limit=` | | `Mission[]` | `list_missions` | NONE | S3 |
+| `cube.find_missions` | `POST /api/cube/find` | `FindMissions` | `FoundMissions` | `find_missions` | NONE | S3 |
+| `cube.get_mission` | `GET /api/cube/missions/:key?silo=&stage=&at=&knownAt=` | | `MissionState` | `get_mission` | NONE | S3 |
+| `cube.compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `Comparison` | `compare_missions` | NONE | S3 |
+| `cube.get_value_evidence` | `GET /api/cube/values/:id` | | `ValueEvidence` | `get_value_evidence` | NONE | S3 |
+| `cube.prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | `prepare_values` | NONE | S3 |
+| `cube.similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `SimilarPage` | `similar_missions` | NONE | S3 |
+| `cube.explain_similarity` | `POST /api/cube/similar/explain` | `ExplainSimilarity` | `SimilarityExplanation` | `explain_similarity` | NONE | S3 |
+| `cube.submit_values` | `POST /api/cube/values` | `SubmitValues` | `ValueReceipt` | `submit_values`, pauses for approval | DATA | S4 |
+| `cube.save_view` | `POST /api/cube/views` | `SaveView` | `WorkspaceFile` | `save_view`, pauses for approval | DOCUMENT | S5 |
 
-GET path fields come from the route. The strict nested `scope` query field is percent-encoded JSON; POST uses nested JSON. Queries have 1 to 12 AND predicates and at most 20 missions. Comparisons contain 2 to 5 distinct missions; intake has at most 100 candidates; definitions have 2 to 100 reference handles and 1 to 12 dimensions. Compact results are at most 16 kibibytes (KiB); detailed results at most 64 KiB. Truncation preserves whole items and handles. Numeric source strings contain at most 100 characters and use signed decimal notation without exponent, NaN or Infinity. Nominal equality accepts a bounded category string.
-
-Reads have effect NONE. Values and definitions have effect DATA; the bounded JSON workspace view has effect DOCUMENT. The three writes use an exact request identifier and arguments hash, requester approval and one execution. The view stays with its conversation, survives sign-out and is deleted on archive. External transfer uses the existing export gate. Effectful route results shown below are approval receipts or the completed result after approval; no example authorizes an unapproved write.
-
-A scoped GET request encodes the strict JSON query field as follows. Its complete result appears in section 15.4.
-
-```http
-GET /api/cube/missions/10000000-0000-0000-0000-000000000001?scope=%7B%22siloId%22%3A%22engineering%22%2C%22stageId%22%3A%22concept%22%2C%22simulated%22%3Atrue%2C%22validAt%22%3A%222026-01-15T00%3A00%3A00Z%22%2C%22knownAt%22%3A%222026-01-15T00%3A00%3A00Z%22%7D
-```
+Limits: 1 to 12 conditions and at most 20 missions in `find_missions`; 2 to 5 missions in `compare_missions`; at most 10 results in `similar_missions`; at most 100 candidates in `submit_values`; at most 200 rows in a saved view. `at` is a date (`YYYY-MM-DD`) and `knownAt` a timestamp; both default to the time of the request and are returned. Source numbers are decimal strings of at most 100 characters without exponent, NaN or Infinity.
 
 ## 13. Datacube TypeScript forms
 
-Optional input fields receive the Python defaults. Resolved output scopes contain every default and both UTC times. Nullable output fields are present.
-
 ```ts
-export interface CubeResolvedScope { siloId:string; stageId:string; classId:string; optionId:Id|null; simulated:boolean; validAt:Timestamp; knownAt:Timestamp; mode:'compact'|'detailed' }
-export interface CubeScope { siloId:string; stageId:string; classId?:string; optionId?:Id|null; simulated?:boolean; validAt?:Timestamp|null; knownAt?:Timestamp|null; mode?:'compact'|'detailed' }
-export interface CubeCatalogInput { category?:string|null; limit?:number }
-export interface CubeUnit { id:string; dimension:string; multiplier:string; offsetValue:string }
-export interface CubeParameter { id:string; label:string; dimension:string; unitId:string; scale:'linear'|'log'|'ordinal'|'nominal'; minimum:string|null; maximum:string|null; synonyms:string[] }
-export interface CubeDictionary { parameters:CubeParameter[]; units:CubeUnit[]; classIds:string[]; siloIds:string[]; stageIds:string[]; truncated:boolean }
-export interface CubeMissionList { simulated?:boolean; limit?:number }
-export interface CubeMissionSummary { id:Id; key:string; title:string; simulated:boolean; createdAt:Timestamp }
-export interface CubeMissionPage { items:CubeMissionSummary[]; returned:number; truncated:boolean }
-export interface CubePredicate { parameterId:string; operator:'eq'|'ge'|'le'|'between'; value:string; unitId:string; upperValue?:string|null }
-export interface CubeQuery { scope:CubeScope; predicates:CubePredicate[]; missionIds?:Id[]; limit?:number }
-export interface CubeCell { valueId:Id; missionId:Id; elementId:Id; parameterId:string; unitId:string; numericValue:string|null; textValue:string|null; lowerBound:string|null; upperBound:string|null; marker:'exact'|'range'|'lower'|'upper'|'tbd'|'not-applicable'; basis:'observed'|'assumed'|'imputed'|'derived'; confidence:number; simulated:boolean; evidenceHandle:Id }
-export interface CubeMatch { mission:CubeMissionSummary; cells:CubeCell[]; gaps:string[] }
-export interface CubeSearch { items:CubeMatch[]; scope:CubeResolvedScope; returned:number; truncated:boolean }
-export interface CubeMissionInput { missionId:Id; scope:CubeScope }
-export interface CubeMission { mission:CubeMissionSummary; scope:CubeResolvedScope; cells:CubeCell[]; documentIds:Id[]; gaps:string[]; truncated:boolean }
-export interface CubeCompareInput { missionIds:Id[]; parameterIds:string[]; scope:CubeScope }
-export interface CubeDelta { leftValueId:Id; rightValueId:Id; parameterId:string; delta:string; unitId:string }
-export interface CubeComparison { missions:CubeMatch[]; deltas:CubeDelta[]; scope:CubeResolvedScope; truncated:boolean }
-export interface CubeSimilarInput { missionId:Id; definitionId:Id; scope:CubeScope; limit?:number }
-export interface CubeDistanceInput { leftMissionId:Id; rightMissionId:Id; definitionId:Id; scope:CubeScope }
-export interface CubeContribution { parameterId:string; leftValueId:Id; rightValueId:Id; weight:number; sigma:string; squared:number; share:number }
-export interface CubeDistance { leftMissionId:Id; rightMissionId:Id; definitionId:Id; definitionVersion:number; comparable:boolean; distance:number|null; coverage:number; contributions:CubeContribution[]; skipped:string[]; scope:CubeResolvedScope; truncated:boolean }
-export interface CubeSimilarPage { items:CubeDistance[]; returned:number; truncated:boolean }
-export interface CubeValueInput { valueId:Id }
-export interface CubeEvidence { cell:CubeCell; citation:Citation; recipe:string; validFrom:Timestamp; validTo:Timestamp|null; recordedAt:Timestamp; inputIds:Id[]; truncated:boolean }
-export interface CubeDocumentQuery { missionId:Id; scope:CubeScope; query:string; limit?:number }
-export interface CubeDocumentPage { citations:Citation[]; scores:number[]; scope:CubeResolvedScope; truncated:boolean }
-export interface CubeExportInput { conversationId:Id; requestId:Id; query:CubeQuery }
-export interface CubeCandidate { elementId:Id; parameterId:string; documentId:Id; version:string; locator:string; sourceUnitId:string; numericValue:string|null; textValue:string|null; lowerBound:string|null; upperBound:string|null; marker:'exact'|'range'|'lower'|'upper'|'tbd'|'not-applicable'; basis:'observed'|'assumed'; confidence:number; recipe:string; validFrom:Timestamp; validTo:Timestamp|null }
-export interface CubeCandidateInput { missionId:Id; scope:CubeScope; conversationId:Id; requestId:Id; candidates:CubeCandidate[] }
-export interface CubeReceipt { approvalRequestId:Id; status:'pending'|'executed'; valueIds:Id[]; definitionId:Id|null }
-export interface CubeApprovalInput { conversationId:Id; status?:'pending'|'approved'|'rejected'|'executed'|'failed' }
-export interface CubeApprovalPage { items:Approval[]; truncated:boolean }
-export interface CubeDimension { parameterId:string; weight:number; sigma:string }
-export interface CubeDefinitionInput { key:string; version:number; conversationId:Id; requestId:Id; simulated:boolean; referenceValueIds:Id[]; dimensions:CubeDimension[]; minimumCoverage:number; cutoff:number; resultLimit?:number }
+export type Facet = "purpose" | "design" | "operations" | "program" | "cost_and_risk";
+export type ValueKind = "exact" | "range" | "unknown" | "not_applicable";
+export interface Parameter {
+  key: string; label: string; unit: string; min: number | null; max: number | null; whole: boolean;
+  units: { unit: string; multiplier: string; offset: string }[];
+}
+export interface Mission { key: string; title: string; currentStage: string; aliases: string[]; simulated: boolean }
+export interface Condition {
+  parameter: string; op: "eq" | "ge" | "le" | "between"; value: string; high?: string; unit: string;
+}
+export interface FindMissions {
+  conditions: Condition[]; silo?: string; stage?: string;        // stage "current" = each mission's current stage
+  at?: string; knownAt?: Timestamp; limit?: number;
+}
+export interface CubeValue {
+  id: Id; mission: string; silo: string; stage: string | null; element: string | null; parameter: string;
+  kind: ValueKind; low: number | null; high: number | null; unit: string;
+  sourceNumber: string | null; sourceUnit: string | null;
+  validFrom: string; recordedAt: Timestamp; citation: CitationHandle;
+  withdrawn: boolean;                  // true: shown as unknown, source withdrawn
+  approvalId: Id | null; simulated: boolean;
+}
+export interface FoundMissions {
+  missions: { mission: Mission; matched: CubeValue[] }[]; at: string; knownAt: Timestamp; truncated: boolean;
+}
+export interface MissionState {
+  mission: Mission; values: CubeValue[]; gaps: string[];         // parameter keys without a value
+  at: string; knownAt: Timestamp;
+}
+export interface CompareMissions {
+  keys: string[]; parameters: string[]; silo?: string; stage?: string; at?: string; knownAt?: Timestamp;
+}
+export interface Comparison {
+  parameters: string[]; rows: { mission: Mission; values: (CubeValue | null)[] }[];
+  at: string; knownAt: Timestamp;
+}
+export interface ValueEvidence {
+  value: CubeValue; quote: string; conversion: string;
+  citationStatus: "current" | "changed" | "newer_version" | "withdrawn";
+}
+export interface PrepareValues {
+  handle: CitationHandle;              // a table chunk
+  mission?: string; silo?: string; stage?: string; validFrom?: string;
+}
+export interface Candidate {
+  row: number; header: string; parameter: string | null; element: string | null;
+  sourceNumber: string; sourceUnit: string | null; kind: ValueKind;
+  low: number | null; high: number | null; citation: CitationHandle; problem: string | null;
+}
+export interface Candidates {
+  mission: string | null; silo: string | null; stage: string | null; validFrom: string | null;
+  candidates: Candidate[]; problems: string[];
+}
+export interface SubmitValues {
+  mission: string; silo: string; stage: string | null; validFrom: string;
+  candidates: Candidate[];             // only candidates without a problem
+}
+export interface ValueReceipt { approvalId: Id; valueIds: Id[] }
+export interface SimilarMissions { key: string; facets?: Facet[]; limit?: number }   // 1 to 10, default 5
+export interface SimilarMission {
+  mission: Mission; score: number | null; comparable: boolean;
+  facetScores: Partial<Record<Facet, number | null>>;             // null: missing on one side
+}
+export interface SimilarPage { missions: SimilarMission[]; facets: Facet[] }
+export interface ExplainSimilarity { key: string; other: string; facets?: Facet[] }
+export interface SimilarityExplanation {
+  facets: { facet: Facet; score: number | null; text: string | null; otherText: string | null;
+            sources: string[]; otherSources: string[] }[];
+}
+export interface SaveView {
+  conversationId: Id; name: string;
+  operation: "find_missions" | "get_mission" | "compare_missions" | "similar_missions";
+  input: Record<string, unknown>;      // that operation's request
+}
 ```
 
 ## 14. Datacube route declarations
@@ -393,204 +459,51 @@ export interface CubeDefinitionInput { key:string; version:number; conversationI
 ```ts
 import type * as T from "./types";
 export interface CubeRoutes {
-  "GET /api/cube/parameters": { query: T.CubeCatalogInput; response: T.CubeDictionary };
-  "GET /api/cube/missions": { query: T.CubeMissionList; response: T.CubeMissionPage };
-  "POST /api/cube/find": { body: T.CubeQuery; response: T.CubeSearch };
-  "GET /api/cube/missions/:missionId": { path: { missionId: T.Id }; query: { scope: T.CubeScope }; response: T.CubeMission };
-  "POST /api/cube/compare": { body: T.CubeCompareInput; response: T.CubeComparison };
-  "POST /api/cube/similar": { body: T.CubeSimilarInput; response: T.CubeSimilarPage };
-  "POST /api/cube/distance": { body: T.CubeDistanceInput; response: T.CubeDistance };
-  "GET /api/cube/values/:valueId": { path: { valueId: T.Id }; response: T.CubeEvidence };
-  "POST /api/cube/documents/search": { body: T.CubeDocumentQuery; response: T.CubeDocumentPage };
-  "POST /api/cube/views": { body: T.CubeExportInput; response: T.WorkspaceFile };
-  "POST /api/cube/values/candidates": { body: T.CubeCandidateInput; response: T.CubeReceipt };
-  "GET /api/cube/approvals": { query: T.CubeApprovalInput; response: T.CubeApprovalPage };
-  "POST /api/cube/definitions": { body: T.CubeDefinitionInput; response: T.CubeReceipt };
+  "GET /api/cube/parameters":         { response: T.Parameter[] };
+  "GET /api/cube/missions":           { query: { query?: string; limit?: number }; response: T.Mission[] };
+  "POST /api/cube/find":              { body: T.FindMissions; response: T.FoundMissions };
+  "GET /api/cube/missions/:key":      { query: { silo?: string; stage?: string; at?: string; knownAt?: T.Timestamp };
+                                        response: T.MissionState };
+  "POST /api/cube/compare":           { body: T.CompareMissions; response: T.Comparison };
+  "GET /api/cube/values/:id":         { response: T.ValueEvidence };
+  "POST /api/cube/candidates":        { body: T.PrepareValues; response: T.Candidates };
+  "POST /api/cube/similar":           { body: T.SimilarMissions; response: T.SimilarPage };
+  "POST /api/cube/similar/explain":   { body: T.ExplainSimilarity; response: T.SimilarityExplanation };
+  "POST /api/cube/values":            { body: T.SubmitValues; response: T.ValueReceipt };
+  "POST /api/cube/views":             { body: T.SaveView; response: T.WorkspaceFile };
 }
 ```
 
 ## 15. Synthetic datacube examples
 
-These are made-up wire objects for contract implementation. GET request objects separate path and query fields; `scope` must be JSON-encoded in the URL query.
+```http
+POST /api/cube/find
+Content-Type: application/json
 
-### 15.1 list_cube_parameters
+{ "conditions": [ { "parameter": "mass_dry", "op": "le", "value": "150", "unit": "kg" } ], "stage": "current", "at": "2026-10-15" }
 
-Request:
-
-```json
-{"category":"mass","limit":100}
+200 OK
+{ "missions": [ { "mission": { "key": "msn-sim-01", "title": "Simulated mission 01", "currentStage": "st3-design",
+      "aliases": ["sim-01"], "simulated": true },
+    "matched": [ { "id": "0199e7d0-5b1e-7a40-9f0e-3c1d2b8a4e61", "mission": "msn-sim-01", "silo": "engineering",
+      "stage": "st3-design", "element": null, "parameter": "mass_dry", "kind": "exact", "low": 120, "high": 120,
+      "unit": "kg", "sourceNumber": "120", "sourceUnit": "kg", "validFrom": "2026-03-01",
+      "recordedAt": "2026-10-15T14:02:00Z",
+      "citation": { "item": "itm_4f9c2a0b1c2d", "version": 2, "block": 5, "locator": "sheet=Mass;range=A1:C9;row=3",
+                    "quoteSha256": "9d0e…", "simulated": true },
+      "withdrawn": false, "approvalId": null, "simulated": true } ] } ],
+  "at": "2026-10-15", "knownAt": "2026-10-15T15:00:00Z", "truncated": false }
 ```
 
-Response:
+```http
+POST /api/cube/similar
+Content-Type: application/json
 
-```json
-{"parameters":[{"id":"mass","label":"Mass","dimension":"mass","unitId":"kg","scale":"linear","minimum":"0","maximum":null,"synonyms":["mass","masse"]}],"units":[{"id":"kg","dimension":"mass","multiplier":"1","offsetValue":"0"},{"id":"g","dimension":"mass","multiplier":"0.001","offsetValue":"0"}],"classIds":["system"],"siloIds":["engineering"],"stageIds":["concept"],"truncated":false}
-```
+{ "key": "msn-sim-01", "facets": ["design", "operations"] }
 
-### 15.2 list_cube_missions
-
-Request:
-
-```json
-{"simulated":true,"limit":20}
-```
-
-Response:
-
-```json
-{"items":[{"id":"10000000-0000-0000-0000-000000000001","key":"alpha","title":"Synthetic Alpha","simulated":true,"createdAt":"2026-01-01T00:00:00Z"},{"id":"10000000-0000-0000-0000-000000000002","key":"beta","title":"Synthetic Beta","simulated":true,"createdAt":"2026-01-01T00:00:00Z"}],"returned":2,"truncated":false}
-```
-
-### 15.3 find_cube_missions
-
-Request:
-
-```json
-{"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"predicates":[{"parameterId":"mass","operator":"le","value":"105","unitId":"kg","upperValue":null}],"missionIds":[],"limit":20}
-```
-
-Response:
-
-```json
-{"items":[{"mission":{"id":"10000000-0000-0000-0000-000000000001","key":"alpha","title":"Synthetic Alpha","simulated":true,"createdAt":"2026-01-01T00:00:00Z"},"cells":[{"valueId":"50000000-0000-0000-0000-000000000001","missionId":"10000000-0000-0000-0000-000000000001","elementId":"40000000-0000-0000-0000-000000000001","parameterId":"mass","unitId":"kg","numericValue":"100","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"simulated":true,"evidenceHandle":"50000000-0000-0000-0000-000000000001"}],"gaps":[]}],"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"returned":1,"truncated":false}
-```
-
-### 15.4 get_cube_mission
-
-Request:
-
-```json
-{"missionId":"10000000-0000-0000-0000-000000000001","scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"}}
-```
-
-Response:
-
-```json
-{"mission":{"id":"10000000-0000-0000-0000-000000000001","key":"alpha","title":"Synthetic Alpha","simulated":true,"createdAt":"2026-01-01T00:00:00Z"},"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"cells":[{"valueId":"50000000-0000-0000-0000-000000000001","missionId":"10000000-0000-0000-0000-000000000001","elementId":"40000000-0000-0000-0000-000000000001","parameterId":"mass","unitId":"kg","numericValue":"100","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"simulated":true,"evidenceHandle":"50000000-0000-0000-0000-000000000001"},{"valueId":"50000000-0000-0000-0000-000000000002","missionId":"10000000-0000-0000-0000-000000000001","elementId":"40000000-0000-0000-0000-000000000001","parameterId":"power","unitId":"W","numericValue":"200","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"simulated":true,"evidenceHandle":"50000000-0000-0000-0000-000000000002"}],"documentIds":["20000000-0000-0000-0000-000000000001"],"gaps":[],"truncated":false}
-```
-
-### 15.5 compare_cube_missions
-
-Request:
-
-```json
-{"missionIds":["10000000-0000-0000-0000-000000000001","10000000-0000-0000-0000-000000000002"],"parameterIds":["mass"],"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"}}
-```
-
-Response:
-
-```json
-{"missions":[{"mission":{"id":"10000000-0000-0000-0000-000000000001","key":"alpha","title":"Synthetic Alpha","simulated":true,"createdAt":"2026-01-01T00:00:00Z"},"cells":[{"valueId":"50000000-0000-0000-0000-000000000001","missionId":"10000000-0000-0000-0000-000000000001","elementId":"40000000-0000-0000-0000-000000000001","parameterId":"mass","unitId":"kg","numericValue":"100","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"simulated":true,"evidenceHandle":"50000000-0000-0000-0000-000000000001"}],"gaps":[]},{"mission":{"id":"10000000-0000-0000-0000-000000000002","key":"beta","title":"Synthetic Beta","simulated":true,"createdAt":"2026-01-01T00:00:00Z"},"cells":[{"valueId":"50000000-0000-0000-0000-000000000003","missionId":"10000000-0000-0000-0000-000000000002","elementId":"40000000-0000-0000-0000-000000000002","parameterId":"mass","unitId":"kg","numericValue":"110","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"simulated":true,"evidenceHandle":"50000000-0000-0000-0000-000000000003"}],"gaps":[]}],"deltas":[{"leftValueId":"50000000-0000-0000-0000-000000000001","rightValueId":"50000000-0000-0000-0000-000000000003","parameterId":"mass","delta":"10","unitId":"kg"}],"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"truncated":false}
-```
-
-### 15.6 similar_cube_missions
-
-Request:
-
-```json
-{"missionId":"10000000-0000-0000-0000-000000000001","definitionId":"60000000-0000-0000-0000-000000000001","scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"limit":5}
-```
-
-Response:
-
-```json
-{"items":[{"leftMissionId":"10000000-0000-0000-0000-000000000001","rightMissionId":"10000000-0000-0000-0000-000000000002","definitionId":"60000000-0000-0000-0000-000000000001","definitionVersion":1,"comparable":true,"distance":1,"coverage":1,"contributions":[{"parameterId":"mass","leftValueId":"50000000-0000-0000-0000-000000000001","rightValueId":"50000000-0000-0000-0000-000000000003","weight":0.6,"sigma":"10","squared":0.6,"share":0.6},{"parameterId":"power","leftValueId":"50000000-0000-0000-0000-000000000002","rightValueId":"50000000-0000-0000-0000-000000000004","weight":0.4,"sigma":"20","squared":0.4,"share":0.4}],"skipped":[],"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"truncated":false}],"returned":1,"truncated":false}
-```
-
-### 15.7 explain_cube_distance
-
-Request:
-
-```json
-{"leftMissionId":"10000000-0000-0000-0000-000000000001","rightMissionId":"10000000-0000-0000-0000-000000000002","definitionId":"60000000-0000-0000-0000-000000000001","scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"}}
-```
-
-Response:
-
-```json
-{"leftMissionId":"10000000-0000-0000-0000-000000000001","rightMissionId":"10000000-0000-0000-0000-000000000002","definitionId":"60000000-0000-0000-0000-000000000001","definitionVersion":1,"comparable":true,"distance":1,"coverage":1,"contributions":[{"parameterId":"mass","leftValueId":"50000000-0000-0000-0000-000000000001","rightValueId":"50000000-0000-0000-0000-000000000003","weight":0.6,"sigma":"10","squared":0.6,"share":0.6},{"parameterId":"power","leftValueId":"50000000-0000-0000-0000-000000000002","rightValueId":"50000000-0000-0000-0000-000000000004","weight":0.4,"sigma":"20","squared":0.4,"share":0.4}],"skipped":[],"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"truncated":false}
-```
-
-### 15.8 get_cube_value_evidence
-
-Request:
-
-```json
-{"valueId":"50000000-0000-0000-0000-000000000001"}
-```
-
-Response:
-
-```json
-{"cell":{"valueId":"50000000-0000-0000-0000-000000000001","missionId":"10000000-0000-0000-0000-000000000001","elementId":"40000000-0000-0000-0000-000000000001","parameterId":"mass","unitId":"kg","numericValue":"100","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"simulated":true,"evidenceHandle":"50000000-0000-0000-0000-000000000001"},"citation":{"passageId":"a0000000-0000-0000-0000-000000000001","documentId":"20000000-0000-0000-0000-000000000001","title":"Synthetic parameters","section":"Parameters","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifact":"parameters.xlsx","locator":"sheet:parameters!B2","simulated":true,"classification":"unclassified","quote":"Mass: 100 kg"},"recipe":"table-v1","validFrom":"2026-01-01T00:00:00Z","validTo":null,"recordedAt":"2026-01-02T00:00:00Z","inputIds":[],"truncated":false}
-```
-
-### 15.9 search_cube_documents
-
-Request:
-
-```json
-{"missionId":"10000000-0000-0000-0000-000000000001","scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"query":"mass","limit":8}
-```
-
-Response:
-
-```json
-{"citations":[{"passageId":"a0000000-0000-0000-0000-000000000001","documentId":"20000000-0000-0000-0000-000000000001","title":"Synthetic parameters","section":"Parameters","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifact":"parameters.xlsx","locator":"sheet:parameters!B2","simulated":true,"classification":"unclassified","quote":"Mass: 100 kg"}],"scores":[1],"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"truncated":false}
-```
-
-### 15.10 export_cube_view
-
-Request:
-
-```json
-{"conversationId":"70000000-0000-0000-0000-000000000001","requestId":"80000000-0000-0000-0000-000000000001","query":{"scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"predicates":[{"parameterId":"mass","operator":"le","value":"105","unitId":"kg","upperValue":null}],"missionIds":[],"limit":20}}
-```
-
-Response:
-
-```json
-{"id":"b0000000-0000-0000-0000-000000000001","conversationId":"70000000-0000-0000-0000-000000000001","name":"view.json","mediaType":"application/json","sizeBytes":1024,"origin":"agent","state":"ready","simulated":true,"classification":"unclassified","createdAt":"2026-01-15T00:00:00Z"}
-```
-
-### 15.11 submit_cube_values
-
-Request:
-
-```json
-{"missionId":"10000000-0000-0000-0000-000000000001","scope":{"siloId":"engineering","stageId":"concept","classId":"system","optionId":null,"simulated":true,"validAt":"2026-01-15T00:00:00Z","knownAt":"2026-01-15T00:00:00Z","mode":"compact"},"conversationId":"70000000-0000-0000-0000-000000000001","requestId":"80000000-0000-0000-0000-000000000001","candidates":[{"elementId":"40000000-0000-0000-0000-000000000001","parameterId":"mass","documentId":"20000000-0000-0000-0000-000000000001","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","locator":"sheet:parameters!B2","sourceUnitId":"kg","numericValue":"100","textValue":null,"lowerBound":null,"upperBound":null,"marker":"exact","basis":"observed","confidence":1,"recipe":"table-v1","validFrom":"2026-01-01T00:00:00Z","validTo":null}]}
-```
-
-Response:
-
-```json
-{"approvalRequestId":"90000000-0000-0000-0000-000000000001","status":"pending","valueIds":[],"definitionId":null}
-```
-
-### 15.12 list_cube_approvals
-
-Request:
-
-```json
-{"conversationId":"70000000-0000-0000-0000-000000000001","status":"pending"}
-```
-
-Response:
-
-```json
-{"items":[{"id":"90000000-0000-0000-0000-000000000001","conversationId":"70000000-0000-0000-0000-000000000001","runId":"c0000000-0000-0000-0000-000000000001","tool":"submit_cube_values","summary":"One candidate value","status":"pending","requestedAt":"2026-01-15T00:00:00Z"}],"truncated":false}
-```
-
-### 15.13 submit_cube_definition
-
-Request:
-
-```json
-{"key":"technical","version":2,"conversationId":"70000000-0000-0000-0000-000000000001","requestId":"80000000-0000-0000-0000-000000000001","simulated":true,"referenceValueIds":["50000000-0000-0000-0000-000000000001","50000000-0000-0000-0000-000000000007","50000000-0000-0000-0000-000000000002","50000000-0000-0000-0000-000000000009"],"dimensions":[{"parameterId":"mass","weight":0.6,"sigma":"10"},{"parameterId":"power","weight":0.4,"sigma":"20"}],"minimumCoverage":0.6,"cutoff":100,"resultLimit":5}
-```
-
-Response:
-
-```json
-{"approvalRequestId":"90000000-0000-0000-0000-000000000001","status":"pending","valueIds":[],"definitionId":null}
+200 OK
+{ "missions": [ { "mission": { "key": "msn-sim-04", "title": "Simulated mission 04", "currentStage": "st4-build",
+      "aliases": [], "simulated": true },
+    "score": 0.895, "comparable": true, "facetScores": { "design": 0.91, "operations": 0.88 } } ],
+  "facets": ["design", "operations"] }
 ```
