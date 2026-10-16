@@ -24,6 +24,7 @@ from app.infrastructure.requests import RequestIdMiddleware
 from app.library import handlers as library_handlers
 from app.notes import handlers as note_handlers
 from app.summarize import handlers as summarize_handlers
+from app.tools import handlers as tool_handlers
 
 
 class DevPage(StaticFiles):
@@ -82,6 +83,7 @@ def create_app(settings: Settings) -> FastAPI:
         agent_handlers,
         conversation_handlers,
         note_handlers,
+        tool_handlers,
     )
     configure_logging(settings.log_level)
     engine = make_engine(settings)

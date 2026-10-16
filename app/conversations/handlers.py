@@ -132,3 +132,9 @@ def file_content(caller: Caller, request: FileRef) -> Response:
 def delete_file(caller: Caller, request: FileRef) -> None:
     """Delete one file only from its owned active conversation."""
     service.delete(caller, request)
+
+
+@operation(SIGNED_IN)
+def store_generated_file(caller: Caller, request: WorkspaceUpload) -> WorkspaceFile:
+    """Persist a generated image through the same owned workspace rules."""
+    return WorkspaceFile(**service.upload(caller, request, origin="agent"))

@@ -158,5 +158,21 @@
     "effects": "NONE",
     "needsApproval": false,
     "route": "DELETE /api/notes/{id}"
+  },
+  {
+    "name": "make_chart",
+    "operation": "tools.make_chart",
+    "description": "Render inline chart data locally; keep a generated file in the active workspace.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/tools/chart"
+  },
+  {
+    "name": "check_calculation",
+    "operation": "tools.check_calculation",
+    "description": "Check a numeric or unit expression independently, without its source context.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "POST /api/tools/calculation-check"
   }
 ]

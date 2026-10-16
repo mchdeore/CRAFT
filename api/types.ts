@@ -121,3 +121,8 @@ export interface NoteSummary { id: Id; title: string; conversationId: Id | null;
 export interface Note extends NoteSummary { body: string }
 export interface AskAgent { question: string; conversationId?: Id | null }
 export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
+
+export interface ChartInput { spec: Record<string, unknown>; format: "svg" | "png" }
+export interface ChartResult { format: "svg" | "png"; mediaType: string; contentBase64: string | null; file: WorkspaceFile | null }
+export interface CalculationInput { expression: string; craftResult?: string | number | null; unit?: string | null }
+export interface CalculationResult { expression: string; wolframResult: string; craftResult: string | number | null; agrees: boolean; checkedAt: string }

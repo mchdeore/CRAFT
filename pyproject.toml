@@ -23,6 +23,7 @@ dependencies = [
   "openai==3.29.0",
   "azure-ai-projects==2.7.0",
   "anyio==4.15.1",
+  "vl-convert-python==1.9.0.post1",
 ]
 
 [dependency-groups]
@@ -61,3 +62,4 @@ venv = ".venv"
 [tool.pytest.ini_options]
 testpaths = ["app"]
 addopts = "-q"
+markers = ["live: requires configured external service credentials"]

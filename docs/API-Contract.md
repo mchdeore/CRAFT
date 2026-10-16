@@ -109,6 +109,8 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/notes/:id` | — | `Note` | signed in; live resource access | `read_note` |
 | `DELETE /api/notes/:id` | — | `void` | signed in; live resource access | `delete_note` |
 | `POST /api/agent/ask` | `AskAgent` | `AskAgentResult` | signed in; live resource access | `ask_agent` |
+| `POST /api/tools/chart` | `ChartInput` | `ChartResult` | signed in; live resource access | `make_chart` |
+| `POST /api/tools/calculation-check` | `CalculationInput` | `CalculationResult` | signed in; live resource access | `check_calculation` |
 
 ### 5.2 Agreed, not built yet
 
@@ -133,6 +135,7 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | Tool | Route | Input type | Effects |
 |---|---|---|---|
 | `ask_agent` | `POST /api/agent/ask` | `AskAgent` | `NONE` |
+| `check_calculation` | `POST /api/tools/calculation-check` | `CalculationInput` | `NONE` |
 | `check_citation` | `POST /api/library/citations/check` | `CitationCheck` | `NONE` |
 | `compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `NONE` |
 | `compare_versions` | `GET /api/library/documents/:item/compare` | `CompareVersions` | `NONE` |
@@ -146,6 +149,7 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `list_missions` | `GET /api/cube/missions` | `ListMissions` | `NONE` |
 | `list_notes` | `GET /api/notes` | `NoteList` | `NONE` |
 | `list_parameters` | `GET /api/cube/parameters` | `none` | `NONE` |
+| `make_chart` | `POST /api/tools/chart` | `ChartInput` | `NONE` |
 | `prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `NONE` |
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
@@ -346,6 +350,11 @@ export interface Note extends NoteSummary { body: string }
 export interface AskAgent { question: string; conversationId?: Id | null }
 export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
 
+export interface ChartInput { spec: Record<string, unknown>; format: "svg" | "png" }
+export interface ChartResult { format: "svg" | "png"; mediaType: string; contentBase64: string | null; file: WorkspaceFile | null }
+export interface CalculationInput { expression: string; craftResult?: string | number | null; unit?: string | null }
+export interface CalculationResult { expression: string; wolframResult: string; craftResult: string | number | null; agrees: boolean; checkedAt: string }
+
 // Remaining forms for table 5.2.
 export type Timestamp = string;   // ISO 8601, UTC
 
@@ -439,6 +448,8 @@ export interface Routes {
   "GET /api/notes/:id": { response: T.Note };
   "DELETE /api/notes/:id": { response: void };
   "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
+  "POST /api/tools/chart": { body: T.ChartInput; response: T.ChartResult };
+  "POST /api/tools/calculation-check": { body: T.CalculationInput; response: T.CalculationResult };
 }
 ```
 
@@ -480,6 +491,8 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/notes` | `NoteSummary[]` | `api/examples/notes.json` |
 | `GET /api/notes/:id` | `Note` | `api/examples/note.json` |
 | `POST /api/agent/ask` | `AskAgentResult` | `api/examples/ask-agent.json` |
+| `POST /api/tools/chart` | `ChartResult` | `api/examples/chart.json` |
+| `POST /api/tools/calculation-check` | `CalculationResult` | `api/examples/calculation-check.json` |
 
 ## 16. Stand-ins and contract tests
 

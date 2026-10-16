@@ -42,4 +42,6 @@ export interface Routes {
   "GET /api/notes/:id": { response: T.Note };
   "DELETE /api/notes/:id": { response: void };
   "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
+  "POST /api/tools/chart": { body: T.ChartInput; response: T.ChartResult };
+  "POST /api/tools/calculation-check": { body: T.CalculationInput; response: T.CalculationResult };
 }

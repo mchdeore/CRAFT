@@ -29,6 +29,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     model_endpoint: str = ""
     model_key: str = ""
     model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=4000)] = 4000
+    wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

@@ -125,7 +125,7 @@ def files(caller, identifier):
         return [file_shape(row) for row in storage.file_rows(session, identifier)]
 
 
-def upload(caller, request):
+def upload(caller, request, *, origin="upload"):
     name = request.file_name
     if name in {".", ".."} or any(c in name for c in "/\\") or any(ord(c) < 32 for c in name):
         raise InvalidInput()
@@ -144,7 +144,7 @@ def upload(caller, request):
                 size_bytes=len(request.content),
                 sha256=hashlib.sha256(request.content).digest(),
                 bytes=request.content,
-                origin="upload",
+                origin=origin,
                 state="uploading",
                 simulated=request.simulated,
                 classification=request.classification,
