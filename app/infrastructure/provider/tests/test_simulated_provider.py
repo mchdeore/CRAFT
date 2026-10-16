@@ -65,3 +65,14 @@ def test_path_tags(tmp_path: Path) -> None:
         and unknown["stage"] is None
         and unknown["warnings"] == ["unknown_silo"]
     )
+
+
+def test_version_preserves_original_name_and_media(tmp_path):
+    provider = SimulatedProvider(tmp_path)
+    provider.write_content("reference/rows.csv", b"Simulated,value\nOne,1\n")
+    item = next(iter(provider.items()))
+    provider.path("reference/rows.csv").rename(provider.path("reference/renamed.txt"))
+    provider.scan()
+    version = provider.get_item(item)["versions"][0]
+    assert version["file_name"] == "rows.csv" and version["media_type"] == "text/csv"
+    assert len(provider.get_item(item)["versions"]) == 1

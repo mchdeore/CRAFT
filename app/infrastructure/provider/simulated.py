@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import mimetypes
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -130,7 +131,14 @@ class SimulatedProvider:
                 snapshot = self.meta / "versions" / record["item"] / str(version)
                 snapshot.parent.mkdir(parents=True, exist_ok=True)
                 snapshot.write_bytes(content)
-                record["versions"].append({"version": version, "sha256": digest})
+                record["versions"].append(
+                    {
+                        "version": version,
+                        "sha256": digest,
+                        "file_name": file.name,
+                        "media_type": mimetypes.guess_type(path)[0] or "text/plain",
+                    }
+                )
                 kind = kind or "changed"
             if kind:
                 record["updated_at"] = now
