@@ -33,6 +33,21 @@ class ApprovalRequired(ApiError):
     status, code, message = 409, "approval_required", "Approval required."
 
 
+class OperationStreamResponse(StreamingResponse):
+    """Close the primed source even when response start precedes a disconnect."""
+
+    def __init__(self, *args, source, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.source = source
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await self.source.aclose()
+
+
 def decode(operation: Operation, value: Any) -> Any:
     if operation.input is None:
         if value not in (None, {}):
@@ -93,8 +108,8 @@ def finish(
         "kind": kind,
         "name": name,
         "origin": caller.origin,
-        "outcome": "error" if error else "ok",
-        "error_code": error.code if error else None,
+        "outcome": "error" if error or ctx.error_code else "ok",
+        "error_code": error.code if error else ctx.error_code,
         "duration_ms": round((perf_counter() - ctx.started) * 1000),
         "db_statements": ctx.db_statements,
         "db_ms": round(ctx.db_ms),
@@ -402,8 +417,9 @@ def endpoint(operation: Operation) -> Any:
                         with anyio.CancelScope(shield=True):
                             await iterator.aclose()
 
-                result = StreamingResponse(
+                result = OperationStreamResponse(
                     encoded(),
+                    source=iterator,
                     media_type="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
                 )

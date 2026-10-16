@@ -18,6 +18,7 @@ class CallContext:
     started: float
     db_statements: int = 0
     db_ms: float = 0
+    error_code: str | None = None
 
 
 current_call: ContextVar[CallContext | None] = ContextVar("current_call", default=None)

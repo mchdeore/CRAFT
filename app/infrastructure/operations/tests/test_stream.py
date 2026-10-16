@@ -99,3 +99,74 @@ def test_stream_cannot_be_a_tool():
         async def stream_tool(caller: Caller) -> AsyncIterator[StreamEvent]:
             """Stream a simulated value; for example 1."""
             yield StreamEvent(value=1)
+
+
+def test_handled_stream_failure_records_error(app):
+    @operation(PUBLIC)
+    async def stream_failure(caller: Caller) -> AsyncIterator[StreamEvent]:
+        context = current_call.get()
+        assert context is not None
+        context.error_code = "internal_error"
+        yield StreamEvent(value=1)
+
+    async def execute():
+        async for _ in stream_failure(trusted(app)):
+            pass
+
+    asyncio.run(execute())
+    recorded = rows(app, "probe.stream_failure")[-1]
+    assert recorded["outcome"] == "error" and recorded["error_code"] == "internal_error"
+
+
+def test_http_disconnect_before_body_closes_primed_source(app, monkeypatch):
+    closed, recorded = [], []
+
+    @operation(PUBLIC, post="/stream-disconnect")
+    async def stream_disconnect(caller: Caller) -> AsyncIterator[StreamEvent]:
+        try:
+            yield StreamEvent(value=1)
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            closed.append(True)
+
+    async def execute():
+        started = asyncio.Event()
+        body_read = False
+
+        async def receive():
+            nonlocal body_read
+            if not body_read:
+                body_read = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await started.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                started.set()
+                await asyncio.Event().wait()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/stream-disconnect",
+            "raw_path": b"/api/stream-disconnect",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"host", b"localhost:8000"), (b"origin", b"http://localhost:8000")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("localhost", 8000),
+        }
+        monkeypatch.setattr(
+            "app.infrastructure.operations.pipeline.record",
+            lambda caller, fields: recorded.append(fields),
+        )
+        await asyncio.wait_for(create_app(app.state.settings)(scope, receive, send), 3)
+        assert started.is_set() and closed == [True] and len(recorded) == 1
+        assert recorded[0]["outcome"] == "error"
+
+    asyncio.run(execute())
