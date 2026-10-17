@@ -12,6 +12,7 @@ CHROME="${CHROME:-$(command -v google-chrome chromium | head -1 || true)}"
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+export UV_PROJECT_ENVIRONMENT="$WORK/venv"
 rm -f "$OUT"/CRAFT-*.pdf "$OUT/index.html"
 
 version() {  # version <path>: "<date>|<commit>" of its last change, or "<today>|draft"
@@ -84,7 +85,7 @@ build docs/Dependencies-and-Integration.md Dependencies-and-Integration "Depende
 python3 "$T/links.py" "$ROOT/docs/downloads.md" "$WORK/manifest.tsv" "$WORK/downloads.md" "$(git -C "$ROOT" rev-parse HEAD)"
 
 # Stage verified downloads with the Markdown topics, then let MkDocs own the site.
-uv run --group docs python - "$ROOT" "$WORK" "$OUT" <<'PYDOCS'
+uv run --locked --only-group docs python - "$ROOT" "$WORK" "$OUT" <<'PYDOCS'
 from pathlib import Path
 import shutil
 import sys
@@ -100,5 +101,5 @@ config["docs_dir"] = str(source)
 config["site_dir"] = str(output)
 (work / "mkdocs.yml").write_text(yaml.safe_dump(config, sort_keys=False))
 PYDOCS
-uv run --group docs mkdocs build --strict --config-file "$WORK/mkdocs.yml"
+uv run --locked --only-group docs mkdocs build --strict --config-file "$WORK/mkdocs.yml"
 python3 "$T/check_site.py" "$OUT"
