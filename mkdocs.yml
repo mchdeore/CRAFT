@@ -13,6 +13,7 @@ nav:
       - Agent runtime: wiki/runtime.md
       - Python workspace: wiki/python.md
       - Documents and evidence: wiki/documents.md
+      - Local jobs and audio: wiki/jobs-and-audio.md
   - Concepts:
       - Scope: spec/01-scope.md
       - Connections: spec/02-connections.md

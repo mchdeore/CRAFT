@@ -9,6 +9,7 @@ CRAFT connects project documents, cited answers and engineering values. Use a to
 - [Agent runtime](wiki/runtime.md): local runs, tools and decisions.
 - [Python workspace](wiki/python.md): code, CSV data and returned artifacts.
 - [Documents and evidence](wiki/documents.md): identity, versions, extraction and relationships.
+- [Local jobs and audio](wiki/jobs-and-audio.md): queued work, transcript versions and research snapshots.
 
 ## 2. Application concepts
 
