@@ -8,7 +8,7 @@ from starlette.responses import Response
 from app.infrastructure.access import Caller
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import InvalidInput, NotFound
-from app.infrastructure.provider.simulated import SimulatedProvider
+from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.embed import embed, model_name
 
@@ -104,7 +104,7 @@ def search(caller: Caller, request):
     from app.library.handlers import LibraryHit, LibraryHits
 
     sessions, settings = scope(caller)
-    provider = SimulatedProvider(settings.provider_root)
+    provider = get_provider(settings.provider_root)
     live = provider.items()
     vector = embed(request.query, caller=caller)
     with unit_of_work(sessions, read_only=True) as session:
@@ -308,7 +308,7 @@ def read_facets(caller: Caller, request):
         cached_access = {
             item: storage.provider_readable(session, caller, row) for item, row in cached.items()
         }
-    live = SimulatedProvider(settings.provider_root).items()
+    live = get_provider(settings.provider_root).items()
     with unit_of_work(sessions, read_only=True) as session:
         live_access = {
             item: cached_access.get(item, False)
@@ -382,7 +382,7 @@ def check_citation(caller: Caller, request):
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:
         item, version, _ = readable_version(session, caller, handle.item, handle.version)
-    provider = SimulatedProvider(settings.provider_root)
+    provider = get_provider(settings.provider_root)
     try:
         live = provider.get_item(handle.item)
     except KeyError:
@@ -423,9 +423,7 @@ def original(caller: Caller, request, attachment: bool) -> Response:
     with unit_of_work(sessions, read_only=True) as session:
         item, version, _ = readable_version(session, caller, request.item, request.version)
     try:
-        content = SimulatedProvider(settings.provider_root).read_content(
-            request.item, request.version
-        )
+        content = get_provider(settings.provider_root).read_content(request.item, request.version)
     except KeyError:
         raise NotFound() from None
     from pathlib import Path
@@ -443,6 +441,7 @@ def original(caller: Caller, request, attachment: bool) -> Response:
         media_type=version["media_type"],
         headers={
             "Content-Disposition": f'{disposition}; filename="{name}"',
+            "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox",
         },

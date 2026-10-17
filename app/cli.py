@@ -83,9 +83,9 @@ def main(argv: list[str] | None = None) -> None:
 
             print(json.dumps(index_provider(settings, args.rebuild)))
         elif args.command == "provider":
-            from app.infrastructure.provider.simulated import SimulatedProvider
+            from app.infrastructure.provider import get_provider
 
-            provider = SimulatedProvider(settings.provider_root)
+            provider = get_provider(settings.provider_root)
             if args.action == "scan":
                 print(json.dumps({"changes": len(provider.scan())}))
             elif args.action == "put":
