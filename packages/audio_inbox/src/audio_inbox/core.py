@@ -75,13 +75,13 @@ class AudioInbox:
         self.clock = clock or time.time
 
         self.settle_seconds = self._num("settle_seconds", settle_seconds, min_value=0)
-        self.max_file_bytes = int(self._num("max_file_bytes", max_file_bytes, min_value=1))
-        self.max_total_bytes = int(self._num("max_total_bytes", max_total_bytes, min_value=1))
+        self.max_file_bytes = self._integer("max_file_bytes", max_file_bytes, min_value=1)
+        self.max_total_bytes = self._integer("max_total_bytes", max_total_bytes, min_value=1)
         self.max_duration_seconds = self._num(
             "max_duration_seconds", max_duration_seconds, min_value=0
         )
-        self.max_text_chars = int(self._num("max_text_chars", max_text_chars, min_value=1))
-        self.max_safe_retries = int(self._num("max_safe_retries", max_safe_retries, min_value=0))
+        self.max_text_chars = self._integer("max_text_chars", max_text_chars, min_value=1)
+        self.max_safe_retries = self._integer("max_safe_retries", max_safe_retries, min_value=0)
 
         self.root.mkdir(parents=True, exist_ok=True)
         self._chmod_private(self.root)
@@ -172,9 +172,14 @@ class AudioInbox:
                 );
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(suggestion_runs)")}
+            for column, kind in (("owner_pid", "INTEGER"), ("claim_token", "TEXT")):
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE suggestion_runs ADD COLUMN {column} {kind}")
 
     def _recover_running_jobs(self) -> None:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT id, running_pid FROM jobs WHERE status='running'"
             ).fetchall()
@@ -185,6 +190,16 @@ class AudioInbox:
                         "UPDATE jobs SET status='uncertain', running_pid=NULL, claim_token"
                         "=NULL, validation_error='stale_running', updated_at=? WHERE id=?",
                         (self.clock(), row["id"]),
+                    )
+            for row in conn.execute(
+                "SELECT version_id,owner_pid FROM suggestion_runs WHERE status='running'"
+            ).fetchall():
+                if row["owner_pid"] is None or not self._pid_alive(row["owner_pid"]):
+                    conn.execute(
+                        "UPDATE suggestion_runs SET "
+                        "status='uncertain',error_code='stale_running',owner_pid=NULL,"
+                        "claim_token=NULL,updated_at=? WHERE version_id=? AND status='running'",
+                        (self.clock(), row["version_id"]),
                     )
 
     def _pid_alive(self, pid: int) -> bool:
@@ -664,6 +679,9 @@ class AudioInbox:
         if existing:
             return [self._proposal_from_row(r) for r in existing]
 
+        transcript = self.transcript(version_id)
+        duration = self._asset_for_version(version_id).duration
+        claim_token = self._new_id("suggestion")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             run = conn.execute(
@@ -674,27 +692,37 @@ class AudioInbox:
                     return [self._proposal_from_row(row) for row in self._proposal_rows(version_id)]
                 raise RuntimeError("suggestions unavailable")
             conn.execute(
-                "INSERT INTO suggestion_runs VALUES (?, 'running', NULL, ?)",
-                (version_id, self.clock()),
+                "INSERT INTO "
+                "suggestion_runs(version_id,status,error_code,updated_at,owner_pid,"
+                "claim_token) VALUES (?, 'running', NULL, ?, ?, ?)",
+                (version_id, self.clock(), os.getpid(), claim_token),
             )
 
-        transcript = self.transcript(version_id)
         try:
             candidates = self.suggester(transcript)
         except TimeoutError:
-            self._mark_suggestion_run(version_id, "uncertain", "suggestion_timeout")
+            self._mark_suggestion_run(version_id, "uncertain", "suggestion_timeout", claim_token)
             raise
         except Exception:
-            self._mark_suggestion_run(version_id, "failed", "suggestion_error")
+            self._mark_suggestion_run(version_id, "failed", "suggestion_error", claim_token)
             raise
 
         if not isinstance(candidates, list) or len(candidates) > 100:
-            self._mark_suggestion_run(version_id, "failed", "suggestion_shape")
+            self._mark_suggestion_run(version_id, "failed", "suggestion_shape", claim_token)
             raise ValueError("invalid_suggestion_shape")
-        duration = self._asset_for_version(version_id).duration
         valid = [c for c in candidates if valid_goal(c, transcript, duration, self.max_text_chars)]
         now = self.clock()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT claim_token,status FROM suggestion_runs WHERE version_id=?", (version_id,)
+            ).fetchone()
+            if (
+                current is None
+                or current["status"] != "running"
+                or current["claim_token"] != claim_token
+            ):
+                raise RuntimeError("suggestion_claim_lost")
             for cand in valid:
                 conn.execute(
                     "INSERT INTO proposals(id, version_id, title, action, due_date, un"
@@ -714,9 +742,10 @@ class AudioInbox:
                     ),
                 )
             conn.execute(
-                "INSERT OR REPLACE INTO suggestion_runs(version_id, status, error_"
-                "code, updated_at) VALUES(?,?,?,?)",
-                (version_id, "completed", None, now),
+                "UPDATE suggestion_runs SET "
+                "status='completed',error_code=NULL,updated_at=?,owner_pid=NULL,"
+                "claim_token=NULL WHERE version_id=? AND claim_token=?",
+                (now, version_id, claim_token),
             )
         return [self._proposal_from_row(r) for r in self._proposal_rows(version_id)]
 
@@ -726,13 +755,18 @@ class AudioInbox:
                 "SELECT * FROM suggestion_runs WHERE version_id=?", (version_id,)
             ).fetchone()
 
-    def _mark_suggestion_run(self, version_id: str, status: str, error_code: str) -> None:
+    def _mark_suggestion_run(
+        self, version_id: str, status: str, error_code: str, claim_token: str
+    ) -> None:
         with self._connect() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO suggestion_runs(version_id, status, error_"
-                "code, updated_at) VALUES(?,?,?,?)",
-                (version_id, status, error_code, self.clock()),
+            result = conn.execute(
+                "UPDATE suggestion_runs SET "
+                "status=?,error_code=?,updated_at=?,owner_pid=NULL,claim_token=NULL WHERE "
+                "version_id=? AND status='running' AND claim_token=?",
+                (status, error_code, self.clock(), version_id, claim_token),
             )
+            if result.rowcount != 1:
+                raise RuntimeError("suggestion_claim_lost")
 
     def _asset_for_version(self, version_id: str) -> AssetRef:
         with self._connect() as conn:
@@ -881,6 +915,12 @@ class AudioInbox:
                 os.chmod(path, 0o700)
             except OSError:
                 pass
+
+    @staticmethod
+    def _integer(name: str, value: Any, *, min_value: int) -> int:
+        if type(value) is not int or value < min_value or value >= 2**63:
+            raise ValueError(f"invalid_{name}")
+        return value
 
     @staticmethod
     def _num(name: str, value: Any, *, min_value: float = 0.0) -> float:
