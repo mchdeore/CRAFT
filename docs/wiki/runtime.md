@@ -14,6 +14,8 @@ A decision identifies the proposed action and its current context. Accepted or r
 
 The model job library maintains a local queue with pause, resume and cancellation. Provider routes refer to private credentials loaded at dispatch. Source quotes are checked against the supplied evidence; a quote match establishes a reference, while interpretation remains part of review.
 
+The approval routes list and read requester-owned frozen actions and append an HTTP requester decision once. The database preserves request arguments, evidence and event history. Concurrent decisions serialize on the owned run. Approval decisions are absent from the model tool catalog.
+
 ## 3. Related topics
 
 See [agent](../spec/03-agent.md), [operations](../spec/05-operations-and-logging.md), [models and confidence](../spec/04-models-and-confidence.md), [workspace](python.md), [documents](documents.md) and [components](components.md).

@@ -36,22 +36,18 @@ dev = [
     "craft-python-workspace",
     "craft-data-provider",
     "craft-provider-fleet",
-    "craft-research-data",
-    "craft-audio-inbox",
 ]
 
 docs = ["mkdocs==1.6.1"]
 
 [tool.uv.workspace]
-members = ["packages/runtime", "packages/python_workspace", "packages/data_provider", "packages/provider_fleet", "packages/research_data", "packages/audio_inbox"]
+members = ["packages/runtime", "packages/python_workspace", "packages/data_provider", "packages/provider_fleet"]
 
 [tool.uv.sources]
 craft-runtime = { workspace = true }
 craft-python-workspace = { workspace = true }
 craft-data-provider = { workspace = true }
 craft-provider-fleet = { workspace = true }
-craft-research-data = { workspace = true }
-craft-audio-inbox = { workspace = true }
 
 [project.scripts]
 craft = "app.cli:main"
@@ -67,7 +63,7 @@ module-root = ""
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = [".", "packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/research_data/src", "packages/audio_inbox/src"]
+src = [".", "packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src"]
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
@@ -76,12 +72,12 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pyright]
 pythonVersion = "3.12"
 include = ["app", "migrations", "packages"]
-extraPaths = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/research_data/src", "packages/audio_inbox/src"]
+extraPaths = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src"]
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["app", "tests", "packages"]
-pythonpath = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/runtime/tests", "packages/research_data/src", "packages/audio_inbox/src"]
+pythonpath = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/runtime/tests"]
 addopts = "-q --import-mode=importlib"
 markers = ["live: requires configured external service credentials", "docker: requires the restricted Python workspace image and Docker daemon"]
