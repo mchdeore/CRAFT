@@ -16,6 +16,12 @@ Permission checks constrain visible rows before counts and ranking. A partial pr
 
 The local navigation interface accepts typed mission, provider, silo, stage, classification, simulation, text and tag filters. It selects the latest eligible source version before text or tag matching. A knowledge cutoff also selects eligible extraction and tag records. Counts and pages share a short read snapshot. Version timelines record acquisition times alongside explicitly current mission/stage/silo metadata.
 
+Local document search and graph views select currently readable, active source versions before returning text, counts or nodes. The default selects the latest eligible version; an explicit all-version view retains accessible history. A knowledge cutoff selects the latest extraction known at that time, with a deterministic tie between extraction attempts. Current withdrawal and permission checks still apply to historical views.
+
+New representations record their creation time. A cutoff excludes a later-generated summary even when its source version was already known. Existing stored representations whose timing cannot be established remain available in current views and are excluded from historical views. The local store preserves their records and source identities when adding the timestamp field.
+
+Structural links belong to document versions. Evidence links depend on their source extraction; similarity candidates depend on both endpoint representations. Re-extraction retires those derived edges from current views while preserving eligible historical views. Graph nodes and edges share one read snapshot and the same source scope, and readable isolated nodes remain visible.
+
 The field catalog describes supported filters. Optional field-vector matching preserves model, dimensions, recipe and catalog hash and compares cosine similarity. It suggests field names; direct queries use the same fixed SQL and caller permission rules without a model.
 
 ## 3. Values

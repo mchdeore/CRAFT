@@ -1,5 +1,7 @@
 """Private SQLite schema for the isolated prototype."""
 
+import sqlite3
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
@@ -102,6 +104,7 @@ CREATE TABLE IF NOT EXISTS representations (
     origin TEXT NOT NULL CHECK (origin IN ('extracted', 'generated', 'explicit', 'suggested')),
     generator_model TEXT,
     recipe TEXT,
+    created_at TEXT,
     UNIQUE (version_id, representation_id),
     FOREIGN KEY (version_id, extraction_id)
         REFERENCES extractions(version_id, extraction_id),
@@ -334,3 +337,26 @@ BEGIN
     ) THEN RAISE(ABORT, 'target embedding contract mismatch') END;
 END;
 """
+
+
+def migrate_representation_times(connection: sqlite3.Connection) -> None:
+    """Preserve legacy rows and backfill only known automatic extraction times."""
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(representations)")}
+    if "created_at" in columns:
+        return
+    connection.execute("ALTER TABLE representations ADD COLUMN created_at TEXT")
+    # These source keys identify body rows inserted with their extraction. Other
+    # legacy representations may have been added later, even to an old extraction.
+    connection.execute(
+        """
+        UPDATE representations SET created_at = (
+            SELECT x.created_at FROM extractions x
+            JOIN blocks b ON b.version_id = x.version_id AND b.extraction_id = x.extraction_id
+            WHERE x.extraction_id = representations.extraction_id
+              AND b.block_id = representations.block_id
+              AND representations.source_key =
+                  b.source_key || '/representation:body_chunk:body_heading_v1'
+        )
+        WHERE origin = 'extracted' AND kind = 'body_chunk' AND purpose = 'body_heading_v1'
+        """
+    )

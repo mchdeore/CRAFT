@@ -25,7 +25,7 @@ from .models import (
     StorageMode,
     VersionInfo,
 )
-from .schema import SCHEMA
+from .schema import SCHEMA, migrate_representation_times
 from .timeutil import dump_datetime, load_datetime, utc_now
 
 Clock = Callable[[], datetime]
@@ -56,6 +56,10 @@ class DocumentStore:
         self.root.mkdir(parents=True, exist_ok=True)
         with self.transaction() as connection:
             connection.executescript(SCHEMA)
+            # executescript commits the initial transaction; keep the migration
+            # check, column addition, and conservative backfill atomic together.
+            connection.execute("BEGIN IMMEDIATE")
+            migrate_representation_times(connection)
 
     @contextmanager
     def read_connection(self) -> Iterator[sqlite3.Connection]:
@@ -698,9 +702,10 @@ class DocumentStore:
                 """
                 INSERT INTO representations (
                     representation_id, version_id, extraction_id, block_id, kind,
-                    purpose, text, text_hash, source_key, origin, generator_model, recipe
+                    purpose, text, text_hash, source_key, origin, generator_model, recipe,
+                    created_at
                 ) VALUES (?, ?, ?, ?, 'body_chunk', 'body_heading_v1',
-                    ?, ?, ?, 'extracted', NULL, ?)
+                    ?, ?, ?, 'extracted', NULL, ?, ?)
                 """,
                 (
                     representation_id,
@@ -711,6 +716,7 @@ class DocumentStore:
                     representation_hash,
                     f"{block_source}/representation:body_chunk:body_heading_v1",
                     extraction_method,
+                    created_at,
                 ),
             )
         return extraction_id, True
@@ -911,8 +917,9 @@ class DocumentStore:
                 """
                 INSERT INTO representations (
                     representation_id, version_id, extraction_id, block_id, kind,
-                    purpose, text, text_hash, source_key, origin, generator_model, recipe
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    purpose, text, text_hash, source_key, origin, generator_model, recipe,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     representation_id,
@@ -927,6 +934,7 @@ class DocumentStore:
                     origin,
                     generator_model,
                     recipe,
+                    dump_datetime(self.clock()),
                 ),
             )
             return representation_id

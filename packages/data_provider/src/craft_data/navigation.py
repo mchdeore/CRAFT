@@ -11,6 +11,7 @@ from typing import Literal
 from .models import Citation
 from .store import DocumentStore
 from .timeutil import dump_datetime, load_datetime
+from .visibility import VisibilityScope
 
 _MAX_TEXT = 500
 _MAX_TERM = 120
@@ -154,12 +155,10 @@ def query_documents(store: DocumentStore, principal: str, query: DocumentQuery) 
         raise TypeError("principal must be non-empty text")
     _validate_query(query)
 
-    clauses: list[str] = [
-        "d.remote_status = 'active'",
-        "g.principal = ?",
-        "g.can_read = 1",
-    ]
-    params: list[object] = [principal]
+    scope = VisibilityScope(principal, query.version_mode, query.known_at)
+    version_filter, version_parameters = scope.versions()
+    clauses: list[str] = [version_filter]
+    params: list[object] = list(version_parameters)
     _append_in_filter("d.mission", query.missions, clauses, params)
     _append_in_filter("d.provider", query.providers, clauses, params)
     _append_in_filter("d.silo", query.silos, clauses, params)
@@ -168,50 +167,34 @@ def query_documents(store: DocumentStore, principal: str, query: DocumentQuery) 
     if query.synthetic is not None:
         clauses.append("d.synthetic = ?")
         params.append(1 if query.synthetic else 0)
-    if query.known_at is not None:
-        clauses.append("v.created_at <= ?")
-        params.append(dump_datetime(query.known_at))
-    if query.version_mode == "latest":
-        latest_time = " AND newer.created_at <= ?" if query.known_at is not None else ""
-        clauses.append(
-            "NOT EXISTS (SELECT 1 FROM doc_versions newer "
-            "WHERE newer.document_id=v.document_id AND newer.sequence>v.sequence"
-            + latest_time
-            + ")"
-        )
-        if query.known_at is not None:
-            params.append(dump_datetime(query.known_at))
     if query.text:
         like = _escape_like(query.text)
-
-        def extraction_scope(alias):
-            if query.known_at is None:
-                return f"{alias}.is_current = 1"
-            return (
-                f"{alias}.created_at <= ? AND NOT EXISTS (SELECT 1 FROM extractions newer "
-                f"WHERE newer.version_id={alias}.version_id AND newer.created_at <= ? "
-                f"AND (newer.created_at>{alias}.created_at OR "
-                f"(newer.created_at={alias}.created_at AND newer.rowid>{alias}.rowid)))"
-            )
-
+        block_scope, block_parameters = scope.extractions("e")
+        representation_scope, representation_parameters = scope.extractions("e2")
+        representation_time, representation_time_parameters = scope.created("r")
         clauses.append(
             "(d.name LIKE ? ESCAPE '\\' OR "
             "EXISTS (SELECT 1 FROM extractions e JOIN blocks b "
             "ON b.version_id=e.version_id AND b.extraction_id=e.extraction_id "
             "WHERE e.version_id=v.version_id AND "
-            + extraction_scope("e")
+            + block_scope
             + " AND b.text LIKE ? ESCAPE '\\') OR "
             "EXISTS (SELECT 1 FROM extractions e2 JOIN representations r "
             "ON r.version_id=e2.version_id AND r.extraction_id=e2.extraction_id "
             "WHERE e2.version_id=v.version_id AND "
-            + extraction_scope("e2")
-            + " AND r.text LIKE ? ESCAPE '\\'))"
+            + representation_scope
+            + f" AND {representation_time} AND r.text LIKE ? ESCAPE '\\'))"
         )
-        params.append(like)
-        for _ in range(2):
-            if query.known_at is not None:
-                params.extend([dump_datetime(query.known_at)] * 2)
-            params.append(like)
+        params.extend(
+            [
+                like,
+                *block_parameters,
+                like,
+                *representation_parameters,
+                *representation_time_parameters,
+                like,
+            ]
+        )
     for tag in query.tags:
         clauses.append(
             "EXISTS (SELECT 1 FROM tag_assignments ta WHERE ta.document_id = d.document_id "

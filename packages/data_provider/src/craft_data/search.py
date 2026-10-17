@@ -6,7 +6,7 @@ import re
 
 from .models import Citation, SearchHit, SearchPage, SearchQuery
 from .store import DocumentStore
-from .timeutil import dump_datetime
+from .visibility import VisibilityScope
 
 
 def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
@@ -14,10 +14,7 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
         raise ValueError("search text must not be empty")
     if query.limit < 1 or query.limit > 500:
         raise ValueError("limit must be between 1 and 500")
-    if query.version_mode not in {"latest", "all"}:
-        raise ValueError("version_mode must be latest or all")
-    if not query.principal.strip():
-        raise ValueError("principal must not be empty")
+    scope = VisibilityScope(query.principal, query.version_mode, query.known_at)
     tokens = tuple(dict.fromkeys(re.findall(r"[\w.-]+", query.text.casefold())))
     if not tokens:
         return SearchPage(total_hits=0, hits=())
@@ -33,21 +30,15 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
         token_parameters.append(f"%{escaped}%")
     kinds_placeholders = ", ".join("?" for _ in kinds)
     score_expression = " + ".join(score_parts)
-    known_filter = "" if query.known_at is None else "AND v.created_at <= ?"
-    latest_filter = ""
-    if query.version_mode == "latest":
-        recent_time = "AND newer.created_at <= ?" if query.known_at is not None else ""
-        latest_filter = (
-            "AND NOT EXISTS (SELECT 1 FROM doc_versions newer "
-            "WHERE newer.document_id=v.document_id AND newer.sequence>v.sequence "
-            + recent_time
-            + ")"
-        )
-    parameters: list[object] = [query.principal, *kinds]
-    if query.known_at is not None:
-        parameters.append(dump_datetime(query.known_at))
-        if latest_filter:
-            parameters.append(dump_datetime(query.known_at))
+    version_filter, version_parameters = scope.versions()
+    extraction_filter, extraction_parameters = scope.extractions("x")
+    representation_filter, representation_parameters = scope.created("r")
+    parameters: list[object] = [
+        *version_parameters,
+        *extraction_parameters,
+        *representation_parameters,
+        *kinds,
+    ]
     parameters.extend(token_parameters)
     parameters.append(query.limit)
 
@@ -62,14 +53,13 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
                 FROM representations r
                 JOIN doc_versions v ON v.version_id = r.version_id
                 JOIN documents d ON d.document_id = v.document_id
-                JOIN extractions x ON x.extraction_id = r.extraction_id AND x.is_current = 1
+                JOIN extractions x ON x.extraction_id = r.extraction_id
                 JOIN mission_grants g ON g.mission = d.mission
                 LEFT JOIN blocks b ON b.version_id = r.version_id AND b.block_id = r.block_id
-                WHERE g.principal = ? AND g.can_read = 1
-                  AND d.remote_status = 'active'
+                WHERE {version_filter}
+                  AND ({extraction_filter})
+                  AND ({representation_filter})
                   AND r.kind IN ({kinds_placeholders})
-                  {known_filter}
-                  {latest_filter}
             ), scored AS (
                 SELECT permitted.*,
                     ({score_expression}) AS score
