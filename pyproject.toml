@@ -48,6 +48,7 @@ module-root = ""
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+src = [".", "packages/runtime/src"]
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
@@ -55,11 +56,13 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
 pythonVersion = "3.12"
-include = ["app", "migrations"]
+include = ["app", "migrations", "packages/runtime"]
+extraPaths = ["packages/runtime/src"]
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-testpaths = ["app", "tests"]
+testpaths = ["app", "tests", "packages"]
+pythonpath = ["packages/runtime/src"]
 addopts = "-q"
 markers = ["live: requires configured external service credentials"]
