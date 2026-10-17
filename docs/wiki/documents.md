@@ -12,6 +12,10 @@ Representations record purpose, text, source location and generation or extracti
 
 Permission checks constrain visible rows before counts and ranking. A partial provider scan does not establish deletion. [Retrieval](../spec/10-retrieval.md) owns the application search behavior; [data](../spec/07-data.md) owns the application tables.
 
+The local navigation interface accepts typed mission, provider, silo, stage, classification, simulation, text and tag filters. It selects the latest eligible source version before text or tag matching. A knowledge cutoff also selects eligible extraction and tag records. Counts and pages share a short read snapshot. Version timelines record acquisition times alongside explicitly current mission/stage/silo metadata.
+
+The field catalog describes supported filters. Optional field-vector matching preserves model, dimensions, recipe and catalog hash and compares cosine similarity. It suggests field names; direct queries use the same fixed SQL and caller permission rules without a model.
+
 ## 3. Values
 
 The local cube fixture retains exact values, explicit value states, event time, knowledge time and source evidence. Candidate values are separate from published values. Approved publication is atomic and idempotent; rejected candidates write no factual value. Withdrawn latest evidence produces a withheld result without reviving an older value.
