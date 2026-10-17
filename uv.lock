@@ -5,9 +5,11 @@ requires-python = "==3.12.*"
 [manifest]
 members = [
     "craft",
+    "craft-audio-inbox",
     "craft-data-provider",
     "craft-provider-fleet",
     "craft-python-workspace",
+    "craft-research-data",
     "craft-runtime",
 ]
 
@@ -456,9 +458,11 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "craft-audio-inbox" },
     { name = "craft-data-provider" },
     { name = "craft-provider-fleet" },
     { name = "craft-python-workspace" },
+    { name = "craft-research-data" },
     { name = "craft-runtime" },
     { name = "fpdf2" },
     { name = "pyright" },
@@ -495,9 +499,11 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "craft-audio-inbox", editable = "packages/audio_inbox" },
     { name = "craft-data-provider", editable = "packages/data_provider" },
     { name = "craft-provider-fleet", editable = "packages/provider_fleet" },
     { name = "craft-python-workspace", editable = "packages/python_workspace" },
+    { name = "craft-research-data", editable = "packages/research_data" },
     { name = "craft-runtime", editable = "packages/runtime" },
     { name = "fpdf2", specifier = "==2.8.9" },
     { name = "pyright", specifier = "==1.1.414" },
@@ -505,6 +511,11 @@ dev = [
     { name = "ruff", specifier = "==0.16.10" },
 ]
 docs = [{ name = "mkdocs", specifier = "==1.6.1" }]
+
+[[package]]
+name = "craft-audio-inbox"
+version = "0.1.0"
+source = { editable = "packages/audio_inbox" }
 
 [[package]]
 name = "craft-data-provider"
@@ -563,6 +574,11 @@ dev = [
     { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff", specifier = "==0.16.10" },
 ]
+
+[[package]]
+name = "craft-research-data"
+version = "0.1.0"
+source = { editable = "packages/research_data" }
 
 [[package]]
 name = "craft-runtime"

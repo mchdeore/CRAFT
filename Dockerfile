@@ -8,6 +8,8 @@ COPY packages/runtime/pyproject.toml packages/runtime/pyproject.toml
 COPY packages/python_workspace/pyproject.toml packages/python_workspace/pyproject.toml
 COPY packages/data_provider/pyproject.toml packages/data_provider/pyproject.toml
 COPY packages/provider_fleet/pyproject.toml packages/provider_fleet/pyproject.toml
+COPY packages/research_data/pyproject.toml packages/research_data/pyproject.toml
+COPY packages/audio_inbox/pyproject.toml packages/audio_inbox/pyproject.toml
 RUN uv sync --locked --no-dev --no-install-project
 COPY app ./app
 COPY migrations ./migrations
