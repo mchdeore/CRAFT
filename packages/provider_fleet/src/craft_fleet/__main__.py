@@ -20,12 +20,19 @@ def main():
     add.add_argument("--sources", type=Path, required=True)
     add.add_argument("--max-output-tokens", type=int, default=1024)
     add.add_argument("--deadline", type=float, default=60)
+    add.add_argument("--deliverable", choices=("json", "coding_proposal"), default="json")
+    add.add_argument("--allowed-path", action="append", default=[])
+    add.add_argument("--priority", type=int, default=0)
     commands.add_parser("list")
     commands.add_parser("run")
     commands.add_parser("pause")
     commands.add_parser("resume")
     cancel = commands.add_parser("cancel")
     cancel.add_argument("job", type=int)
+    commands.add_parser("recover")
+    revise = commands.add_parser("revise")
+    revise.add_argument("job", type=int)
+    revise.add_argument("--changes", type=Path, required=True)
     show = commands.add_parser("show")
     show.add_argument("job", type=int)
     args = parser.parse_args()
@@ -40,6 +47,9 @@ def main():
                 "source_excerpts": json.loads(args.sources.read_text()),
                 "max_output_tokens": args.max_output_tokens,
                 "deadline": args.deadline,
+                "expected_deliverable": args.deliverable,
+                "allowed_proposal_paths": args.allowed_path,
+                "priority": args.priority,
             }
         )
         print(json.dumps({"job": job}))
@@ -55,6 +65,11 @@ def main():
         fleet.queue.pause()
     elif args.command == "resume":
         fleet.queue.resume()
+    elif args.command == "recover":
+        print(json.dumps({"recovered": fleet.queue.recover_dead_jobs()}))
+    elif args.command == "revise":
+        new_id, parent_id = fleet.queue.revise(args.job, json.loads(args.changes.read_text()))
+        print(json.dumps({"job": new_id, "parent": parent_id}))
     elif args.command == "cancel":
         print(json.dumps({"cancelled": fleet.queue.cancel(args.job)}))
 
