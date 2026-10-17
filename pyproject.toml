@@ -32,7 +32,22 @@ dev = [
     "ruff==0.16.10",
     "pyright==1.1.414",
     "fpdf2==2.8.9",
+    "craft-runtime",
+    "craft-python-workspace",
+    "craft-data-provider",
+    "craft-provider-fleet",
 ]
+
+docs = ["mkdocs==1.6.1"]
+
+[tool.uv.workspace]
+members = ["packages/runtime", "packages/python_workspace", "packages/data_provider", "packages/provider_fleet"]
+
+[tool.uv.sources]
+craft-runtime = { workspace = true }
+craft-python-workspace = { workspace = true }
+craft-data-provider = { workspace = true }
+craft-provider-fleet = { workspace = true }
 
 [project.scripts]
 craft = "app.cli:main"
@@ -48,7 +63,7 @@ module-root = ""
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = [".", "packages/runtime/src"]
+src = [".", "packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src"]
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
@@ -56,13 +71,13 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
 pythonVersion = "3.12"
-include = ["app", "migrations", "packages/runtime"]
-extraPaths = ["packages/runtime/src"]
+include = ["app", "migrations", "packages"]
+extraPaths = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src"]
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["app", "tests", "packages"]
-pythonpath = ["packages/runtime/src"]
-addopts = "-q"
-markers = ["live: requires configured external service credentials"]
+pythonpath = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/runtime/tests"]
+addopts = "-q --import-mode=importlib"
+markers = ["live: requires configured external service credentials", "docker: requires the restricted Python workspace image and Docker daemon"]

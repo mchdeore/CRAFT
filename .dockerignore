@@ -8,3 +8,11 @@
 **/__pycache__
 **/tests
 **/conftest.py
+!packages
+!packages/*
+!packages/*/pyproject.toml
+packages/*/src
+packages/*/tests
+packages/*/.venv
+packages/*/build
+packages/*/*.egg-info
