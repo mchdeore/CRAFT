@@ -23,6 +23,7 @@ def main():
     add.add_argument("--deliverable", choices=("json", "coding_proposal"), default="json")
     add.add_argument("--allowed-path", action="append", default=[])
     add.add_argument("--priority", type=int, default=0)
+    add.add_argument("--retry-limit", type=int, default=2)
     commands.add_parser("list")
     commands.add_parser("run")
     commands.add_parser("pause")
@@ -50,6 +51,7 @@ def main():
                 "expected_deliverable": args.deliverable,
                 "allowed_proposal_paths": args.allowed_path,
                 "priority": args.priority,
+                "retry_limit": args.retry_limit,
             }
         )
         print(json.dumps({"job": job}))

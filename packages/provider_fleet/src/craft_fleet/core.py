@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from craft_fleet.deliverables import build_job_request, validate_deliverable
+from craft_fleet.pricing import Price, estimate_cost, safe_id
 from craft_fleet.queue import JobQueue as JobQueue
 
 
@@ -18,6 +19,7 @@ class ProviderError(Exception):
     kind: str
     status: int | None = None
     retry_after: float | None = None
+    request_id: str | None = None
 
 
 class ProviderClient:
@@ -82,26 +84,37 @@ class ProviderClient:
         )
         own = self.http_client is None
         try:
-            data = await self._post_json(client, cfg["endpoint"], headers, body)
-            return self._normalize(protocol, data)
+            data, request_id = await self._post_json(client, cfg["endpoint"], headers, body)
+            result = self._normalize(protocol, data)
+            result.update(request_id=request_id, response_id=safe_id(data.get("id")))
+            return result
         finally:
             if own:
                 await client.aclose()
 
     async def _post_json(
         self, client: httpx.AsyncClient, url: str, headers: dict[str, str], body: dict[str, Any]
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], str | None]:
+        request_id = None
         try:
-            async with client.stream("POST", url, headers=headers, content=json.dumps(body)) as r:
+            async with client.stream(
+                "POST", url, headers=headers, content=json.dumps(body), follow_redirects=False
+            ) as r:
+                request_id = safe_id(
+                    r.headers.get("apim-request-id")
+                    or r.headers.get("x-request-id")
+                    or r.headers.get("x-ms-request-id")
+                )
                 if r.status_code in (401, 403, 429):
                     ra = r.headers.get("retry-after")
                     raise ProviderError(
                         "http_status",
                         status=r.status_code,
                         retry_after=float(ra) if ra and ra.isdigit() else None,
+                        request_id=request_id,
                     )
-                if r.status_code >= 400:
-                    raise ProviderError("http_status", status=r.status_code)
+                if r.status_code != 200:
+                    raise ProviderError("http_status", status=r.status_code, request_id=request_id)
                 b = bytearray()
                 async for chunk in r.aiter_bytes():
                     b.extend(chunk)
@@ -110,19 +123,25 @@ class ProviderClient:
             data = json.loads(bytes(b).decode("utf-8"))
             if not isinstance(data, dict):
                 raise ProviderError("bad_response_shape")
-            return data
+            return data, request_id
         except TimeoutError:
-            raise ProviderError("timeout") from None
+            raise ProviderError("timeout", request_id=request_id) from None
         except httpx.TimeoutException:
-            raise ProviderError("timeout") from None
+            raise ProviderError("timeout", request_id=request_id) from None
         except httpx.HTTPError:
-            raise ProviderError("transport") from None
+            raise ProviderError("transport", request_id=request_id) from None
         except json.JSONDecodeError:
             raise ProviderError("bad_json") from None
         except UnicodeError:
             raise ProviderError("bad_encoding") from None
 
     def _normalize(self, protocol: str, data: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self._normalize_shape(protocol, data)
+        except (AttributeError, TypeError, IndexError):
+            raise ProviderError("bad_response_shape") from None
+
+    def _normalize_shape(self, protocol: str, data: dict[str, Any]) -> dict[str, Any]:
         if protocol == "responses":
             content = "".join(
                 part.get("text", "")
@@ -139,6 +158,8 @@ class ProviderClient:
             finish = str(ch.get("finish_reason") or "")
             model = data.get("model")
             usage = data.get("usage") or {}
+        if not isinstance(content, str) or not isinstance(usage, dict):
+            raise ProviderError("bad_response_shape")
         successful = finish in {"completed", "stop"} and bool(content)
         return {
             "content": content,
@@ -178,6 +199,10 @@ class LocalResearchFleet:
             per_minute_token_limit=limits.get("tokens_per_minute"),
         )
         self.registry = registry
+        self.prices = {
+            name: Price.from_config(cfg["price"]) if cfg.get("price") else None
+            for name, cfg in registry.get("providers", {}).items()
+        }
         self.provider = provider_client or ProviderClient(registry, trusted_config_dir)
         self._running: dict[int, asyncio.Task[Any]] = {}
 
@@ -234,6 +259,11 @@ class LocalResearchFleet:
                     "usage": resp.get("usage"),
                     "model": resp.get("model"),
                     "finish": resp.get("finish_status"),
+                    "request_id": resp.get("request_id"),
+                    "response_id": resp.get("response_id"),
+                    "estimated_cost": estimate_cost(
+                        resp.get("usage"), self.prices.get(spec["provider"])
+                    ),
                 }
             )
             if not resp.get("successful"):
@@ -269,11 +299,16 @@ class LocalResearchFleet:
             if (
                 e.kind == "http_status"
                 and e.status == 429
-                and job["attempts"] < self.queue.max_retry_revisions
+                and job["attempts"]
+                < min(self.queue.max_retry_revisions, spec.get("retry_limit", 2) + 1)
             ):
                 after = min(30.0, max(0.1, e.retry_after or 1.0))
                 self.queue.requeue_with_retry(
-                    jid, after, "rate_limited", claim_token=job["claim_token"]
+                    jid,
+                    after,
+                    "rate_limited",
+                    claim_token=job["claim_token"],
+                    request_id=e.request_id,
                 )
                 return
             finish(
@@ -282,6 +317,7 @@ class LocalResearchFleet:
                 None,
                 {
                     "provider_error": e.kind,
+                    "request_id": e.request_id,
                     "status": e.status,
                     "retry_after": e.retry_after,
                     "accepted": False

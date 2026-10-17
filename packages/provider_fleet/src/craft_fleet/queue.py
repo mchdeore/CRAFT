@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from craft_fleet.deliverables import estimate_request_tokens
+from craft_fleet.pricing import safe_estimate, safe_id
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "needs_review", "uncertain"}
 ALLOWED_REQUEUE_REASONS = {"not_accepted", "provider_refused", "rate_limited"}
@@ -361,6 +362,7 @@ class JobQueue:
         ):
             raise ValueError("invalid_priority")
         paths = self._sanitize_paths(spec.get("allowed_proposal_paths", []))
+        self._require_int_in_range("retry_limit", spec.get("retry_limit", 2), 0, 19)
         if expected == "coding_proposal" and not paths:
             raise ValueError("missing_allowed_paths")
         reserved = estimate_request_tokens(deployment, spec)
@@ -707,6 +709,12 @@ class JobQueue:
                     )
                     self._event(c, row["id"], "invalid_spec", {"status": "failed"})
                     continue
+                if row["deployment"] != deployment:
+                    c.execute(
+                        "UPDATE jobs SET status='failed',updated_at=? WHERE id=?", (now, row["id"])
+                    )
+                    self._event(c, row["id"], "provider_changed", {"status": "failed"})
+                    continue
                 if deployment in occupied:
                     continue
                 cap = self.provider_daily_claim_cap.get(provider)
@@ -877,7 +885,17 @@ class JobQueue:
                     ),
                 )
             safe_event = {"status": status, "usage": usage}
-            for name in ("model", "reason", "provider_error", "finish"):
+            cost = safe_estimate(meta.get("estimated_cost"))
+            if cost is not None:
+                safe_event["estimated_cost"] = cost
+            for name in (
+                "model",
+                "reason",
+                "provider_error",
+                "finish",
+                "request_id",
+                "response_id",
+            ):
                 value = meta.get(name)
                 if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
                     safe_event[name] = value
@@ -895,7 +913,13 @@ class JobQueue:
             return bool(r and r[0])
 
     def requeue_with_retry(
-        self, job_id: int, retry_after_s: float, reason: str, *, claim_token: str | None = None
+        self,
+        job_id: int,
+        retry_after_s: float,
+        reason: str,
+        *,
+        claim_token: str | None = None,
+        request_id: str | None = None,
     ) -> None:
         if reason not in ALLOWED_REQUEUE_REASONS:
             raise ValueError("retry_reason_not_allowed")
@@ -910,7 +934,8 @@ class JobQueue:
         now = self._clock()
         with self._conn() as c:
             row = c.execute(
-                "SELECT status,cancel_requested,attempts,claim_token FROM jobs WHERE id=?",
+                "SELECT status,cancel_requested,attempts,claim_token,spec_json "
+                "FROM jobs WHERE id=?",
                 (job_id,),
             ).fetchone()
             if row is None:
@@ -921,7 +946,10 @@ class JobQueue:
                 raise ValueError("claim_token_mismatch")
             if row["cancel_requested"]:
                 raise ValueError("retry_disallowed_cancel_requested")
-            if int(row["attempts"] or 0) >= self.max_retry_revisions:
+            max_attempts = min(
+                self.max_retry_revisions, json.loads(row["spec_json"]).get("retry_limit", 2) + 1
+            )
+            if int(row["attempts"] or 0) >= max_attempts:
                 raise ValueError("retry_budget_exhausted")
             c.execute(
                 "UPDATE jobs SET status='queued',retry_after=?,updated_at=?,worker"
@@ -935,7 +963,14 @@ class JobQueue:
                 (now, row["claim_token"]),
             )
             self._event(
-                c, job_id, "retry_scheduled", {"after_s": float(retry_after_s), "reason": reason}
+                c,
+                job_id,
+                "retry_scheduled",
+                {
+                    "after_s": float(retry_after_s),
+                    "reason": reason,
+                    "request_id": safe_id(request_id),
+                },
             )
 
     def recover_dead_jobs(self) -> int:
