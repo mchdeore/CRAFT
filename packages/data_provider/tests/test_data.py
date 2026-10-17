@@ -474,3 +474,36 @@ def test_latest_and_historical_search_choose_version_before_ranking(tmp_path):
     assert all_versions.total_hits == 2 and len(all_versions.hits) == 1
     assert search(store, SearchQuery("absent token", "reader")).total_hits == 0
     assert search(store, SearchQuery("thermal", "outsider")).total_hits == 0
+
+
+def test_representation_rebuild_reuses_identity_but_keeps_changed_provenance(local_store):
+    document = make_local(local_store)
+    version = ingest(local_store, document.document_id, b"facts", "generated facts")
+    block = local_store.get_blocks(version.version_id)[0]
+    args = dict(
+        kind="document_summary",
+        purpose="summary",
+        text="Summary text",
+        block_id=block.block_id,
+        origin="generated",
+        generator_model="model-a",
+        recipe="r1",
+    )
+    first = local_store.add_representation(version.version_id, **args)
+    rebuilt = local_store.add_representation(version.version_id, **args)
+    changed = local_store.add_representation(
+        version.version_id, **(args | dict(text="Revised summary"))
+    )
+    new_recipe = local_store.add_representation(version.version_id, **(args | dict(recipe="r2")))
+    new_model = local_store.add_representation(
+        version.version_id, **(args | dict(generator_model="model-b"))
+    )
+    assert rebuilt == first
+    with local_store.transaction() as connection:
+        connection.execute(
+            "UPDATE representations SET source_key='legacy-reference' WHERE representation_id=?",
+            (first,),
+        )
+    assert local_store.add_representation(version.version_id, **args) == first
+    assert len({first, changed, new_recipe, new_model}) == 4
+    assert local_store.get_representation(first)["text"] == "Summary text"

@@ -871,10 +871,42 @@ class DocumentStore:
             representation_id = str(uuid.uuid4())
             text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
             block_key = "document" if block_id is None else block_id
+            equivalent = connection.execute(
+                "SELECT representation_id FROM representations "
+                "WHERE version_id=? AND extraction_id=? AND block_id IS ? "
+                "AND kind=? AND purpose=? AND origin=? AND generator_model IS ? "
+                "AND recipe IS ? AND text_hash=? ORDER BY rowid LIMIT 1",
+                (
+                    version_id,
+                    extraction_id,
+                    block_id,
+                    kind,
+                    purpose,
+                    origin,
+                    generator_model,
+                    recipe,
+                    text_hash,
+                ),
+            ).fetchone()
+            if equivalent is not None:
+                return str(equivalent["representation_id"])
+            identity = hashlib.sha256(
+                json.dumps(
+                    [kind, purpose, origin, generator_model, recipe, text_hash],
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode()
+            ).hexdigest()
             source_key = (
                 f"{version['source_key']}/extraction:{extraction_id}"
-                f"/block:{block_key}/representation:{kind}:{purpose}"
+                f"/block:{block_key}/representation:{kind}:{identity}"
             )
+            existing = connection.execute(
+                "SELECT representation_id FROM representations WHERE source_key=?",
+                (source_key,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing["representation_id"])
             connection.execute(
                 """
                 INSERT INTO representations (
