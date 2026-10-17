@@ -6,6 +6,8 @@ A document ID identifies the item across name and location changes. An immutable
 
 The document library stores local originals in its local-originals mode. External-originals mode retains the intended derived data and source references. Its simulated tenant exercises listing, versions, content, extraction and reconciliation.
 
+The OpenText tenant adapter reads Content Metadata Service file/version records and Content Storage Service V3 streams. It maps logical chronicle IDs separately from specific version IDs. A reported text rendition supplies derived line blocks and an extraction reference. Missing text capability leaves reconciliation partial. Listing and version cursors stay within the configured service origin, and scan limits prevent incomplete pages from establishing deletion.
+
 ## 2. Representation and relationships
 
 Representations record purpose, text, source location and generation or extraction origin. Embeddings refer to a representation and preserve model, dimensions, input type, recipe and hash. Structural links, source-supported evidence links and similarity candidates retain their distinct meanings.

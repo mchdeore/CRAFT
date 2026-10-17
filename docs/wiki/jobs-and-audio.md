@@ -22,6 +22,8 @@ The command interface supports `setup`, `scan`, `list`, `process`, `suggest`, `r
 
 The `--providers` option selects a private JSON configuration with a deferred credential reference. Transcription and goal-model endpoints are configured separately. The transcription adapter uploads a verified bounded byte snapshot. Plain JSON text carries no generated timestamps; verbose responses retain reported segments. The goal adapter uses a strict Responses schema and the same quote/time validator as the inbox. Both adapters bound streamed responses and leave supplied HTTP clients under caller ownership.
 
+Suggestion attempts retain process ownership and a claim token. Recovery marks abandoned attempts uncertain, while a live claim stays active. Completion cannot replace another claim. PCM WAV chunk preparation uses verified bytes, bounded temporary files and exact frame offsets. Transcript merging retains unknown timestamps and flags unresolved overlap; it removes only exact text/known-interval duplicates.
+
 ## 3. Research snapshots
 
 The `research_data` library stores caller-fetched CSV and JSON snapshots with immutable hashes and acquisition records. Records include source URL, fetch/publication/observation times, schema, row and byte counts, license status and parent acquisitions for derived results. The catalog rejects a Git LFS pointer as dataset content and requires review when a dataset's shape changes.
