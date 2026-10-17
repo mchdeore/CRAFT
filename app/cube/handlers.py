@@ -8,7 +8,7 @@ import msgspec
 from app.cube import service
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.config.settings import Settings
-from app.infrastructure.operations import operation
+from app.infrastructure.operations import DATA, operation
 from app.infrastructure.shapes import Shape
 from app.library.handlers import CitationHandle, Facet
 
@@ -234,6 +234,25 @@ class Candidates(Shape):
 def prepare_values(caller: Caller, request: PrepareValues) -> Candidates:
     """Read cited candidates without writing values; for example a mass-budget table."""
     return service.prepare_values(caller, request)
+
+
+class SubmitValues(Shape):
+    mission: str
+    silo: str
+    valid_from: str
+    candidates: Annotated[list[Candidate], msgspec.Meta(min_length=1, max_length=100)]
+    stage: str | None = None
+
+
+class ValueReceipt(Shape):
+    approval_id: UUID
+    value_ids: list[UUID]
+
+
+@operation(SIGNED_IN, post="/cube/values", tool=True, effects=DATA)
+def submit_values(caller: Caller, request: SubmitValues) -> ValueReceipt:
+    """Publish a reviewed batch of source candidates in one approval transaction."""
+    return service.submit_values(caller, request)
 
 
 @operation(SIGNED_IN, get="/cube/parameters", tool=True)

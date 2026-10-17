@@ -76,6 +76,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/tools` | — | `ToolInfo[]` | signed in; live resource access | — |
 | `POST /api/agent/runs` | `RunAgentInput` | `AG-UI event stream` | signed in; live resource access | — |
 | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | signed in; live resource access | `prepare_values` |
+| `POST /api/cube/values` | `SubmitValues` | `ValueReceipt` | signed in; requester-approved batch | `submit_values` |
 | `POST /api/library/citations/check` | `CitationCheck` | `CitationStatus` | signed in; live resource access | `check_citation` |
 | `GET /api/library/documents/:item/compare` | —; query `{ fromVersion: number; toVersion: number }` | `VersionDiff` | signed in; live resource access | `compare_versions` |
 | `GET /health/live` | — | `Health` | public | — |
@@ -123,13 +124,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/drafts` | — | `DraftSummary[]` | own; `list_drafts` | B25 |
 | `GET /api/drafts/:id` | — | `Draft` | owner; `read_draft` | B25 |
 | `POST /api/drafts` | `NewDraft` | `Draft` | signed in; `save_draft`, pauses for approval | B25 |
-| `GET /api/approvals` | query `{ status?: ApprovalStatus }` | `Approval[]` | readable requests; no tool | B24 |
-| `GET /api/approvals/:id` | — | `ApprovalDetail` | requester access; no tool | B24 |
-| `POST /api/approvals/:id/decision` | `Decision` | `Approval` | requester decision, never the agent; no tool | B24 |
-| `POST /api/cube/values` | `SubmitValues` | `ValueReceipt` | signed in; `submit_values`, DATA, approval | B26 |
 | `POST /api/cube/views` | `SaveView` | `WorkspaceFile` | signed in; `save_view`, DOCUMENT, approval | B27 |
-
-These agreements include approval decisions and standard AG-UI interrupt/resume. A paused run is found by its run identifier in the pending approval list. The decision is read from the database; a new run uses a resolved or cancelled resume entry. Saved history is returned as AG-UI messages by the conversation route. The current run route refuses resume with `409`. Approved exports set `exported`; rejected execution writes nothing.
 
 ## 6. Agent tools
 
@@ -154,6 +149,7 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `list_parameters` | `GET /api/cube/parameters` | `none` | `NONE` |
 | `make_chart` | `POST /api/tools/chart` | `ChartInput` | `NONE` |
 | `prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `NONE` |
+| `submit_values` | `POST /api/cube/values` | `SubmitValues` | `DATA` |
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
@@ -225,6 +221,8 @@ Until the six-input confidence calibration is defined, scores remain zero, the l
 Each candidate contains its source row, header, parameter, named element or null mission total, original numeric token and unit, converted interval, row citation and at most one problem. Numeric tokens are at most 100 characters. Cells without valid numbers use an empty source-number string; their source text remains available through the row citation. Empty and TBD cells have kind unknown; n/a has kind not_applicable. Neither has numeric bounds. Ranges convert both decimal bounds. Candidate preparation writes no domain rows.
 
 Problem names are unknown header, no unit, unknown unit, not a number, outside the allowed bounds, mission not resolved and no valid-from date. A candidate takes the first applicable problem in that order. The top-level problems list includes every applicable scope and cell problem. Element recognition applies account grants even when no silo is specified. Explicit element names remain names; no unrecognized row is treated as a mission total.
+
+`submit_values` accepts one to 100 distinct candidates with explicit mission, silo and event date. It executes through the requester-approved native MCP call. Direct HTTP publication returns 409 approval_required. The source chunks must still be current and readable; every candidate must match freshly interpreted source cells and the approved arguments. Decimal bounds are recomputed from the original source number and registered conversion. One transaction appends every value with its approval identifier and execution event. Failure appends no values, rejection writes nothing and replay is refused. The response contains the approval identifier and new value identifiers.
 
 ## 13. `api/types.ts`
 
@@ -415,6 +413,7 @@ export interface Routes {
   "GET /api/tools": { response: T.ToolInfo[] };
   "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
+  "POST /api/cube/values": { body: T.SubmitValues; response: T.ValueReceipt };
   "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
   "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number }; response: T.VersionDiff };
   "GET /health/live": { response: T.Health };
@@ -469,6 +468,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/approvals/:id/decision` | `Approval` | `api/examples/approval.json` |
 | `GET /api/tools` | `ToolInfo[]` | `api/examples/tools.json` |
 | `POST /api/cube/candidates` | `Candidates` | `api/examples/candidates.json` |
+| `POST /api/cube/values` | `ValueReceipt` | `api/examples/value-receipt.json` |
 | `POST /api/library/citations/check` | `CitationStatus` | `api/examples/citation-status.json` |
 | `GET /api/library/documents/:item/compare` | `VersionDiff` | `api/examples/version-diff.json` |
 | `GET /health/live` | `Health` | `api/examples/health-live.json` |

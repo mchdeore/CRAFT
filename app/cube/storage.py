@@ -132,6 +132,23 @@ def intake_grant(session: Session, caller: Caller, target, silo) -> bool:
     return session.execute(query.limit(1)).first() is not None
 
 
+def publication_elements(session: Session, mission, silo):
+    return {
+        row["name"]: row["id"]
+        for row in session.execute(
+            select(m.elements.c.name, m.elements.c.id).where(
+                m.elements.c.mission_key == mission, m.elements.c.silo == silo
+            )
+        ).mappings()
+    }
+
+
+def append_values(session: Session, rows):
+    return list(
+        session.execute(m.cube_values.insert().returning(m.cube_values.c.id), rows).scalars()
+    )
+
+
 def scope(session: Session, silo, stage) -> None:
     if (
         silo is not None

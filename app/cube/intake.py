@@ -50,7 +50,7 @@ def header(value):
     )
 
 
-def converted(raw, source_unit, parameter):
+def converted(raw, source_unit, parameter, *, exact=False):
     stripped = raw.strip()
     kind = (
         "unknown"
@@ -95,7 +95,7 @@ def converted(raw, source_unit, parameter):
         and (low != low.to_integral_value() or high != high.to_integral_value())
     ):
         return kind, number, unit, None, None, "outside the allowed bounds"
-    return kind, number, unit, float(low), float(high), None
+    return kind, number, unit, low if exact else float(low), high if exact else float(high), None
 
 
 def prepare(chunk, dictionary, synonyms, elements, mission, silo, stage, valid_from):

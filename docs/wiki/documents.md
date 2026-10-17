@@ -22,4 +22,6 @@ The field catalog describes supported filters. Optional field-vector matching pr
 
 The local cube fixture retains exact values, explicit value states, event time, knowledge time and source evidence. Candidate values are separate from published values. Approved publication is atomic and idempotent; rejected candidates write no factual value. Withdrawn latest evidence produces a withheld result without reviving an older value.
 
+The application publishes a bounded source-candidate batch through `cube.submit_values` and the existing native MCP approval transaction. It rechecks current source chunks, mission and silo access, candidate identity and exact Decimal conversion. Every append-only value records its approval identifier. A failed batch rolls back all values; rejection and replay produce no additional value. The [API contract](../API-Contract.md) describes the request and receipt.
+
 See [engineering datacube](../spec/08-engineering-datacube.md), [components](components.md), [accounts and access](../spec/09-accounts-and-access.md) and [runtime](runtime.md).

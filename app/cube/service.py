@@ -196,6 +196,12 @@ def prepare_values(caller, request):
     )
 
 
+def submit_values(caller, request):
+    from app.cube import publication
+
+    return publication.submit(caller, request)
+
+
 def find_missions(caller, request):
     from app.cube.handlers import FoundMissions, MatchedMission
 

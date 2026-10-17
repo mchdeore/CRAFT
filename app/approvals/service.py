@@ -129,20 +129,34 @@ def require_approved(caller, operation, value):
         or inspect.iscoroutinefunction(operation.function)
     ):
         raise ApprovalRequired()
+    approved_request_id(caller, operation.name, value)
+
+
+def approved_request_id(caller, operation_name, value):
+    """Identify the unconsumed approved call whose transaction owns a database effect."""
+    from app.infrastructure.operations.pipeline import ApprovalRequired
+
+    if (
+        caller.origin != "mcp"
+        or caller.sessions is None
+        or caller.user_id is None
+        or caller.run_id is None
+        or caller.conversation_id is None
+    ):
+        raise ApprovalRequired()
     with unit_of_work(caller.sessions, read_only=True) as session:
-        if (
-            storage.approved_call(
-                session,
-                caller.user_id,
-                caller.run_id,
-                caller.conversation_id,
-                operation.name,
-                _call_digest(value),
-                caller.tool_call_id,
-            )
-            is None
-        ):
+        row = storage.approved_call(
+            session,
+            caller.user_id,
+            caller.run_id,
+            caller.conversation_id,
+            operation_name,
+            _call_digest(value),
+            caller.tool_call_id,
+        )
+        if row is None:
             raise ApprovalRequired()
+        return row["id"]
 
 
 def execute_approved(caller, operation, value, invoke):

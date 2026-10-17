@@ -88,6 +88,14 @@
     "route": "POST /api/cube/candidates"
   },
   {
+    "name": "submit_values",
+    "operation": "cube.submit_values",
+    "description": "Publish a reviewed batch of source candidates in one approval transaction.",
+    "effects": "DATA",
+    "needsApproval": true,
+    "route": "POST /api/cube/values"
+  },
+  {
     "name": "list_parameters",
     "operation": "cube.list_parameters",
     "description": "Read the parameter dictionary and registered units. Use before filtering, such as kg or g.",
