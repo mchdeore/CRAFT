@@ -31,6 +31,26 @@ class _FakeSuggester:
 
 
 def _build(args: argparse.Namespace) -> AudioInbox:
+    if args.providers is not None:
+        if args.fake:
+            raise SystemExit("Choose generated-data mode or configured providers")
+        from .config import providers
+
+        transcriber, suggester = providers(args.providers)
+        if args.cmd == "process" and transcriber is None:
+            raise SystemExit("Transcription service is not configured")
+        if args.cmd == "suggest" and suggester is None:
+            raise SystemExit("Goal model adapter is not configured")
+
+        def unavailable(_):
+            raise RuntimeError("provider_not_configured")
+
+        return AudioInbox(
+            root=args.store,
+            inbox=args.inbox,
+            transcriber=transcriber or unavailable,
+            suggester=suggester or unavailable,
+        )
     return AudioInbox(
         root=args.store,
         inbox=args.inbox,
@@ -42,6 +62,7 @@ def _build(args: argparse.Namespace) -> AudioInbox:
 def main() -> int:
     p = argparse.ArgumentParser(prog="audio-inbox")
     p.add_argument("--fake", action="store_true", help="Enable generated-data fake processing")
+    p.add_argument("--providers", type=Path, help="Private provider configuration file")
     p.add_argument("--store", type=Path, default=Path.home() / ".local" / "private" / "audio-inbox")
     p.add_argument("--inbox", type=Path, default=Path.home() / "Downloads" / "CRAFT Audio Inbox")
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -90,14 +111,14 @@ def main() -> int:
             )
         return 0
     if args.cmd == "process":
-        if not args.fake:
+        if not args.fake and args.providers is None:
             raise SystemExit(
                 "Transcription service is not configured; --fake is for generated fixtures"
             )
         print(box.process(args.job_id))
         return 0
     if args.cmd == "suggest":
-        if not args.fake:
+        if not args.fake and args.providers is None:
             raise SystemExit("Goal model adapter is not configured")
         for proposal in box.proposals(args.version_id):
             print(f"{proposal.id} {proposal.status}")

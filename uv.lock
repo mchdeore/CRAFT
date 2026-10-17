@@ -516,6 +516,12 @@ docs = [{ name = "mkdocs", specifier = "==1.6.1" }]
 name = "craft-audio-inbox"
 version = "0.1.0"
 source = { editable = "packages/audio_inbox" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = "==0.28.1" }]
 
 [[package]]
 name = "craft-data-provider"

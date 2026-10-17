@@ -13,84 +13,34 @@ import uuid
 import wave
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .models import (
+    AssetRef,
+    Citation,
+    GoalCandidate,
+    JobState,
+    Proposal,
+    Segment,
+    TranscriptReply,
+    TranscriptVersion,
+)
+from .validation import valid_goal, validate_transcript
 
-@dataclass(frozen=True)
-class Segment:
-    segment_id: str
-    text: str
-    start: float | None = None
-    end: float | None = None
-    speaker: str | None = None
-
-
-@dataclass(frozen=True)
-class TranscriptReply:
-    model: str
-    text: str
-    segments: list[Segment]
-
-
-@dataclass(frozen=True)
-class Citation:
-    segment_id: str
-    quote: str
-    start: float | None = None
-    end: float | None = None
-
-
-@dataclass(frozen=True)
-class GoalCandidate:
-    title: str
-    action: str
-    citations: list[Citation]
-    due_date: str | None = None
-    uncertainty: str | None = None
-
-
-@dataclass(frozen=True)
-class AssetRef:
-    id: str
-    path: Path
-    sha256: str
-    media_type: str
-    duration: float
-    size_bytes: int
-
-
-@dataclass(frozen=True)
-class TranscriptVersion:
-    id: str
-    job_id: str
-    parent_version_id: str | None
-    model: str
-    text: str
-    segments: list[Segment]
-
-
-@dataclass(frozen=True)
-class Proposal:
-    id: str
-    version_id: str
-    title: str
-    action: str
-    citations: list[Citation]
-    status: str
-    due_date: str | None = None
-    uncertainty: str | None = None
-
-
-@dataclass(frozen=True)
-class JobState:
-    id: str
-    source_name: str
-    status: str
-    asset_id: str | None
-    version_id: str | None
-    error: str | None
+__all__ = [
+    "Segment",
+    "TranscriptReply",
+    "Citation",
+    "GoalCandidate",
+    "AssetRef",
+    "TranscriptVersion",
+    "Proposal",
+    "JobState",
+    "AudioInbox",
+    "RefusedNotAcceptedError",
+]
 
 
 class RefusedNotAcceptedError(RuntimeError):
@@ -656,40 +606,7 @@ class AudioInbox:
         return self._asset_ref_from_row(row)
 
     def _validate_reply(self, reply: TranscriptReply, duration: float) -> TranscriptReply:
-        if len(reply.text) > self.max_text_chars:
-            raise ValueError("transcript text too large")
-        seen: set[str] = set()
-        prev_start = -math.inf
-        clean_segments: list[Segment] = []
-        for seg in reply.segments:
-            if not seg.segment_id or seg.segment_id in seen:
-                raise ValueError("segment ids must be unique and present")
-            seen.add(seg.segment_id)
-            if len(seg.text) > self.max_text_chars:
-                raise ValueError("segment text too large")
-            if seg.start is not None:
-                if (
-                    isinstance(seg.start, bool)
-                    or not math.isfinite(seg.start)
-                    or seg.start < 0
-                    or seg.start > duration
-                ):
-                    raise ValueError("invalid segment start")
-                if seg.start < prev_start:
-                    raise ValueError("segments out of order")
-                prev_start = seg.start
-            if seg.end is not None:
-                if (
-                    isinstance(seg.end, bool)
-                    or not math.isfinite(seg.end)
-                    or seg.end < 0
-                    or seg.end > duration
-                ):
-                    raise ValueError("invalid segment end")
-            if seg.start is not None and seg.end is not None and seg.end < seg.start:
-                raise ValueError("segment end before start")
-            clean_segments.append(seg)
-        return TranscriptReply(model=reply.model, text=reply.text, segments=clean_segments)
+        return validate_transcript(reply, duration, self.max_text_chars)
 
     def transcript(self, version_id: str) -> TranscriptVersion:
         with self._connect() as conn:
@@ -771,7 +688,11 @@ class AudioInbox:
             self._mark_suggestion_run(version_id, "failed", "suggestion_error")
             raise
 
-        valid = [c for c in candidates if self._valid_candidate(c, transcript)]
+        if not isinstance(candidates, list) or len(candidates) > 100:
+            self._mark_suggestion_run(version_id, "failed", "suggestion_shape")
+            raise ValueError("invalid_suggestion_shape")
+        duration = self._asset_for_version(version_id).duration
+        valid = [c for c in candidates if valid_goal(c, transcript, duration, self.max_text_chars)]
         now = self.clock()
         with self._connect() as conn:
             for cand in valid:
@@ -812,41 +733,6 @@ class AudioInbox:
                 "code, updated_at) VALUES(?,?,?,?)",
                 (version_id, status, error_code, self.clock()),
             )
-
-    def _valid_candidate(self, candidate: GoalCandidate, transcript: TranscriptVersion) -> bool:
-        if not candidate.title.strip() or not candidate.action.strip() or not candidate.citations:
-            return False
-        seg_index = {s.segment_id: s for s in transcript.segments}
-        asset_duration = self._asset_for_version(transcript.id).duration
-        for c in candidate.citations:
-            if not c.quote.strip() or len(c.quote) > self.max_text_chars:
-                return False
-            seg = seg_index.get(c.segment_id)
-            if seg is None or c.quote not in seg.text:
-                return False
-            if c.start is not None and (
-                seg.start is None
-                or isinstance(c.start, bool)
-                or not math.isfinite(c.start)
-                or c.start < 0
-                or c.start > asset_duration
-            ):
-                return False
-            if c.end is not None and (
-                seg.end is None
-                or isinstance(c.end, bool)
-                or not math.isfinite(c.end)
-                or c.end < 0
-                or c.end > asset_duration
-            ):
-                return False
-            if seg.start is not None and c.start is not None and c.start < seg.start:
-                return False
-            if seg.end is not None and c.end is not None and c.end > seg.end:
-                return False
-            if c.start is not None and c.end is not None and c.end < c.start:
-                return False
-        return True
 
     def _asset_for_version(self, version_id: str) -> AssetRef:
         with self._connect() as conn:
