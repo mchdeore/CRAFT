@@ -129,3 +129,28 @@ def test_contract_and_validation_are_data_only_no_filesystem(
         {"files": [{"path": "x.py", "content": "pass"}], "notes": []},
     )
     assert called["open"] is False
+
+
+def test_request_reservation_accounts_for_schema_and_allowed_paths():
+    import json
+
+    from craft_fleet.deliverables import build_job_request, estimate_request_tokens
+
+    spec = {
+        "topic": "small task",
+        "source_excerpts": [{"source_id": "one", "text": "generated data"}],
+        "max_output_tokens": 256,
+    }
+    small = estimate_request_tokens("deployment", spec)
+    extended = spec | {
+        "expected_deliverable": "coding_proposal",
+        "allowed_proposal_paths": ["folder/" + ("x" * 180) + ".py"],
+    }
+    body = build_job_request("responses", "deployment", extended)
+    assert estimate_request_tokens("deployment", extended) >= len(json.dumps(body).encode()) + 256
+    assert estimate_request_tokens("deployment", extended) > small
+    assert body["input"][0]["role"] == "user"
+    assert (
+        build_job_request("chat", "deployment", spec | {"role": "system"})["messages"][0]["role"]
+        == "user"
+    )

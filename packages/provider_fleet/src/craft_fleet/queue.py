@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from pathlib import PurePosixPath
 from typing import Any
 
+from craft_fleet.deliverables import estimate_request_tokens
+
 TERMINAL_STATUSES = {"completed", "failed", "cancelled", "needs_review", "uncertain"}
 ALLOWED_REQUEUE_REASONS = {"not_accepted", "provider_refused", "rate_limited"}
 UNKNOWN_OUTCOME_STATUSES = {"needs_review", "uncertain"}
@@ -332,7 +334,6 @@ class JobQueue:
         if not isinstance(src, list) or not src:
             raise ValueError("source_excerpts_must_be_list")
         ids: list[str] = []
-        char_budget = 0
         for source in src:
             if (
                 not isinstance(source, dict)
@@ -342,7 +343,6 @@ class JobQueue:
             ):
                 raise ValueError("invalid_source")
             ids.append(source["source_id"])
-            char_budget += len(source["text"])
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate_source_id")
         if len(json.dumps(spec).encode("utf-8")) > 100_000:
@@ -363,9 +363,7 @@ class JobQueue:
         paths = self._sanitize_paths(spec.get("allowed_proposal_paths", []))
         if expected == "coding_proposal" and not paths:
             raise ValueError("missing_allowed_paths")
-        reserved = (
-            len(json.dumps(spec["source_excerpts"]).encode()) + len(topic.encode()) + 512 + mot
-        )
+        reserved = estimate_request_tokens(deployment, spec)
         if reserved <= 0 or reserved > 10**8:
             raise ValueError("invalid_estimated_tokens")
         canonical = self._canonical_spec(spec)

@@ -6,6 +6,41 @@ from typing import Any
 _MAX_BYTES = 100_000
 
 
+def build_job_request(protocol: str, deployment: str, spec: dict[str, Any]) -> dict[str, Any]:
+    instructions, schema = build_request_contract(spec)
+    data = {"topic": spec["topic"], "sources": spec["source_excerpts"]}
+    message = {"role": "user", "content": instructions + "\n" + json.dumps(data)}
+    if protocol == "responses":
+        return {
+            "model": deployment,
+            "input": [message],
+            "store": False,
+            "max_output_tokens": spec["max_output_tokens"],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "job_result",
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+        }
+    if protocol == "chat":
+        return {
+            "model": deployment,
+            "messages": [message],
+            "max_tokens": spec["max_output_tokens"],
+            "response_format": {"type": "json_object"},
+        }
+    raise ValueError("unsupported_protocol")
+
+
+def estimate_request_tokens(deployment: str, spec: dict[str, Any]) -> int:
+    """Reserve full wire bytes plus output cap and a small protocol allowance."""
+    body = build_job_request("responses", deployment, spec)
+    return len(json.dumps(body).encode("utf-8")) + spec["max_output_tokens"] + 128
+
+
 def build_request_contract(spec: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """Build trusted prompt text and JSON schema for provider JSON output."""
     kind = spec.get("expected_deliverable", "json")

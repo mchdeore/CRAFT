@@ -76,7 +76,7 @@ def test_migration_from_old_schema_preserves_rows_and_refs(tmp_path):
     c.commit()
     c.close()
 
-    q = JobQueue(db, day_token_cap=900)
+    q = JobQueue(db, day_token_cap=1600)
     parent_row = checked_job(q, parent)
     child_row = checked_job(q, child)
     assert parent_row and child_row
@@ -134,7 +134,7 @@ def test_stale_attempt_cannot_finish_or_requeue_a_new_claim(tmp_path):
     "usage", [{}, {"input_tokens": 1}, {"output_tokens_details": {"reasoning_tokens": 1}}]
 )
 def test_partial_usage_does_not_release_unknown_charge(tmp_path, usage):
-    q = JobQueue(tmp_path / "jobs.sqlite", day_token_cap=900)
+    q = JobQueue(tmp_path / "jobs.sqlite", day_token_cap=1600)
     jid = q.add(spec())
     q.add(spec(topic="next"))
     claim = q.claim("first")
@@ -144,7 +144,7 @@ def test_partial_usage_does_not_release_unknown_charge(tmp_path, usage):
 
 
 def test_usage_detail_keys_are_allowlisted_and_inconsistent_total_is_conservative(tmp_path):
-    q = JobQueue(tmp_path / "jobs.sqlite", day_token_cap=900)
+    q = JobQueue(tmp_path / "jobs.sqlite", day_token_cap=1600)
     jid = q.add(spec())
     q.add(spec(topic="next"))
     claim = q.claim("first")
@@ -185,7 +185,7 @@ def test_revise_creates_new_job_and_keeps_original_spec_immutable(tmp_path):
 
 
 def test_run_and_day_token_caps_include_pending_and_finished(tmp_path):
-    q = JobQueue(tmp_path / "jobs.sqlite", run_token_cap=900, day_token_cap=900)
+    q = JobQueue(tmp_path / "jobs.sqlite", run_token_cap=1600, day_token_cap=1600)
     a = q.add(spec(topic="a"))
     b = q.add(spec(topic="b"))
 
@@ -205,7 +205,7 @@ def test_run_and_day_token_caps_include_pending_and_finished(tmp_path):
 
 
 def test_unknown_outcome_keeps_reserved_charge(tmp_path):
-    q = JobQueue(tmp_path / "jobs.sqlite", day_token_cap=900)
+    q = JobQueue(tmp_path / "jobs.sqlite", day_token_cap=1600)
     j1 = q.add(spec(topic="x"))
     j2 = q.add(spec(topic="y"))
 
@@ -285,7 +285,7 @@ def test_cache_fingerprint_includes_deliverable_paths_and_scans_all_matches(tmp_
 
 
 def test_per_minute_limits_and_safe_event_metadata(tmp_path):
-    q = JobQueue(tmp_path / "jobs.sqlite", per_minute_request_limit=1, per_minute_token_limit=900)
+    q = JobQueue(tmp_path / "jobs.sqlite", per_minute_request_limit=1, per_minute_token_limit=1600)
     j1 = q.add(spec(topic="one"))
     j2 = q.add(spec(topic="two"))
 
@@ -340,7 +340,7 @@ def test_legacy_running_deployment_is_reserved_after_migration(tmp_path):
 
 
 def test_missing_usage_keeps_a_conservative_reservation(tmp_path):
-    queue = JobQueue(tmp_path / "unknown.sqlite", day_token_cap=900)
+    queue = JobQueue(tmp_path / "unknown.sqlite", day_token_cap=1600)
     first = queue.add(spec("a"))
     queue.add(spec("b"))
     claim = queue.claim("worker")
@@ -398,8 +398,8 @@ def test_rate_and_run_caps_do_not_reset_at_utc_midnight(tmp_path):
     queue = JobQueue(
         tmp_path / "midnight.sqlite",
         clock=lambda: clock[0],
-        run_token_cap=900,
-        per_minute_token_limit=900,
+        run_token_cap=1600,
+        per_minute_token_limit=1600,
     )
     first = queue.add(spec("a"))
     queue.add(spec("b"))

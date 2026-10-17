@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from craft_fleet.deliverables import build_request_contract, validate_deliverable
+from craft_fleet.deliverables import build_job_request, validate_deliverable
 from craft_fleet.queue import JobQueue as JobQueue
 
 
@@ -70,36 +70,12 @@ class ProviderClient:
         cfg = self._provider_cfg(provider_name)
         key = self._load_key()
         deployment = cfg.get("deployment")
+        if not isinstance(deployment, str) or not deployment:
+            raise ProviderError("bad_deployment")
         protocol = str(cfg["protocol"])
         if protocol not in {"responses", "chat"}:
             raise ProviderError("bad_protocol")
-        role = "user"
-        sources = spec["source_excerpts"]
-        src_text = "\n".join(f"[{s['source_id']}] {s['text']}" for s in sources)
-        instructions, schema = build_request_contract(spec)
-        user = f"{instructions}\nTopic: {spec['topic']}\nSources:\n{src_text}"
-        if protocol == "responses":
-            body = {
-                "model": deployment,
-                "input": [{"role": role, "content": user}],
-                "store": False,
-                "max_output_tokens": int(spec["max_output_tokens"]),
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "job_result",
-                        "strict": True,
-                        "schema": schema,
-                    }
-                },
-            }
-        else:
-            body = {
-                "model": deployment,
-                "messages": [{"role": role, "content": user}],
-                "max_tokens": int(spec["max_output_tokens"]),
-                "response_format": {"type": "json_object"},
-            }
+        body = build_job_request(protocol, deployment, spec)
         headers = {"api-key": key, "content-type": "application/json"}
         client = self.http_client or httpx.AsyncClient(
             timeout=httpx.Timeout(float(spec["deadline"])), follow_redirects=False, trust_env=False
