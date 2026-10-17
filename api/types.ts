@@ -126,3 +126,9 @@ export interface ChartInput { spec: Record<string, unknown>; format: "svg" | "pn
 export interface ChartResult { format: "svg" | "png"; mediaType: string; contentBase64: string | null; file: WorkspaceFile | null }
 export interface CalculationInput { expression: string; craftResult?: string | number | null; unit?: string | null }
 export interface CalculationResult { expression: string; wolframResult: string; craftResult: string | number | null; agrees: boolean; checkedAt: string }
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | "failed";
+export interface Approval { id: Id; conversationId: Id; runId: Id; tool: string; summary: string; status: ApprovalStatus; requestedAt: string }
+export interface ApprovalEvent { kind: "requested" | "approved" | "rejected" | "executed" | "failed"; actorId: Id | null; at: string; note?: string | null }
+export interface ApprovalDetail extends Approval { arguments: Record<string, unknown>; evidence: Record<string, unknown>[]; reasoning: string; retrievalPath: Record<string, unknown>[]; events: ApprovalEvent[] }
+export interface Decision { approve: boolean; note?: string | null }

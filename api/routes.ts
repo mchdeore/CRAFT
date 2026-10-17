@@ -1,6 +1,9 @@
 import type * as T from "./types";
 import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
 export interface Routes {
+  "GET /api/approvals": { query: { status?: T.ApprovalStatus }; response: T.Approval[] };
+  "GET /api/approvals/:id": { response: T.ApprovalDetail };
+  "POST /api/approvals/:id/decision": { body: T.Decision; response: T.Approval };
   "GET /api/tools": { response: T.ToolInfo[] };
   "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };

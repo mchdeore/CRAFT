@@ -1,0 +1,9 @@
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "conversationId": "00000000-0000-4000-8000-000000000002",
+  "runId": "00000000-0000-4000-8000-000000000003",
+  "tool": "fixture_write",
+  "summary": "Store a generated amount.",
+  "status": "approved",
+  "requestedAt": "2026-10-17T00:00:00Z"
+}

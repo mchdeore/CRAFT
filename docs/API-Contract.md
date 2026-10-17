@@ -70,6 +70,9 @@ The workspace, draft, candidate submission and saved-view limits are described i
 
 | Route | Request body or query | Response | Access | Agent tool |
 |---|---|---|---|---|
+| `GET /api/approvals` | —; query `{ status?: ApprovalStatus }` | `Approval[]` | signed in; requester ownership | — |
+| `GET /api/approvals/:id` | — | `ApprovalDetail` | signed in; requester ownership | — |
+| `POST /api/approvals/:id/decision` | `Decision` | `Approval` | HTTP requester only | — |
 | `GET /api/tools` | — | `ToolInfo[]` | signed in; live resource access | — |
 | `POST /api/agent/runs` | `RunAgentInput` | `AG-UI event stream` | signed in; live resource access | — |
 | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | signed in; live resource access | `prepare_values` |
@@ -459,6 +462,9 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 
 | Route | Response type | File |
 |---|---|---|
+| `GET /api/approvals` | `Approval[]` | `api/examples/approvals.json` |
+| `GET /api/approvals/:id` | `ApprovalDetail` | `api/examples/approval-detail.json` |
+| `POST /api/approvals/:id/decision` | `Approval` | `api/examples/approval.json` |
 | `GET /api/tools` | `ToolInfo[]` | `api/examples/tools.json` |
 | `POST /api/cube/candidates` | `Candidates` | `api/examples/candidates.json` |
 | `POST /api/library/citations/check` | `CitationStatus` | `api/examples/citation-status.json` |

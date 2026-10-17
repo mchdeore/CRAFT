@@ -11,6 +11,7 @@ from starlette.types import Scope
 
 from app.accounts import handlers as account_handlers
 from app.agent import handlers as agent_handlers
+from app.approvals import handlers as approval_handlers
 from app.conversations import handlers as conversation_handlers
 from app.cube import handlers as cube_handlers
 from app.health.handlers import migration_head
@@ -78,6 +79,7 @@ def create_app(settings: Settings) -> FastAPI:
     _ = (
         library_handlers,
         account_handlers,
+        approval_handlers,
         cube_handlers,
         summarize_handlers,
         agent_handlers,
