@@ -148,3 +148,36 @@ def test_reference_metadata_escapes_comment_terminator(tmp_path):
     assert "source_location" in rendered
     assert "--\\u003e" in rendered
     assert "<!-- craft-reference-v1" in rendered
+
+
+def test_cycle_and_scan_limits_do_not_publish_deletions(tmp_path):
+    from craft_data.simulator import TenantPage
+
+    class Looping:
+        provider = "synthetic-provider"
+        scope_id = "synthetic-scope"
+
+        def list_page(self, cursor):
+            return TenantPage((), "same")
+
+        def read_content(self, remote_id, provider_version):
+            raise AssertionError("cycle must stop before content")
+
+        def get_blocks(self, remote_id, provider_version):
+            raise AssertionError("cycle must stop before extraction")
+
+        def extraction_method_for(self, remote_id, provider_version):
+            return "fixture"
+
+    store = _store(tmp_path)
+    result = TenantReconciler(store, max_pages=5).scan(Looping())
+    assert result.status == "partial" and result.error_type == "UnstableSnapshotError"
+    original = _item("item-a", b"generated")
+    _scan(store, [original])
+    limited = TenantReconciler(store, max_items=1).scan(
+        SimulatedTenant([original, _item("item-b", b"other")])
+    )
+    assert (
+        limited.status == "partial"
+        and store.get_external_document("synthetic-provider", "item-a").remote_status == "active"
+    )

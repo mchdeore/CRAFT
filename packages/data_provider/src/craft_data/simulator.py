@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -88,9 +89,11 @@ class TenantSource(Protocol):
 
     def list_page(self, cursor: str | None) -> TenantPage: ...
 
-    def read_content(self, remote_id: str, provider_version: str) -> tuple[bytes, ...]: ...
+    def read_content(self, remote_id: str, provider_version: str) -> Iterable[bytes]: ...
 
     def get_blocks(self, remote_id: str, provider_version: str) -> tuple[BlockInput, ...]: ...
+
+    def extraction_method_for(self, remote_id: str, provider_version: str) -> str: ...
 
 
 class SimulatedTenant:
@@ -153,6 +156,9 @@ class SimulatedTenant:
     def get_blocks(self, remote_id: str, provider_version: str) -> tuple[BlockInput, ...]:
         return self._item(remote_id).version(provider_version).blocks
 
+    def extraction_method_for(self, remote_id: str, provider_version: str) -> str:
+        return self._item(remote_id).version(provider_version).extraction_method
+
     def _item(self, remote_id: str) -> SimulatedItem:
         for item in self.items:
             if item.remote_id == remote_id:
@@ -168,11 +174,19 @@ class TenantReconciler:
         max_item_bytes: int = 8 * 1024 * 1024,
         max_scan_bytes: int = 32 * 1024 * 1024,
         clock=utc_now,
+        max_pages: int = 1000,
+        max_items: int = 10000,
     ) -> None:
         self.store = store
         self.max_item_bytes = max_item_bytes
         self.max_scan_bytes = max_scan_bytes
         self.clock = clock
+        if any(
+            type(value) is not int or value <= 0
+            for value in (max_pages, max_items, max_item_bytes, max_scan_bytes)
+        ):
+            raise ValueError("invalid_scan_limit")
+        self.max_pages, self.max_items = max_pages, max_items
 
     def scan(self, tenant: TenantSource) -> ReconciliationResult:
         scan_id = str(uuid.uuid4())
@@ -181,10 +195,17 @@ class TenantReconciler:
         seen_entries = 0
         try:
             cursor: str | None = None
+            cursors: set[str] = set()
+            pages = 0
             while True:
+                pages += 1
+                if pages > self.max_pages:
+                    raise SimulatedTenantError("page_limit")
                 page = tenant.list_page(cursor)
                 for item in page.items:
                     seen_entries += 1
+                    if seen_entries > self.max_items:
+                        raise SimulatedTenantError("item_limit")
                     previous = listings.get(item.remote_id)
                     if previous is not None and previous != item:
                         raise UnstableSnapshotError(
@@ -193,6 +214,9 @@ class TenantReconciler:
                     listings[item.remote_id] = item
                 if page.next_cursor is None:
                     break
+                if page.next_cursor in cursors:
+                    raise UnstableSnapshotError("cursor_cycle")
+                cursors.add(page.next_cursor)
                 cursor = page.next_cursor
 
             records: list[ExternalRecord] = []
@@ -218,7 +242,9 @@ class TenantReconciler:
                         provider_version=item.current_version,
                         body=body,
                         blocks=tenant.get_blocks(item.remote_id, item.current_version),
-                        extraction_method="simulated-tenant-blocks-v1",
+                        extraction_method=tenant.extraction_method_for(
+                            item.remote_id, item.current_version
+                        ),
                     )
                 )
             return self.store.apply_reconciliation(
@@ -260,7 +286,7 @@ def _split(body: bytes, chunk_size: int) -> tuple[bytes, ...]:
     return tuple(body[offset : offset + chunk_size] for offset in range(0, len(body), chunk_size))
 
 
-def _join_bounded(chunks: tuple[bytes, ...], limit: int) -> bytes:
+def _join_bounded(chunks: Iterable[bytes], limit: int) -> bytes:
     body = bytearray()
     for chunk in chunks:
         if not isinstance(chunk, bytes):

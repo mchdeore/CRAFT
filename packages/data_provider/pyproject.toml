@@ -3,7 +3,7 @@ name = "craft-data-provider"
 version = "0.1.0"
 description = "Local document, provider and engineering data prototype"
 requires-python = "==3.12.*"
-dependencies = []
+dependencies = ["httpx==0.28.1"]
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]

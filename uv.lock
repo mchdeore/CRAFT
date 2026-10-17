@@ -527,6 +527,12 @@ requires-dist = [{ name = "httpx", specifier = "==0.28.1" }]
 name = "craft-data-provider"
 version = "0.1.0"
 source = { editable = "packages/data_provider" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = "==0.28.1" }]
 
 [[package]]
 name = "craft-provider-fleet"
