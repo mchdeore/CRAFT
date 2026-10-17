@@ -6,9 +6,24 @@ from urllib.parse import urlsplit
 
 import httpx
 from agent_framework import MCPStreamableHTTPTool
+from agent_framework.exceptions import ToolExecutionException
 
 from craft_runtime.runner import Binding
 from craft_runtime.state import RuntimeErrorCode
+
+
+class SingleAttemptMCP(MCPStreamableHTTPTool):
+    """The pinned SDK reconnect hook must not replay a possibly accepted call."""
+
+    async def _call_tool_with_retries(self, tool_name, filtered_kwargs, meta, parser, span):
+        try:
+            session = self.session
+            if session is None:
+                raise RuntimeErrorCode("tool_disconnected")
+            result = await session.call_tool(tool_name, arguments=filtered_kwargs, meta=meta)
+            return parser(result)
+        except Exception:
+            raise ToolExecutionException("tool_failed") from None
 
 
 class NativeMCPSource:
@@ -31,7 +46,7 @@ class NativeMCPSource:
             timeout=120,
             cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
         )
-        self.tool = MCPStreamableHTTPTool(
+        self.tool = SingleAttemptMCP(
             name="local-tools",
             url=url,
             allowed_tools=list(self.bindings),
@@ -45,6 +60,8 @@ class NativeMCPSource:
 
     @staticmethod
     def parse(result):
+        if result.isError:
+            raise RuntimeErrorCode("tool_failed")
         value = result.structuredContent
         if value is None:
             value = next(

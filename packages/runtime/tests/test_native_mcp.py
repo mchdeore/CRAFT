@@ -115,3 +115,34 @@ def test_native_http_tools_share_runner_identity_and_close():
             assert models[0].closed and sources[0].http.is_closed and not credentials.active
 
         asyncio.run(run())
+
+
+def test_native_lost_call_is_not_reconnected_or_replayed(monkeypatch):
+    import pytest
+    from agent_framework.exceptions import ToolExecutionException
+    from anyio import ClosedResourceError
+
+    received = []
+    with synthetic_server(received) as url:
+
+        async def run():
+            source = NativeMCPSource(
+                url, "synthetic-credential-no-replay", {"lookup": Binding("fixture")}
+            )
+            attempts = []
+            try:
+                await source.connect()
+
+                async def lost(*args, **kwargs):
+                    attempts.append(1)
+                    raise ClosedResourceError()
+
+                monkeypatch.setattr(source.tool.session, "call_tool", lost)
+                with pytest.raises(ToolExecutionException, match="tool_failed"):
+                    await source.functions[0].invoke(arguments={"query": "fixture"})
+                assert len(attempts) == 1
+            finally:
+                await source.close()
+            assert source.http.is_closed
+
+        asyncio.run(run())
