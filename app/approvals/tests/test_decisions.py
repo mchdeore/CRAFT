@@ -101,6 +101,11 @@ def context(settings, owner_engine):
         }
     finally:
         with owner_engine.begin() as db:
+            db.execute(
+                metadata.tables["notes"]
+                .delete()
+                .where(metadata.tables["notes"].c.owner.in_([user for user, _ in users]))
+            )
             ids = select(metadata.tables["approval_requests"].c.id).where(
                 metadata.tables["approval_requests"].c.run_id == run
             )

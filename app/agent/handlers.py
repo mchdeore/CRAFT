@@ -48,6 +48,7 @@ class RunAgentInput(Shape, forbid_unknown_fields=False):
 
 class AGUIEvent(Shape, omit_defaults=True):
     type: str
+    outcome: Any = None
     thread_id: str | None = None
     run_id: str | None = None
     message_id: str | None = None
@@ -162,7 +163,7 @@ def list_tools(caller: Caller) -> list[ToolInfo]:
 
 @operation(SIGNED_IN, post="/agent/runs")
 async def run_agent(caller: Caller, request: RunAgentInput) -> AsyncIterator[AGUIEvent]:
-    """Stream an owned run with server history and read tools; for example a cited fact."""
+    """Stream an owned run with server history and reviewed writes; for example a cited fact."""
     from app.agent.runtime import run
 
     iterator = run(caller, request)
@@ -258,27 +259,30 @@ async def ask_agent(caller: Caller, request: AskAgent) -> AskAgentResult:
         run_id=identifier,
         messages=[{"id": str(uuid4()), "role": "user", "content": request.question}],
     )
-    iterator = run_agent(trusted, data)
-    text = ""
-    answer = None
-    finished = False
-    try:
-        async for event in iterator:
-            if event.type == "TEXT_MESSAGE_START":
-                text = ""
-            elif event.type == "TEXT_MESSAGE_CONTENT":
-                text += event.delta
-            elif event.type == "ACTIVITY_SNAPSHOT" and event.activity_type == "craft.answer":
-                answer = event.content
-            elif event.type == "RUN_FINISHED":
-                finished = True
-    finally:
-        await iterator.aclose()
-    if not finished or answer is None:
-        raise ApiError()
-    return AskAgentResult(
-        answer=text,
-        citations=msgspec.convert(answer["citations"], list[AnswerCitation]),
-        confidence=msgspec.convert(answer["confidence"], AnswerConfidence),
-        run_id=identifier,
-    )
+    from app.agent.runtime import read_only_query
+
+    with read_only_query():
+        iterator = run_agent(trusted, data)
+        text = ""
+        answer = None
+        finished = False
+        try:
+            async for event in iterator:
+                if event.type == "TEXT_MESSAGE_START":
+                    text = ""
+                elif event.type == "TEXT_MESSAGE_CONTENT":
+                    text += event.delta
+                elif event.type == "ACTIVITY_SNAPSHOT" and event.activity_type == "craft.answer":
+                    answer = event.content
+                elif event.type == "RUN_FINISHED":
+                    finished = True
+        finally:
+            await iterator.aclose()
+        if not finished or answer is None:
+            raise ApiError()
+        return AskAgentResult(
+            answer=text,
+            citations=msgspec.convert(answer["citations"], list[AnswerCitation]),
+            confidence=msgspec.convert(answer["confidence"], AnswerConfidence),
+            run_id=identifier,
+        )

@@ -48,6 +48,7 @@ def test_failed_runs_close_and_revoke(mode, code):
         )
         assert events[-1].kind == "error" and events[-1].data["code"] == code
         assert store.runs["failure-1"].status == "failed"
+        assert asyncio.all_tasks() == {asyncio.current_task()}
         assert (
             sources[0].closed and all(model.closed for model in models) and not credentials.active
         )

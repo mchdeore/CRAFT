@@ -4,12 +4,14 @@ Agent-User Interaction (AG-UI) carries stream events. The Model Context Protocol
 
 ## 3.1 Now: one agent
 
-The current read-only runtime uses the real framework agent and stream adapter with
+The current runtime uses the real framework agent and stream adapter with
 server-owned conversation history and session state. Native `MCPStreamableHTTPTool`
 connections call the same registry server as local standard input and output.
 The server validates a run-token digest and current account/run state before each
 request and tool call; it never authenticates from a browser cookie. The transport
-exposes only allowlisted read tools. A supplied resume entry returns conflict.
+offers allowlisted read tools and approval-required writes. The single-call query
+helper offers read tools only. A paused root run accepts an owned approval identifier
+and restores the persisted framework session, interrupt and requester decision.
 
 - One agent per conversation: Microsoft Agent Framework (open source).
 - Runs inside the CRAFT backend, on a local machine: tools, approvals and records are proven end to end before anything is deployed.
@@ -99,8 +101,20 @@ Now:
 | 3 | AG-UI adapter | `RUN_FINISHED`, `outcome.type="interrupt"`, `reason:"tool_call"`: the run is paused for a decision |
 | 4 | CRAFT | `approval_requests` (operation, arguments, `arguments_sha256`, evidence, reasoning, retrieval path, `interrupt_id`) + a `requested` event. Session saved. Run `paused` |
 | 5 | Requester decision | `POST /api/approvals/:id/decision`, HTTP only. Agent callers refused. Decided once (unique index) |
-| 6 | Resume | The browser sends `resume`; the server answers from the database decision and restores the session |
-| 7 | Server gate | Runs only with an approved, unexecuted request for the same run, tool and argument hash. Then `executed`/`failed`, once |
+| 6 | Resume | The browser sends `resume: {"approvalId": "…"}` with the same run and conversation. The server reads the owned decision and restores the session and native interrupt |
+| 7 | Server gate | Runs only with an approved, unexecuted request for the same run, tool and argument hash. Rechecks frozen source citations. The database effect and `executed` event commit together; failure rolls back the effect and records `failed` |
+
+Rejection runs no write. Changed arguments, foreign approval identifiers, undecided
+requests and replay are refused. Active time and tool-call counts remain bounded
+across resume; human decision time does not consume the active-time budget. Notes
+are `DATA` effects. Synchronous local `DATA` and `DOCUMENT` effects use the shared
+transaction. External and asynchronous effects remain refused until their own
+idempotent execution and recovery boundary is available.
+
+Root runs propose one effectful call at a time. Parallel approval proposals stop
+before any request or write is created. Atomic multi-item changes belong in one
+supported batch operation. The frozen native tool-call identifier binds execution
+to its specific approval, including when two stored requests have identical arguments.
 
 ```python
 @operation("drafts.save", post="/drafts", effects=DOCUMENT, tool=True)

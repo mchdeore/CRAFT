@@ -1,13 +1,14 @@
 """Short owned transactions for frozen actions and requester decisions."""
 
 import hashlib
+import inspect
 import json
 
 import msgspec
 
 from app.approvals import storage
 from app.infrastructure.access import require
-from app.infrastructure.database.unit_of_work import unit_of_work
+from app.infrastructure.database.unit_of_work import approved_transaction, unit_of_work
 from app.infrastructure.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.infrastructure.operations.pipeline import decode
 from app.infrastructure.operations.registry import registry
@@ -107,3 +108,75 @@ def decide(caller, data):
         kind = "approved" if data.approve else "rejected"
         storage.append_event(session, data.id, kind, caller.user_id, data.note)
         return _summary(row, kind)
+
+
+def _call_digest(value):
+    arguments = msgspec.to_builtins(value)
+    return hashlib.sha256(
+        json.dumps(arguments, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).digest()
+
+
+def require_approved(caller, operation, value):
+    from app.infrastructure.operations.pipeline import ApprovalRequired
+
+    if (
+        caller.run_id is None
+        or caller.conversation_id is None
+        or caller.sessions is None
+        or caller.user_id is None
+        or operation.effects not in {"DATA", "DOCUMENT"}
+        or inspect.iscoroutinefunction(operation.function)
+    ):
+        raise ApprovalRequired()
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        if (
+            storage.approved_call(
+                session,
+                caller.user_id,
+                caller.run_id,
+                caller.conversation_id,
+                operation.name,
+                _call_digest(value),
+                caller.tool_call_id,
+            )
+            is None
+        ):
+            raise ApprovalRequired()
+
+
+def execute_approved(caller, operation, value, invoke):
+    """Commit one database effect with its event, or roll it back and retain failure."""
+    from app.infrastructure.operations.pipeline import ApprovalRequired
+
+    failure = None
+    result = None
+    with unit_of_work(_sessions(caller)) as session:
+        storage.require_run(session, caller.user_id, caller.run_id, caller.conversation_id)
+        row = storage.approved_call(
+            session,
+            caller.user_id,
+            caller.run_id,
+            caller.conversation_id,
+            operation.name,
+            _call_digest(value),
+            caller.tool_call_id,
+        )
+        if row is None:
+            raise ApprovalRequired()
+        try:
+            with session.begin_nested(), approved_transaction(caller.sessions, session):
+                from app.library.handlers import CitationCheck, check_citation
+
+                for evidence in row["evidence"]:
+                    check = msgspec.convert({"handle": evidence["handle"]}, CitationCheck)
+                    if check_citation(caller, check).status != "current":
+                        raise Conflict()
+                result = invoke()
+                storage.append_event(session, row["id"], "executed", caller.user_id, None)
+        except Exception as error:
+            storage.append_event(session, row["id"], "failed", caller.user_id, None)
+            failure = error
+    if failure is not None:
+        raise failure
+    return result

@@ -6,7 +6,7 @@ from uuid import UUID
 import msgspec
 
 from app.infrastructure.access import SIGNED_IN, Caller
-from app.infrastructure.operations import operation
+from app.infrastructure.operations import DATA, operation
 from app.infrastructure.shapes import Shape
 from app.notes import service
 
@@ -39,7 +39,7 @@ class Note(NoteSummary):
     body: str
 
 
-@operation(SIGNED_IN, put="/notes", tool=True)
+@operation(SIGNED_IN, put="/notes", tool=True, effects=DATA)
 def write_note(caller: Caller, request: WriteNote) -> Note:
     """Keep or replace an owned working note; for example a calculation scratchpad."""
     return Note(**service.write(caller, request))
@@ -57,7 +57,7 @@ def read_note(caller: Caller, request: NoteRef) -> Note:
     return Note(**service.read(caller, request.id))
 
 
-@operation(SIGNED_IN, delete="/notes/{id}", tool=True)
+@operation(SIGNED_IN, delete="/notes/{id}", tool=True, effects=DATA)
 def delete_note(caller: Caller, request: NoteRef) -> None:
     """Remove one owned working note; use after its temporary work is complete."""
     service.delete(caller, request.id)

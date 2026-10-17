@@ -61,7 +61,9 @@ def test_agent_not_offered_ask_agent(chat):
             await selected.connect()
             names = {function.name for function in selected.functions}
             assert names == {
-                op.tool_name for op in registry.values() if op.tool and op.tool_name != "ask_agent"
+                op.tool_name
+                for op in registry.values()
+                if op.tool and op.effects == "NONE" and op.tool_name != "ask_agent"
             }
         finally:
             await selected.close()
@@ -79,7 +81,7 @@ def test_agent_not_offered_ask_agent(chat):
         service.finish(trusted, data, "cancelled", {})
 
 
-def test_agent_uses_notes(chat, monkeypatch):
+def test_read_only_query_cannot_write_notes(chat, monkeypatch):
     original = FakeChatClient.reply
     title = "Run note " + uuid4().hex
 
@@ -122,4 +124,4 @@ def test_agent_uses_notes(chat, monkeypatch):
     assert result.run_id
     with chat["owner"].connect() as connection:
         rows = connection.execute(select(m.notes.c.owner).where(m.notes.c.title == title)).all()
-    assert len(rows) == 1 and rows[0].owner == chat["caller"].user_id
+    assert rows == []

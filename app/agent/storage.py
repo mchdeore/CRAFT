@@ -101,6 +101,39 @@ def start(session: Session, user, conversation, identifier, model, version):
     ).scalar_one_or_none()
 
 
+def paused_state(session: Session, user, identifier, conversation):
+    conversations = metadata.tables["conversations"]
+    users = metadata.tables["users"]
+    row = session.execute(
+        select(agent_runs.c.status)
+        .join(conversations, conversations.c.id == agent_runs.c.conversation_id)
+        .join(users, users.c.id == agent_runs.c.started_by)
+        .where(
+            agent_runs.c.id == identifier,
+            agent_runs.c.started_by == user,
+            agent_runs.c.conversation_id == conversation,
+            conversations.c.owner_id == user,
+            conversations.c.archived_at.is_(None),
+            users.c.disabled_at.is_(None),
+        )
+        .with_for_update(of=agent_runs)
+    ).first()
+    if row is None or row.status != "paused":
+        raise Conflict()
+    state = session.execute(
+        select(agent_sessions.c.state).where(agent_sessions.c.conversation_id == conversation)
+    ).scalar_one()
+    return state
+
+
+def resume(session: Session, user, identifier):
+    session.execute(
+        agent_runs.update()
+        .where(agent_runs.c.id == identifier, agent_runs.c.started_by == user)
+        .values(status="running", ended_at=None)
+    )
+
+
 def finish(session: Session, user, identifier, conversation, status, state):
     row = session.execute(
         select(agent_runs.c.id)

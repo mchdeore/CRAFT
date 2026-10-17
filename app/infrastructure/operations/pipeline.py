@@ -173,7 +173,9 @@ def checked_input(operation: Operation, caller: Caller, value: Any) -> Any:
             raise TooLarge()
     request = decode(operation, value)
     if caller.origin == "mcp" and operation.effects != "NONE":
-        raise ApprovalRequired()
+        from app.approvals.service import require_approved
+
+        require_approved(caller, operation, request)
     return caller, request
 
 
@@ -301,7 +303,19 @@ def wrap(operation: Operation) -> Any:
                     resolved, value = checked_input(operation, resolved, await request.read())
                 else:
                     resolved, value = checked(operation, caller, request)
-                if inspect.iscoroutinefunction(fn):
+                if resolved.origin == "mcp" and operation.effects != "NONE":
+                    from app.approvals.service import execute_approved
+
+                    output = await run_in_threadpool(
+                        execute_approved,
+                        resolved,
+                        operation,
+                        value,
+                        lambda: validate_output(
+                            operation, fn(resolved, value) if operation.input else fn(resolved)
+                        ),
+                    )
+                elif inspect.iscoroutinefunction(fn):
                     output = await fn(resolved, value) if operation.input else await fn(resolved)
                 else:
                     output = await run_in_threadpool(fn, resolved, value)
@@ -335,6 +349,17 @@ def wrap(operation: Operation) -> Any:
             error = None
             try:
                 resolved, value = checked(operation, caller, request)
+                if resolved.origin == "mcp" and operation.effects != "NONE":
+                    from app.approvals.service import execute_approved
+
+                    return execute_approved(
+                        resolved,
+                        operation,
+                        value,
+                        lambda: validate_output(
+                            operation, fn(resolved, value) if operation.input else fn(resolved)
+                        ),
+                    )
                 result = fn(resolved, value) if operation.input else fn(resolved)
                 return validate_output(operation, result)
             except ApiError as failure:

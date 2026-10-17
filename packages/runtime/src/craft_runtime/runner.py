@@ -203,58 +203,58 @@ class Runtime:
                                 ],
                             )
                         )
-                stream = agent.run(messages, session=session, stream=True)
-                text, pending = "", []
-                async for update in stream:
+                async with agent.run(messages, session=session, stream=True) as stream:
+                    text, pending = "", []
+                    async for update in stream:
+                        if calls.error:
+                            raise RuntimeErrorCode(calls.error)
+                        for content in update.contents:
+                            if content.type == "function_call" and content.name not in [
+                                function.name for function in allowed
+                            ]:
+                                raise RuntimeErrorCode("tool_refused")
+                            if content.type == "text" and update.role == "assistant":
+                                text += content.text or ""
+                                if (
+                                    len(re.findall(r"\w+|[^\w\s]", text)) > self.max_tokens
+                                    or len(text.encode()) > self.max_tokens * 16
+                                ):
+                                    raise RuntimeErrorCode("output_limit")
+                            if content.type == "function_approval_request":
+                                call = content.function_call
+                                if (
+                                    call is None
+                                    or not isinstance(call.name, str)
+                                    or not isinstance(call.call_id, str)
+                                    or not isinstance(content.id, str)
+                                ):
+                                    raise RuntimeErrorCode("invalid_tool_request")
+                                name = call.name
+                                binding = source.bindings.get(name)
+                                if binding is None or not binding.effectful:
+                                    raise RuntimeErrorCode("tool_refused")
+                                arguments = (
+                                    json.loads(call.arguments)
+                                    if isinstance(call.arguments, str)
+                                    else call.arguments
+                                )
+                                if not isinstance(arguments, dict):
+                                    raise RuntimeErrorCode("invalid_tool_request")
+                                proposal = await self.decisions.propose(
+                                    Scope(request.owner, request.run, name, binding.destination),
+                                    arguments,
+                                )
+                                pending.append(
+                                    {
+                                        "proposal": proposal.id,
+                                        "callId": call.call_id,
+                                        "native": content.to_dict(),
+                                    }
+                                )
+                        yield event("update", update.to_dict())
+                    final = await stream.get_final_response()
                     if calls.error:
                         raise RuntimeErrorCode(calls.error)
-                    for content in update.contents:
-                        if content.type == "function_call" and content.name not in [
-                            function.name for function in allowed
-                        ]:
-                            raise RuntimeErrorCode("tool_refused")
-                        if content.type == "text" and update.role == "assistant":
-                            text += content.text or ""
-                            if (
-                                len(re.findall(r"\w+|[^\w\s]", text)) > self.max_tokens
-                                or len(text.encode()) > self.max_tokens * 16
-                            ):
-                                raise RuntimeErrorCode("output_limit")
-                        if content.type == "function_approval_request":
-                            call = content.function_call
-                            if (
-                                call is None
-                                or not isinstance(call.name, str)
-                                or not isinstance(call.call_id, str)
-                                or not isinstance(content.id, str)
-                            ):
-                                raise RuntimeErrorCode("invalid_tool_request")
-                            name = call.name
-                            binding = source.bindings.get(name)
-                            if binding is None or not binding.effectful:
-                                raise RuntimeErrorCode("tool_refused")
-                            arguments = (
-                                json.loads(call.arguments)
-                                if isinstance(call.arguments, str)
-                                else call.arguments
-                            )
-                            if not isinstance(arguments, dict):
-                                raise RuntimeErrorCode("invalid_tool_request")
-                            proposal = await self.decisions.propose(
-                                Scope(request.owner, request.run, name, binding.destination),
-                                arguments,
-                            )
-                            pending.append(
-                                {
-                                    "proposal": proposal.id,
-                                    "callId": call.call_id,
-                                    "native": content.to_dict(),
-                                }
-                            )
-                    yield event("update", update.to_dict())
-                final = await stream.get_final_response()
-                if calls.error:
-                    raise RuntimeErrorCode(calls.error)
             state.messages.extend(message.to_dict() for message in final.messages)
             state.session = session.to_dict()
             state.used_seconds += asyncio.get_running_loop().time() - active_started

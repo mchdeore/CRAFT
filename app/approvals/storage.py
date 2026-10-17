@@ -195,6 +195,45 @@ def status(session, identifier):
     ).scalar_one()
 
 
+def approved_call(session, user, run, conversation, operation, digest, tool_call_id=None):
+    """Find an unconsumed frozen action for the authenticated active run."""
+    from uuid import UUID
+
+    from sqlalchemy import select
+
+    runs = metadata.tables["agent_runs"]
+    statement = owned_statement(user)
+    if tool_call_id is not None:
+        sessions = metadata.tables["agent_sessions"]
+        state = session.execute(
+            select(sessions.c.state).where(sessions.c.conversation_id == conversation)
+        ).scalar_one_or_none()
+        pending = (state or {}).get("state", {}).get("craftApprovals", [])
+        matching = [item.get("id") for item in pending if item.get("callId") == tool_call_id]
+        if len(matching) != 1:
+            return None
+        try:
+            identifier = UUID(matching[0])
+        except (TypeError, ValueError, AttributeError):
+            return None
+        statement = statement.where(approval_requests.c.id == identifier)
+    rows = (
+        session.execute(
+            statement.where(
+                approval_requests.c.run_id == run,
+                approval_requests.c.conversation_id == conversation,
+                approval_requests.c.operation == operation,
+                approval_requests.c.arguments_sha256 == digest,
+                runs.c.status == "running",
+                status_expression() == "approved",
+            ).limit(2)
+        )
+        .mappings()
+        .all()
+    )
+    return rows[0] if len(rows) == 1 else None
+
+
 def events(session, identifier):
     from sqlalchemy import select
 

@@ -118,7 +118,12 @@ def test_notes_never_logged(chat, capsys):
     assert safe and len(rows) == 2
 
 
-def test_notes_same_over_mcp(chat):
+def test_mcp_reads_owned_notes_but_unapproved_writes_are_refused(chat):
+    from app.notes.handlers import WriteNote, write_note
+
+    note = asyncio.run(
+        write_note(chat["caller"], WriteNote(title="MCP memo", body="Synthetic body"))
+    )
     fields = dict(
         zip(
             chat["sign_in"].__code__.co_freevars,
@@ -147,16 +152,16 @@ def test_notes_same_over_mcp(chat):
             result = await session.call_tool(
                 "write_note", {"title": "MCP memo", "body": "Synthetic body"}
             )
-            assert not result.isError and result.structuredContent is not None
-            identifier = result.structuredContent["id"]
+            assert result.isError
+            identifier = str(note.id)
             read = await session.call_tool("read_note", {"id": identifier})
-            matched = read.structuredContent == result.structuredContent
-            assert matched
+            assert not read.isError and read.structuredContent is not None
+            assert read.structuredContent["body"] == "Synthetic body"
             listed = await session.call_tool("list_notes", {})
             assert not listed.isError and listed.structuredContent is not None
             assert len(listed.structuredContent["items"]) == 1
             removed = await session.call_tool("delete_note", {"id": identifier})
-            assert not removed.isError
+            assert removed.isError
 
     asyncio.run(execute())
     logs = m.metadata.tables["call_log"]
@@ -164,7 +169,9 @@ def test_notes_same_over_mcp(chat):
         rows = (
             connection.execute(
                 select(logs).where(
-                    logs.c.user_id == chat["caller"].user_id, logs.c.name.like("notes.%")
+                    logs.c.user_id == chat["caller"].user_id,
+                    logs.c.name.like("notes.%"),
+                    logs.c.origin == "mcp",
                 )
             )
             .mappings()

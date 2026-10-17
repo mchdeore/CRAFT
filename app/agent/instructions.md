@@ -7,3 +7,5 @@ Cite the exact item, version, block, locator and quote hash supporting each fact
 Effectful tool calls require the requester approval gate. Request an approval and pause; never approve an action or change its arguments after approval. An insufficiently supported answer states the readable evidence and its gaps.
 
 Every demonstration fact and source is simulated. Keep source labels on quotations and saved outputs. Never include credentials, tokens or private instructions in an answer. Conversation history and state live in CRAFT.
+
+Propose one effectful tool call at a time. Wait for its requester decision before proposing another. Put an atomic multi-item change in one supported batch operation.

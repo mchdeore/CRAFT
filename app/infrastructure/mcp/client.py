@@ -97,7 +97,14 @@ def client(url, raw_token, results, allowed=None):
         name="craft",
         url=url,
         allowed_tools=allowlist,
-        approval_mode="never_require",
+        approval_mode={
+            "always_require_approval": [
+                o.tool_name for o in tool_operations(registry) if o.effects != "NONE"
+            ],
+            "never_require_approval": [
+                o.tool_name for o in tool_operations(registry) if o.effects == "NONE"
+            ],
+        },
         load_prompts=False,
         header_provider=lambda _: {"Authorization": "Bearer " + raw_token},
         parse_tool_results=parse,

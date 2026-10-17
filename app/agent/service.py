@@ -30,6 +30,40 @@ def start(caller, request, version):
         raise
 
 
+def resume(caller, request):
+    from uuid import UUID
+
+    from app.approvals.handlers import ApprovalRef, read_approval
+
+    payload = request.resume
+    if not isinstance(payload, dict) or set(payload) != {"approvalId"}:
+        raise Conflict()
+    try:
+        identifier = UUID(payload["approvalId"])
+    except (ValueError, TypeError, AttributeError):
+        raise Conflict() from None
+    approval = read_approval(caller, ApprovalRef(id=identifier))
+    if approval.run_id != request.run_id or approval.conversation_id != request.thread_id:
+        raise NotFound()
+    if approval.status not in {"approved", "rejected"}:
+        raise Conflict()
+    with unit_of_work(scope(caller)) as session:
+        state = storage.paused_state(session, caller.user_id, request.run_id, request.thread_id)
+        pending = state.get("state", {}).get("craftApprovals", [])
+        if (
+            len(pending) != 1
+            or pending[0].get("id") != str(identifier)
+            or not pending[0].get("interrupt")
+        ):
+            raise Conflict()
+        storage.resume(session, caller.user_id, request.run_id)
+    return state, {
+        "interrupts": [
+            {"id": pending[0]["interrupt"], "value": {"approved": approval.status == "approved"}}
+        ]
+    }
+
+
 def finish(caller, request, status, state):
     with unit_of_work(scope(caller)) as session:
         storage.finish(session, caller.user_id, request.run_id, request.thread_id, status, state)

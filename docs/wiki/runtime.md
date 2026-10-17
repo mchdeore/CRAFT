@@ -6,7 +6,7 @@ The application agent uses the registered operations and the [API contract](../A
 
 Tools expose typed input and output. The controller supplies the allowed catalog and the decision boundary. Model output is validated before it changes run or stored state.
 
-The registry bridge derives read-tool bindings from declared operations. The native transport sends each tool call once. A lost response fails the call; connection recovery does not replay it. Server permission checks apply independently of the offered catalog.
+The registry bridge derives tool bindings and approval requirements from declared operations. Root runs can propose writes; the single-call query helper sees read tools only. The native transport sends each tool call once. A lost response fails the call; connection recovery does not replay it. Server permission checks apply independently of the offered catalog.
 
 ## 2. Decisions and artifacts
 
@@ -15,6 +15,10 @@ A decision identifies the proposed action and its current context. Accepted or r
 The model job library maintains a local queue with pause, resume and cancellation. Provider routes refer to private credentials loaded at dispatch. Source quotes are checked against the supplied evidence; a quote match establishes a reference, while interpretation remains part of review.
 
 The approval routes list and read requester-owned frozen actions and append an HTTP requester decision once. The database preserves request arguments, evidence and event history. Concurrent decisions serialize on the owned run. Approval decisions are absent from the model tool catalog.
+
+A paused run resumes with its owned approval identifier. The server restores the saved framework interrupt and reads the decision itself. Approved synchronous local writes recheck frozen source citations and commit with their execution event. Failure rolls back the effect, rejection writes nothing and replay is refused. Tool calls and active time retain their budgets across resume. External writes require a separate recovery boundary.
+
+Root runs review one effectful call at a time. Parallel proposals stop before any approval request or write is created. Execution binds the native tool-call identifier and frozen arguments to the specific approval. Native response streams close on completion, refusal and cancellation.
 
 ## 3. Related topics
 
