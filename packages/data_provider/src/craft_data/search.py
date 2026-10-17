@@ -14,6 +14,8 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
         raise ValueError("search text must not be empty")
     if query.limit < 1 or query.limit > 500:
         raise ValueError("limit must be between 1 and 500")
+    if query.version_mode not in {"latest", "all"}:
+        raise ValueError("version_mode must be latest or all")
     if not query.principal.strip():
         raise ValueError("principal must not be empty")
     tokens = tuple(dict.fromkeys(re.findall(r"[\w.-]+", query.text.casefold())))
@@ -32,9 +34,20 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
     kinds_placeholders = ", ".join("?" for _ in kinds)
     score_expression = " + ".join(score_parts)
     known_filter = "" if query.known_at is None else "AND v.created_at <= ?"
+    latest_filter = ""
+    if query.version_mode == "latest":
+        recent_time = "AND newer.created_at <= ?" if query.known_at is not None else ""
+        latest_filter = (
+            "AND NOT EXISTS (SELECT 1 FROM doc_versions newer "
+            "WHERE newer.document_id=v.document_id AND newer.sequence>v.sequence "
+            + recent_time
+            + ")"
+        )
     parameters: list[object] = [query.principal, *kinds]
     if query.known_at is not None:
         parameters.append(dump_datetime(query.known_at))
+        if latest_filter:
+            parameters.append(dump_datetime(query.known_at))
     parameters.extend(token_parameters)
     parameters.append(query.limit)
 
@@ -56,6 +69,7 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
                   AND d.remote_status = 'active'
                   AND r.kind IN ({kinds_placeholders})
                   {known_filter}
+                  {latest_filter}
             ), scored AS (
                 SELECT permitted.*,
                     ({score_expression}) AS score
@@ -74,13 +88,7 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
             """,
             parameters,
         ).fetchall()
-    total = (
-        rows[0]["visible_total"]
-        if rows
-        else _visible_match_count(
-            store, query, kinds, token_parameters, score_expression, known_filter, parameters
-        )
-    )
+    total = rows[0]["visible_total"] if rows else 0
     hits = tuple(
         SearchHit(
             representation_id=row["representation_id"],
@@ -103,37 +111,3 @@ def search(store: DocumentStore, query: SearchQuery) -> SearchPage:
         for row in rows
     )
     return SearchPage(total_hits=total, hits=hits)
-
-
-def _visible_match_count(
-    store: DocumentStore,
-    query: SearchQuery,
-    kinds: tuple[str, ...],
-    token_parameters: list[str],
-    score_expression: str,
-    known_filter: str,
-    parameters: list[object],
-) -> int:
-    count_parameters = parameters[:-1]
-    with store.read_connection() as connection:
-        row = connection.execute(
-            f"""
-            WITH permitted AS (
-                SELECT r.text
-                FROM representations r
-                JOIN doc_versions v ON v.version_id = r.version_id
-                JOIN documents d ON d.document_id = v.document_id
-                JOIN extractions x ON x.extraction_id = r.extraction_id AND x.is_current = 1
-                JOIN mission_grants g ON g.mission = d.mission
-                WHERE g.principal = ? AND g.can_read = 1
-                  AND d.remote_status = 'active'
-                  AND r.kind IN ({", ".join("?" for _ in kinds)})
-                  {known_filter}
-            ), scored AS (
-                SELECT ({score_expression}) AS score FROM permitted
-            )
-            SELECT COUNT(*) FROM scored WHERE score > 0
-            """,
-            count_parameters,
-        ).fetchone()
-    return int(row[0])

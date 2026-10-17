@@ -121,6 +121,7 @@ class SearchQuery:
     limit: int = 10
     kinds: tuple[RepresentationKind, ...] = (RepresentationKind.BODY_CHUNK,)
     known_at: datetime | None = None
+    version_mode: Literal["latest", "all"] = "latest"
 
 
 @dataclass(frozen=True)

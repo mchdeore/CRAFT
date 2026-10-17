@@ -448,3 +448,29 @@ def test_exact_unit_conversion_preserves_long_decimal():
     assert convert_unit(Decimal("123456789012345678901234567890.123"), "kg", "g") == Decimal(
         "123456789012345678901234567890123"
     )
+
+
+def test_latest_and_historical_search_choose_version_before_ranking(tmp_path):
+    clock = [NOW]
+    store = DocumentStore(
+        tmp_path / "versions", mode=StorageMode.LOCAL_ORIGINALS, clock=lambda: clock[0]
+    )
+    document = make_local(store)
+    first = ingest(store, document.document_id, b"old", "thermal power 80 watts")
+    clock[0] = NOW + timedelta(days=2)
+    second = ingest(store, document.document_id, b"new", "thermal power 105 watts")
+    store.set_mission_permission(principal="reader", mission="mission-a", can_read=True)
+    latest = search(store, SearchQuery("thermal power", "reader"))
+    assert latest.total_hits == 1
+    assert latest.hits[0].citation.content_hash == second.content_hash
+    history = search(
+        store, SearchQuery("thermal power", "reader", known_at=NOW + timedelta(days=1))
+    )
+    assert history.total_hits == 1
+    assert history.hits[0].citation.content_hash == first.content_hash
+    all_versions = search(
+        store, SearchQuery("thermal power", "reader", limit=1, version_mode="all")
+    )
+    assert all_versions.total_hits == 2 and len(all_versions.hits) == 1
+    assert search(store, SearchQuery("absent token", "reader")).total_hits == 0
+    assert search(store, SearchQuery("thermal", "outsider")).total_hits == 0
