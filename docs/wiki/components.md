@@ -19,6 +19,8 @@ Handlers expose the application boundary. Services coordinate a use case. Storag
 
 The [operation contract](../API-Contract.md) owns the public forms. A Python package exposes an import interface; its presence in the development environment does not add an application route.
 
+Audio records live in `audio_inbox.models`, deterministic checks in `audio_inbox.validation`, queue/storage behavior in `audio_inbox.core` and external requests in `audio_inbox.providers`. The controller configuration keeps credential loading at dispatch.
+
 ## 3. Related topics
 
 See [runtime](runtime.md), [workspace](python.md), [documents](documents.md), [jobs and audio](jobs-and-audio.md), [development](development.md) and [operations](../spec/05-operations-and-logging.md).

@@ -6,6 +6,8 @@ The application agent uses the registered operations and the [API contract](../A
 
 Tools expose typed input and output. The controller supplies the allowed catalog and the decision boundary. Model output is validated before it changes run or stored state.
 
+The registry bridge derives read-tool bindings from declared operations. The native transport sends each tool call once. A lost response fails the call; connection recovery does not replay it. Server permission checks apply independently of the offered catalog.
+
 ## 2. Decisions and artifacts
 
 A decision identifies the proposed action and its current context. Accepted or rejected decisions retain their result, and replay is checked against the stored action. Artifacts preserve output separately from routine status and usage logging.

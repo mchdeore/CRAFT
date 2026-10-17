@@ -18,6 +18,8 @@ PCM audio is validated with Python's wave interface. Other supported formats use
 
 The command interface supports `setup`, `scan`, `list`, `process`, `suggest`, `review`, `export` and `cancel`. Generated-data processing requires the explicit `--fake` option. The CLI refuses live processing when a service is not configured. Library callers supply transcriber and suggestion functions through the declared interfaces.
 
+The `--providers` option selects a private JSON configuration with a deferred credential reference. Transcription and goal-model endpoints are configured separately. The transcription adapter uploads a verified bounded byte snapshot. Plain JSON text carries no generated timestamps; verbose responses retain reported segments. The goal adapter uses a strict Responses schema and the same quote/time validator as the inbox. Both adapters bound streamed responses and leave supplied HTTP clients under caller ownership.
+
 ## 3. Research snapshots
 
 The `research_data` library stores caller-fetched CSV and JSON snapshots with immutable hashes and acquisition records. Records include source URL, fetch/publication/observation times, schema, row and byte counts, license status and parent acquisitions for derived results. The catalog rejects a Git LFS pointer as dataset content and requires review when a dataset's shape changes.
