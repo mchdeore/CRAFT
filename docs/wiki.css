@@ -1,0 +1,5 @@
+body, .rst-content { font-family: Charter, "Charis SIL", Georgia, serif; }
+code, pre, .rst-content code { font-family: Menlo, Consolas, monospace; }
+.rst-content a { text-decoration: none; }
+.rst-content a:hover { text-decoration: underline; }
+.wy-nav-content { max-width: 1050px; }

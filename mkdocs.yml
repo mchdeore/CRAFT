@@ -1,0 +1,44 @@
+site_name: CRAFT
+use_directory_urls: false
+site_description: Project documents, engineering data and local tools.
+docs_dir: docs
+site_dir: docs/build
+theme:
+  name: readthedocs
+nav:
+  - Home: index.md
+  - Guides:
+      - Development: wiki/development.md
+      - Components: wiki/components.md
+      - Agent runtime: wiki/runtime.md
+      - Python workspace: wiki/python.md
+      - Documents and evidence: wiki/documents.md
+  - Concepts:
+      - Scope: spec/01-scope.md
+      - Connections: spec/02-connections.md
+      - Agent: spec/03-agent.md
+      - Models and confidence: spec/04-models-and-confidence.md
+      - Operations: spec/05-operations-and-logging.md
+      - Code layout: spec/06-code-layout.md
+      - Data: spec/07-data.md
+      - Engineering datacube: spec/08-engineering-datacube.md
+      - Accounts and access: spec/09-accounts-and-access.md
+      - Retrieval: spec/10-retrieval.md
+  - Reference:
+      - API contract: API-Contract.md
+      - Dependencies: Dependencies-and-Integration.md
+      - Glossary: spec/13-glossary.md
+      - Traceability: spec/15-traceability.md
+      - Build order: spec/11-build-order.md
+      - Deferred register: spec/12-deferred-register.md
+      - Vision: spec/14-vision.md
+  - Downloads: downloads.md
+plugins:
+  - search
+exclude_docs: |
+  tools/**
+validation:
+  links:
+    not_found: warn
+extra_css:
+  - wiki.css

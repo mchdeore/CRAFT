@@ -81,8 +81,24 @@ done
 build docs/API-Contract.md API-Contract "API Contract"
 build docs/Dependencies-and-Integration.md Dependencies-and-Integration "Dependencies and Integration"
 
-python3 "$T/links.py" "$ROOT/docs/index.md" "$WORK/manifest.tsv" "$WORK/board.md" "$(git -C "$ROOT" rev-parse HEAD)"
-{ echo '<meta name="viewport" content="width=device-width, initial-scale=1">'
-  echo "<style>"; cat "$T/site.css"; echo "</style>"; } > "$WORK/site-head.html"
-pandoc -f gfm -t html5 -s --columns=10000 -M document-css=false --metadata pagetitle="CRAFT Documents" \
-  -H "$WORK/site-head.html" "$WORK/board.md" -o "$OUT/index.html"
+python3 "$T/links.py" "$ROOT/docs/downloads.md" "$WORK/manifest.tsv" "$WORK/downloads.md" "$(git -C "$ROOT" rev-parse HEAD)"
+
+# Stage verified downloads with the Markdown topics, then let MkDocs own the site.
+uv run --group docs python - "$ROOT" "$WORK" "$OUT" <<'PYDOCS'
+from pathlib import Path
+import shutil
+import sys
+import yaml
+root, work, output = map(Path, sys.argv[1:])
+source = work / "source"
+shutil.copytree(root / "docs", source, ignore=shutil.ignore_patterns("build", "site", "__pycache__"))
+shutil.copyfile(work / "downloads.md", source / "downloads.md")
+for pdf in output.glob("CRAFT-*.pdf"):
+    shutil.copyfile(pdf, source / pdf.name)
+config = yaml.safe_load((root / "mkdocs.yml").read_text())
+config["docs_dir"] = str(source)
+config["site_dir"] = str(output)
+(work / "mkdocs.yml").write_text(yaml.safe_dump(config, sort_keys=False))
+PYDOCS
+uv run --group docs mkdocs build --strict --config-file "$WORK/mkdocs.yml"
+python3 "$T/check_site.py" "$OUT"

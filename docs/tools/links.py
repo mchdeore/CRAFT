@@ -1,6 +1,6 @@
 """Resolve download sources and revision dates for the document index.
 
-Usage: links.py INDEX.md MANIFEST.tsv BOARD.md REVISION
+Usage: links.py INDEX.md MANIFEST.tsv RESOLVED.md REVISION
 """
 
 import os
@@ -39,8 +39,11 @@ def repository_slug() -> str:
     return match[1]
 
 
-repository = repository_slug()
-index, manifest, board = (Path(a) for a in sys.argv[1:4])
+source_mode = os.environ.get("DOCS_SOURCE_LINKS", "local")
+if source_mode not in {"local", "github"}:
+    raise SystemExit("Invalid source-link mode")
+repository = repository_slug() if source_mode == "github" else ""
+index, manifest, resolved = (Path(a) for a in sys.argv[1:4])
 revision = sys.argv[4]
 if not re.fullmatch(r"[0-9a-f]{40}", revision):
     raise SystemExit("Expected a full repository revision")
@@ -64,7 +67,14 @@ for line in text.splitlines():
         if "docs/" + source[1].rstrip("/") != path:
             raise SystemExit("Download/source mismatch")
         kind = "tree" if source[1].endswith("/") else "blob"
-        url = f"https://github.com/{repository}/{kind}/{revision}/{path}"
+        if source_mode == "github":
+            url = f"https://github.com/{repository}/{kind}/{revision}/{path}"
+        else:
+            url = (
+                "./index.md#2-application-concepts"
+                if kind == "tree"
+                else "./" + path.removeprefix("docs/")
+            )
         line = line.replace(source[0], f"[Source]({url})")
         line = line.rstrip().removesuffix("|").rstrip() + f"<br>Updated {date} |"
         linked.add(pdf[1])
@@ -74,5 +84,5 @@ if linked != set(records) or len(records) != 18:
 out = "\n".join(rows) + "\n"
 out = re.sub(r'(<p class="meta">[^|]+\|).*(</p>)', rf"\1 Updated {newest}\2", out, count=1)
 out = re.sub(r"\[([^\]]+)\]\((\S+\.pdf)\)", r'<a href="\2" download>\1</a>', out)
-board.parent.mkdir(parents=True, exist_ok=True)
-board.write_text(out, encoding="utf-8")
+resolved.parent.mkdir(parents=True, exist_ok=True)
+resolved.write_text(out, encoding="utf-8")

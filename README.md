@@ -40,3 +40,10 @@ Fork the repository, create a branch, run the checks in `.github/workflows/ci.ym
 ## Kept locally
 
 `CRAFT-Data-Lake-Import-2026-10-14.zip`: data lake import from the president's document drive, messy documents from students and peers with example data for the database, and sample data for use-case demos; original external data documents as received on 14 October 2026.
+
+
+## Documentation
+
+The [topic index](docs/index.md) links the application concepts, local libraries and canonical reference pages. [Development](docs/wiki/development.md) describes the shared environment and checks. [Components](docs/wiki/components.md) identifies the owning code.
+
+Build the topic site and formatted downloads with `docs/tools/build.sh`. The documentation dependency group supplies the site generator; the existing print path supplies the specification PDFs.
