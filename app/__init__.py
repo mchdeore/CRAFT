@@ -62,14 +62,28 @@ class MountPathMiddleware:
         await self.app(scope, receive, send)
 
 
-def close_on_exit(engine: Engine, mcp) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+def close_on_exit(
+    engine: Engine, mcp, settings: Settings
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        from anyio import CancelScope, to_thread
+
+        from app.infrastructure.processes import open_processes
+
+        processes = None
         try:
+            processes = await to_thread.run_sync(open_processes, settings)
+            app.state.processes = processes
             async with mcp.run():
                 yield
         finally:
-            engine.dispose()
+            try:
+                if processes is not None:
+                    with CancelScope(shield=True):
+                        await to_thread.run_sync(processes.close)
+            finally:
+                engine.dispose()
 
     return lifespan
 
@@ -95,7 +109,10 @@ def create_app(settings: Settings) -> FastAPI:
 
     mcp = HttpTransport(registry)
     app = FastAPI(
-        openapi_url=None, docs_url=None, redoc_url=None, lifespan=close_on_exit(engine, mcp)
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+        lifespan=close_on_exit(engine, mcp, settings),
     )
     app.state.settings = settings
     app.state.engine = engine

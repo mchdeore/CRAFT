@@ -17,6 +17,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     database_port: int = 5432
     database_name: str = "craft_dev"
     provider_root: str = "var/provider"
+    process_root: str = ""
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5

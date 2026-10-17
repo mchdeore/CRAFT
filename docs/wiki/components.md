@@ -10,6 +10,7 @@
 | Analysis library | Parameter comparison, forecasts, risk and charts | `packages/python_workspace/src/craft_analysis/` |
 | Document library | Source versions, representations, evidence and simulated provider reconciliation | `packages/data_provider/` |
 | Model job library | Local job queue, provider requests and reviewed research artifacts | `packages/provider_fleet/` |
+| Process lifecycle | Owned child processes and containers, readiness and bounded shutdown | `packages/process_manager/` |
 
 ## 2. Application boundaries
 

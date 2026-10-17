@@ -8,8 +8,10 @@ COPY packages/runtime/pyproject.toml packages/runtime/pyproject.toml
 COPY packages/python_workspace/pyproject.toml packages/python_workspace/pyproject.toml
 COPY packages/data_provider/pyproject.toml packages/data_provider/pyproject.toml
 COPY packages/provider_fleet/pyproject.toml packages/provider_fleet/pyproject.toml
-RUN uv sync --locked --no-dev --no-install-project
+COPY packages/process_manager/pyproject.toml packages/process_manager/pyproject.toml
+RUN uv sync --locked --no-dev --no-install-workspace
 COPY app ./app
+COPY packages/process_manager ./packages/process_manager
 COPY migrations ./migrations
 COPY alembic.ini ./
 RUN uv sync --locked --no-dev
