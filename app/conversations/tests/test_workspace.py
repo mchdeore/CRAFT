@@ -68,6 +68,8 @@ def test_workspace_owner_content_and_state(chat, foreign_http, monkeypatch):
         response = http.get(f"/api/conversations/{chat['thread']}/files/{identifier}/content")
         equal = response.content == b"Synthetic bytes"
         assert response.status_code == 200 and equal
+        cache_policy = response.headers.get("Cache-Control")
+        assert cache_policy == "no-store"
         assert response.headers["X-Content-Type-Options"] == "nosniff"
         assert response.headers["Content-Disposition"].startswith("attachment;")
         assert response.headers["Content-Type"].startswith("text/plain")
@@ -78,10 +80,10 @@ def test_workspace_owner_content_and_state(chat, foreign_http, monkeypatch):
             ).status_code
             == 204
         )
-        assert (
-            http.get(f"/api/conversations/{chat['thread']}/files/{identifier}/content").status_code
-            == 404
-        )
+        refused = http.get(f"/api/conversations/{chat['thread']}/files/{identifier}/content")
+        assert refused.status_code == 404
+        cache_policy = refused.headers.get("Cache-Control")
+        assert cache_policy == "no-store"
         identifier = upload(http, chat).json()["id"]
     with pytest.raises(NotFound):
         file_content(

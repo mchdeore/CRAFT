@@ -2,7 +2,7 @@
 
 import inspect
 import re
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin, get_type_hints
 
@@ -23,6 +23,7 @@ class Operation:
     effects: str
     input: type[Shape] | None
     output: Any
+    prepare_approved: Callable[[Caller, Any], object] | None = None
 
     @property
     def tool_name(self) -> str:
@@ -67,12 +68,24 @@ def is_output(shape: Any) -> bool:
 
 
 def declare(
-    function: Any, access: str, routes: dict[str, str | None], tool: bool, effects: str
+    function: Any,
+    access: str,
+    routes: dict[str, str | None],
+    tool: bool,
+    effects: str,
+    prepare_approved: Callable[[Caller, Any], object] | None = None,
 ) -> Operation:
     if getattr(function, "__observed__", False):
         raise ValueError("Observation cannot decorate an operation")
     if not access or effects not in {"NONE", "DATA", "DOCUMENT", "EXTERNAL", "FINAL"}:
         raise ValueError("Invalid operation declaration")
+    if prepare_approved is not None and (
+        effects not in {"DATA", "DOCUMENT"}
+        or not callable(prepare_approved)
+        or inspect.iscoroutinefunction(prepare_approved)
+        or inspect.isasyncgenfunction(prepare_approved)
+    ):
+        raise ValueError("Approved preparation requires a synchronous database effect")
     hints = get_type_hints(function)
     params = list(inspect.signature(function).parameters.values())
     if not params or params[0].name != "caller" or hints.get("caller") is not Caller:
@@ -113,7 +126,16 @@ def declare(
     if tool and any(o.tool and o.tool_name == function.__name__ for o in registry.values()):
         raise ValueError("Duplicate tool name")
     return Operation(
-        name, function, access, method, path, tool, effects, input_shape, hints["return"]
+        name,
+        function,
+        access,
+        method,
+        path,
+        tool,
+        effects,
+        input_shape,
+        hints["return"],
+        prepare_approved,
     )
 
 

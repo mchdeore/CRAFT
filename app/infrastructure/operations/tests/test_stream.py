@@ -47,6 +47,8 @@ def test_stream_python_and_http(app):
         response = client.post("/api/stream-probe", json={"value": 2}, headers=headers)
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
+        cache_policy = response.headers.get("Cache-Control")
+        assert cache_policy == "no-store"
         events = [
             json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
         ]
@@ -54,6 +56,8 @@ def test_stream_python_and_http(app):
         assert client.post("/api/stream-probe", json={"value": 2}).status_code == 403
         too_large = client.post("/api/stream-probe", content=b" " * 1025, headers=headers)
         assert too_large.status_code == 413
+        cache_policy = too_large.headers.get("Cache-Control")
+        assert cache_policy == "no-store"
 
 
 def test_stream_close_runs_finalizer_and_records_failure(app):

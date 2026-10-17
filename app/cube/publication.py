@@ -1,25 +1,63 @@
 """Source-validated factual publication inside the existing approved transaction."""
 
+from dataclasses import dataclass
 from datetime import date
 
 import msgspec
 
-from app.approvals.handlers import approved_request_id
+from app.approvals.handlers import approved_preparation, approved_request_id
 from app.cube import intake, storage
-from app.cube.handlers import PrepareValues, ValueReceipt, submit_values
-from app.cube.service import prepare_values, scope
+from app.cube.handlers import PrepareValues, SubmitValues, ValueReceipt, submit_values
+from app.cube.service import prepare_values_from_chunk, scope
+from app.infrastructure.access import Caller
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput
 from app.library.handlers import (
     ChunkRange,
-    CitationCheck,
-    check_citation,
+    PreparedSource,
+    prepare_source,
     read_chunks,
+    validate_prepared_source,
 )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedPublication:
+    sources: tuple[PreparedSource, ...]
+
+
+def prepare_submission(caller: Caller, request: SubmitValues) -> PreparedPublication:
+    selected = [msgspec.json.encode(candidate) for candidate in request.candidates]
+    if len(set(selected)) != len(selected):
+        raise InvalidInput()
+    sources = {}
+    for candidate in request.candidates:
+        handle = candidate.citation
+        key = (handle.item, handle.version, handle.block)
+        if key in sources:
+            continue
+        page = read_chunks(
+            caller,
+            ChunkRange(
+                item=handle.item,
+                version=handle.version,
+                from_block=handle.block,
+                to_block=handle.block,
+            ),
+        )
+        if not page.chunks:
+            raise Conflict()
+        sources[key] = prepare_source(caller, page.chunks[0].handle)
+    return PreparedPublication(sources=tuple(sources.values()))
 
 
 def submit(caller, request):
     approval_id = approved_request_id(caller, submit_values.__operation__.name, request)
+    prepared_id, preparation = approved_preparation(
+        caller, submit_values.__operation__.name, request
+    )
+    if prepared_id != approval_id or type(preparation) is not PreparedPublication:
+        raise Conflict()
     selected = [msgspec.json.encode(candidate) for candidate in request.candidates]
     if len(set(selected)) != len(selected):
         raise InvalidInput()
@@ -27,26 +65,13 @@ def submit(caller, request):
         dictionary = storage.dictionary(session)
         elements = storage.publication_elements(session, request.mission, request.silo)
         prepared = {}
-        for candidate in request.candidates:
-            handle = candidate.citation
-            key = (handle.item, handle.version, handle.block)
+        for source in preparation.sources:
+            key = (source.item, source.version, source.block)
             if key in prepared:
-                continue
-            page = read_chunks(
-                caller,
-                ChunkRange(
-                    item=handle.item,
-                    version=handle.version,
-                    from_block=handle.block,
-                    to_block=handle.block,
-                ),
-            )
-            if not page.chunks:
                 raise Conflict()
-            chunk = page.chunks[0]
-            if check_citation(caller, CitationCheck(handle=chunk.handle)).status != "current":
-                raise Conflict()
-            candidates = prepare_values(
+            validate_prepared_source(caller, session, source)
+            chunk = source.chunk()
+            candidates = prepare_values_from_chunk(
                 caller,
                 PrepareValues(
                     handle=chunk.handle,
@@ -55,6 +80,8 @@ def submit(caller, request):
                     stage=request.stage,
                     valid_from=request.valid_from,
                 ),
+                chunk,
+                (source.mission, source.silo, source.stage),
             )
             if candidates.problems or (
                 candidates.mission,
@@ -71,7 +98,7 @@ def submit(caller, request):
         rows = []
         for candidate, encoded in zip(request.candidates, selected, strict=True):
             handle = candidate.citation
-            if encoded not in prepared[(handle.item, handle.version, handle.block)]:
+            if encoded not in prepared.get((handle.item, handle.version, handle.block), set()):
                 raise Conflict()
             parameter = dictionary.get(candidate.parameter)
             kind, number, unit, low, high, problem = intake.converted(

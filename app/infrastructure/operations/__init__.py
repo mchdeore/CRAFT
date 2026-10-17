@@ -2,11 +2,13 @@
 
 import asyncio
 import inspect
+from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
 from app.infrastructure.access import PUBLIC as PUBLIC
 from app.infrastructure.access import SIGNED_IN as SIGNED_IN
+from app.infrastructure.access import Caller
 
 NONE = "NONE"
 DATA = "DATA"
@@ -25,6 +27,7 @@ def operation(
     delete: str | None = None,
     tool: bool = False,
     effects: str = NONE,
+    prepare_approved: Callable[[Caller, Any], object] | None = None,
 ) -> Any:
     from app.infrastructure.operations.pipeline import wrap
     from app.infrastructure.operations.registry import declare, registry
@@ -36,6 +39,7 @@ def operation(
             {"GET": get, "POST": post, "PUT": put, "PATCH": patch, "DELETE": delete},
             tool,
             effects,
+            prepare_approved,
         )
         wrapper = wrap(declaration)
         from dataclasses import replace

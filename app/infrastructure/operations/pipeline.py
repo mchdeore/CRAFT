@@ -448,7 +448,7 @@ def endpoint(operation: Operation) -> Any:
                     encoded(),
                     source=iterator,
                     media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
                 )
             elif inspect.iscoroutinefunction(wrapper):
                 result = await wrapper(caller, values or None)
@@ -465,12 +465,14 @@ def endpoint(operation: Operation) -> Any:
                 response = json_response(result, status)
             for action in response_actions.get() or []:
                 response.set_cookie(**action)
-            return response
         except ApiError as error:
-            return error_response(error)
+            response = error_response(error)
         finally:
             transport_request.reset(token)
             response_actions.reset(action_token)
+        if not operation.name.startswith("health."):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     handle.__dict__["__operation__"] = operation
     return handle

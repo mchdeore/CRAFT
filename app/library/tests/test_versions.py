@@ -13,6 +13,7 @@ from app import create_app
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import InvalidInput, NotFound
 from app.infrastructure.provider.simulated import SimulatedProvider
+from app.library import storage
 from app.library.diff import compare
 from app.library.handlers import (
     ChunkRange,
@@ -187,13 +188,26 @@ def test_ground_truth_versions(demo):
 
     caller = local_caller("admin", demo["settings"])
     assert len(demo["truth"]["versions"]) == 12
+    withdrawn = {row["item"] for row in demo["truth"]["deletes"]}
     for row in demo["truth"]["versions"]:
-        result = compare_versions(
-            caller,
-            CompareVersions(
-                item=row["item"], from_version=row["fromVersion"], to_version=row["toVersion"]
-            ),
+        request = CompareVersions(
+            item=row["item"], from_version=row["fromVersion"], to_version=row["toVersion"]
         )
+        if row["item"] in withdrawn:
+            with pytest.raises(NotFound):
+                compare_versions(caller, request)
+            with demo["sessions"].begin() as session:
+                item = storage.item(session, caller, row["item"])
+                assert item is not None and item["deleted_at"] is not None
+                retained = {v["version"]: v for v in storage.versions(session, row["item"])}
+                assert row["fromVersion"] in retained and row["toVersion"] in retained
+                assert storage.differences(
+                    session,
+                    retained[row["fromVersion"]]["id"],
+                    retained[row["toVersion"]]["id"],
+                )
+            continue
+        result = compare_versions(caller, request)
         assert result.blocks and not result.truncated
     with demo["sessions"].begin() as session:
         assert session.execute(select(m.version_diffs.c.seq).limit(1)).first() is not None

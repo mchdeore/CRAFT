@@ -6,6 +6,10 @@ A document ID identifies the item across name and location changes. An immutable
 
 The document library stores local originals in its local-originals mode. External-originals mode retains the intended derived data and source references. Its simulated tenant exercises listing, versions, content, extraction and reconciliation.
 
+Application document metadata, chunks, exploration, version comparisons and original downloads check current provider availability and permissions as well as indexed access. A source withdrawn or moved outside the caller's grants is unavailable even before reconciliation updates the index. Explicit historical versions remain readable while their source is active, permitted and still provides that immutable version. Missing source records, versions or original snapshots return the same response as an unreadable source.
+
+Provider metadata and original bytes are read outside database transactions. Protected operation responses, including metadata, files, authentication and errors, use `Cache-Control: no-store`. Citation checks can report withdrawal without returning source text. Cube value evidence keeps withdrawn provenance, marks the value unknown with cleared bounds, and returns an empty quote and a nonnumeric conversion message. Current resource permissions still apply.
+
 The OpenText tenant adapter reads Content Metadata Service file/version records and Content Storage Service V3 streams. It maps logical chronicle IDs separately from specific version IDs. A reported text rendition supplies derived line blocks and an extraction reference. Missing text capability leaves reconciliation partial. Listing and version cursors stay within the configured service origin, and scan limits prevent incomplete pages from establishing deletion.
 
 ## 2. Representation and relationships

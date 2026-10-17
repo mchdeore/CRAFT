@@ -11,7 +11,7 @@ def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
     return service.read_readable(caller, request.item, request.version)
 ```
 
-`@operation(access, *, get|post|put|patch|delete=path, tool=False, effects=NONE)`
+`@operation(access, *, get|post|put|patch|delete=path, tool=False, effects=NONE, prepare_approved=None)`
 
 | Declaration | Required | Values and rule |
 |---|---|---|
@@ -22,6 +22,7 @@ def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
 | `get=` … `delete=` | no | The HTTP route under `/api`. At most one |
 | `tool=True` | no | Also an MCP tool. Needs a route and a docstring (what, when, one example) |
 | `effects=` | no, default `NONE` | `NONE`, `DATA`, `DOCUMENT`, `EXTERNAL`, `FINAL`. An agent call with an effect other than `NONE` pauses for approval |
+| `prepare_approved=` | no, default `None` | Internal preparation callback for an approved synchronous effect; returns a typed server-owned snapshot before the write transaction |
 | names | generated | Operation `<feature>.<function>` (routes, logs); tool = `<function>` |
 | errors | raised | `InvalidInput`, `NotSignedIn`, `Forbidden`, `NotFound`, `Conflict`, `RateLimited`. Other failures return `internal_error` |
 

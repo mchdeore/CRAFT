@@ -18,6 +18,8 @@ The approval routes list and read requester-owned frozen actions and append an H
 
 A paused run resumes with its owned approval identifier. The server restores the saved framework interrupt and reads the decision itself. Approved synchronous local writes recheck frozen source citations and commit with their execution event. Failure rolls back the effect, rejection writes nothing and replay is refused. Tool calls and active time retain their budgets across resume. External writes require a separate recovery boundary.
 
+Source preparation and citation checks run before the approved write transaction. An internal preparation callback can return an immutable snapshot bound to the specific caller, run, conversation, tool call, approval and argument digest. The guarded invocation rechecks the same unconsumed approval, current indexed source provenance and database grants before committing. Cube publication rederives candidates from the captured source blocks with the current dictionary and scope. Provider I/O is refused inside an ambient transaction; source state is sampled during preparation. Preparation failures are recorded only while that approval remains unconsumed.
+
 Root runs review one effectful call at a time. Parallel proposals stop before any approval request or write is created. Execution binds the native tool-call identifier and frozen arguments to the specific approval. Native response streams close on completion, refusal and cancellation.
 
 ## 3. Related topics

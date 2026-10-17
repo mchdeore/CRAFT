@@ -22,6 +22,7 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 | Writes | Ordinary `/api` requests using `POST`, `PUT`, `PATCH` and `DELETE` must carry an `Origin` header from the allowed list |
 | Request ID | Every response has `X-Request-Id`. The same value appears in error bodies and server logs |
 | Unreadable records | `404`, the same as a missing record |
+| Caching | Operation responses under `/api` use `Cache-Control: no-store`, including authentication, errors, files and SSE streams |
 | Lists | Operation-specific limits; no paging. The conversation list agreement is newest first, at most 100 items |
 | Files | Sent with their media type and `X-Content-Type-Options: nosniff`. Preview is inline only for PDF, images and plain text, under `Content-Security-Policy: sandbox`; other types download. Upload: raw bytes, the name in `X-File-Name` |
 
@@ -213,6 +214,8 @@ Until the six-input confidence calibration is defined, scores remain zero, the l
 `CompareVersions` names one readable item and two positive integer versions. The response contains at most 500 ordered added, removed, changed or moved blocks, with nullable source and target positions and a truncation flag. Equal versions return an empty list. Missing or unreadable versions return 404.
 
 `CitationCheck` holds one canonical handle. It returns current, changed, newer_version or withdrawn and the latest provider version. The original is re-read outside database transactions. A row locator checks only its table row. Live source permissions apply before original bytes are read. Nonpositive positions return 400; a missing or mismatched quote returns changed. No source text is returned by these two operations.
+
+Document metadata, chunks, exploration, comparisons and original preview/download also check current provider availability, grants and the selected immutable version before serving indexed results or bytes. Unindexed withdrawal or an inaccessible current location returns `not_found`. Explicit historical versions remain readable for an active, permitted source; missing provider metadata, versions or original snapshots return `not_found`. Provider I/O occurs outside database transactions. `ValueEvidence` retains withdrawn provenance with an unknown value, cleared bounds, an empty quote and a nonnumeric conversion message; current resource permissions still apply.
 
 ## 12. Table candidate values
 

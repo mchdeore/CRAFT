@@ -2,15 +2,65 @@
 
 import math
 from collections import Counter
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 from starlette.responses import Response
 
 from app.infrastructure.access import Caller
-from app.infrastructure.database.unit_of_work import unit_of_work
-from app.infrastructure.errors import InvalidInput, NotFound
+from app.infrastructure.database.unit_of_work import has_ambient_transaction, unit_of_work
+from app.infrastructure.errors import Conflict, InvalidInput, NotFound
 from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.embed import embed, model_name
+
+if TYPE_CHECKING:
+    from app.library.handlers import ChunkText
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedSource:
+    """Server-owned source evidence sampled before an approved transaction."""
+
+    provider_root: str
+    item: str
+    version: int
+    version_id: UUID
+    version_sha256: bytes
+    block: int
+    block_id: UUID
+    locator: str
+    quote_sha256: bytes
+    path: str
+    title: str
+    mission: str | None
+    silo: str | None
+    stage: str | None
+    classification: str
+    simulated: bool
+    source_mission: str | None
+    source_silo: str | None
+    block_locator: str
+    block_sha256: bytes
+    heading_path: str
+    text: str
+
+    def chunk(self) -> "ChunkText":
+        from app.library.handlers import ChunkText, CitationHandle
+
+        return ChunkText(
+            handle=CitationHandle(
+                item=self.item,
+                version=self.version,
+                block=self.block,
+                locator=self.block_locator,
+                quote_sha256=self.block_sha256.hex(),
+                simulated=self.simulated,
+            ),
+            heading_path=self.heading_path,
+            text=self.text,
+        )
 
 
 def inspect_file(request):
@@ -104,8 +154,8 @@ def search(caller: Caller, request):
     from app.library.handlers import LibraryHit, LibraryHits
 
     sessions, settings = scope(caller)
-    provider = get_provider(settings.provider_root)
-    live = provider.items()
+    provider = source_provider(settings)
+    live = source_items(provider)
     vector = embed(request.query, caller=caller)
     with unit_of_work(sessions, read_only=True) as session:
         access = {}
@@ -213,12 +263,64 @@ def readable_version(session, caller: Caller, key: str, version: int | None):
     return item, selected, versions
 
 
+def source_item(provider, key: str):
+    if has_ambient_transaction():
+        raise NotFound()
+    try:
+        return provider.get_item(key)
+    except (KeyError, FileNotFoundError):
+        raise NotFound() from None
+
+
+def source_provider(settings):
+    if has_ambient_transaction():
+        raise NotFound()
+    return get_provider(settings.provider_root)
+
+
+def source_items(provider):
+    if has_ambient_transaction():
+        raise NotFound()
+    try:
+        return provider.items()
+    except (KeyError, FileNotFoundError):
+        raise NotFound() from None
+
+
+def source_content(provider, key: str, version: int):
+    if has_ambient_transaction():
+        raise NotFound()
+    try:
+        return provider.read_content(key, version)
+    except (KeyError, FileNotFoundError):
+        raise NotFound() from None
+
+
+def readable_source_version(session, caller: Caller, key: str, version: int | None, source):
+    item, selected, versions = readable_version(session, caller, key, version)
+    original = next(
+        (row for row in source["versions"] if row["version"] == selected["version"]), None
+    )
+    if (
+        item["deleted_at"] is not None
+        or source["deleted_at"] is not None
+        or not storage.provider_readable(session, caller, source)
+        or original is None
+        or original.get("sha256") != bytes(selected["sha256"]).hex()
+    ):
+        raise NotFound()
+    return item, selected, versions
+
+
 def document(caller: Caller, request):
     from app.library.handlers import LibraryDocument, Outline, Version
 
-    sessions, _ = scope(caller)
+    sessions, settings = scope(caller)
+    live = source_item(source_provider(settings), request.item)
     with unit_of_work(sessions, read_only=True) as session:
-        item, version, versions = readable_version(session, caller, request.item, request.version)
+        item, version, versions = readable_source_version(
+            session, caller, request.item, request.version, live
+        )
         blocks = storage.blocks(session, version["id"])
     return LibraryDocument(
         item=item["item"],
@@ -252,9 +354,12 @@ def read_chunks(caller: Caller, request):
         or request.to_block - request.from_block >= 20
     ):
         raise InvalidInput()
-    sessions, _ = scope(caller)
+    sessions, settings = scope(caller)
+    live = source_item(source_provider(settings), request.item)
     with unit_of_work(sessions, read_only=True) as session:
-        item, version, _ = readable_version(session, caller, request.item, request.version)
+        item, version, _ = readable_source_version(
+            session, caller, request.item, request.version, live
+        )
         blocks = storage.blocks(session, version["id"], request.from_block, request.to_block)
     return ChunkPage(chunks=[chunk_text(item, request.version, b) for b in blocks], truncated=False)
 
@@ -262,10 +367,11 @@ def read_chunks(caller: Caller, request):
 def explore(caller: Caller, request):
     from app.library.handlers import ChunkPage
 
-    sessions, _ = scope(caller)
+    sessions, settings = scope(caller)
+    live = source_item(source_provider(settings), request.handle.item)
     with unit_of_work(sessions, read_only=True) as session:
-        item, version, _ = readable_version(
-            session, caller, request.handle.item, request.handle.version
+        item, version, _ = readable_source_version(
+            session, caller, request.handle.item, request.handle.version, live
         )
         block = storage.blocks(session, version["id"], request.handle.block, request.handle.block)
         if (
@@ -308,7 +414,7 @@ def read_facets(caller: Caller, request):
         cached_access = {
             item: storage.provider_readable(session, caller, row) for item, row in cached.items()
         }
-    live = get_provider(settings.provider_root).items()
+    live = source_items(source_provider(settings))
     with unit_of_work(sessions, read_only=True) as session:
         live_access = {
             item: cached_access.get(item, False)
@@ -345,10 +451,15 @@ def compare_versions(caller: Caller, request):
     from app.library.diff import compare
     from app.library.handlers import DiffBlock, VersionDiff
 
-    sessions, _ = scope(caller)
+    sessions, settings = scope(caller)
+    live = source_item(source_provider(settings), request.item)
     with unit_of_work(sessions, read_only=True) as session:
-        _, before, _ = readable_version(session, caller, request.item, request.from_version)
-        _, after, _ = readable_version(session, caller, request.item, request.to_version)
+        _, before, _ = readable_source_version(
+            session, caller, request.item, request.from_version, live
+        )
+        _, after, _ = readable_source_version(
+            session, caller, request.item, request.to_version, live
+        )
         stored = (
             storage.differences(session, before["id"], after["id"])
             if request.to_version == request.from_version + 1
@@ -370,62 +481,191 @@ def compare_versions(caller: Caller, request):
 
 
 def check_citation(caller: Caller, request):
+    return checked_citation(caller, request.handle)[0]
+
+
+def checked_citation(caller: Caller, handle):
     import hashlib
 
     from app.library.citation import quote
     from app.library.convert import convert
     from app.library.handlers import CitationStatus
 
-    handle = request.handle
     if handle.version < 1 or handle.block < 1:
         raise InvalidInput()
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:
         item, version, _ = readable_version(session, caller, handle.item, handle.version)
-    provider = get_provider(settings.provider_root)
-    try:
-        live = provider.get_item(handle.item)
-    except KeyError:
-        raise NotFound() from None
+    provider = source_provider(settings)
+    live = source_item(provider, handle.item)
     with unit_of_work(sessions, read_only=True) as session:
         if not storage.provider_readable(session, caller, live):
             raise NotFound()
+    if not live["versions"]:
+        raise NotFound()
     latest = max(row["version"] for row in live["versions"])
     if live["deleted_at"] is not None:
-        return CitationStatus(status="withdrawn", latest_version=latest)
-    try:
-        source = provider.read_content(handle.item, handle.version)
-    except KeyError:
-        raise NotFound() from None
-    original_version = next(row for row in live["versions"] if row["version"] == handle.version)
+        return CitationStatus(status="withdrawn", latest_version=latest), live, None
+    original_version = next(
+        (row for row in live["versions"] if row["version"] == handle.version), None
+    )
+    if original_version is None:
+        raise NotFound()
+    source = source_content(provider, handle.item, handle.version)
+    source_sha256 = hashlib.sha256(source).digest()
     filename = original_version.get("file_name", item["path"])
     try:
         blocks = convert(source, filename)
     except (ValueError, UnicodeDecodeError):
-        return CitationStatus(status="changed", latest_version=latest)
+        return CitationStatus(status="changed", latest_version=latest), live, source_sha256
     selected = next((block for block in blocks if block.block == handle.block), None)
     actual = quote(selected.text, handle.locator, selected.locator) if selected else None
     correct = (
         actual is not None and hashlib.sha256(actual.encode()).hexdigest() == handle.quote_sha256
     )
-    return CitationStatus(
-        status="changed"
-        if not correct
-        else "newer_version"
-        if latest > handle.version
-        else "current",
-        latest_version=latest,
+    return (
+        CitationStatus(
+            status="changed"
+            if not correct
+            else "newer_version"
+            if latest > handle.version
+            else "current",
+            latest_version=latest,
+        ),
+        live,
+        source_sha256,
     )
 
 
-def original(caller: Caller, request, attachment: bool) -> Response:
+def prepare_source(caller: Caller, handle) -> PreparedSource:
+    import hashlib
+
+    from app.library.citation import quote
+
+    status, live, actual_sha256 = checked_citation(caller, handle)
+    if status.status != "current":
+        raise Conflict()
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:
-        item, version, _ = readable_version(session, caller, request.item, request.version)
-    try:
-        content = get_provider(settings.provider_root).read_content(request.item, request.version)
-    except KeyError:
-        raise NotFound() from None
+        item, version, versions = readable_source_version(
+            session, caller, handle.item, handle.version, live
+        )
+        if (
+            versions[-1]["version"] != handle.version
+            or actual_sha256 != bytes(version["sha256"])
+            or handle.simulated != item["simulated"]
+        ):
+            raise Conflict()
+        rows = storage.blocks(session, version["id"], handle.block, handle.block)
+        if not rows:
+            raise Conflict()
+        block = rows[0]
+        actual = quote(block["text"], handle.locator, block["locator"])
+        if actual is None or hashlib.sha256(actual.encode()).hexdigest() != handle.quote_sha256:
+            raise Conflict()
+        return PreparedSource(
+            provider_root=settings.provider_root,
+            item=item["item"],
+            version=version["version"],
+            version_id=version["id"],
+            version_sha256=bytes(version["sha256"]),
+            block=block["block"],
+            block_id=block["id"],
+            locator=handle.locator,
+            quote_sha256=bytes.fromhex(handle.quote_sha256),
+            path=item["path"],
+            title=item["title"],
+            mission=item["mission_key"],
+            silo=item["silo"],
+            stage=item["stage"],
+            classification=item["classification"],
+            simulated=item["simulated"],
+            source_mission=live["mission_key"],
+            source_silo=live["silo"],
+            block_locator=block["locator"],
+            block_sha256=bytes(block["text_sha256"]),
+            heading_path=block["heading_path"],
+            text=block["text"],
+        )
+
+
+def validate_prepared_source(session, caller: Caller, prepared: PreparedSource) -> None:
+    import hashlib
+
+    from app.library.citation import quote
+
+    if (
+        type(prepared) is not PreparedSource
+        or caller.settings is None
+        or caller.settings.provider_root != prepared.provider_root
+    ):
+        raise Conflict()
+    item, version, versions = readable_version(session, caller, prepared.item, prepared.version)
+    if item["deleted_at"] is not None or not storage.provider_readable(
+        session,
+        caller,
+        {"mission_key": prepared.source_mission, "silo": prepared.source_silo},
+    ):
+        raise NotFound()
+    if (
+        versions[-1]["version"] != prepared.version
+        or version["id"] != prepared.version_id
+        or bytes(version["sha256"]) != prepared.version_sha256
+        or (
+            item["path"],
+            item["title"],
+            item["mission_key"],
+            item["silo"],
+            item["stage"],
+            item["classification"],
+            item["simulated"],
+        )
+        != (
+            prepared.path,
+            prepared.title,
+            prepared.mission,
+            prepared.silo,
+            prepared.stage,
+            prepared.classification,
+            prepared.simulated,
+        )
+    ):
+        raise Conflict()
+    rows = storage.blocks(session, version["id"], prepared.block, prepared.block)
+    if not rows:
+        raise Conflict()
+    block = rows[0]
+    if (
+        block["id"] != prepared.block_id
+        or block["locator"] != prepared.block_locator
+        or bytes(block["text_sha256"]) != prepared.block_sha256
+        or block["heading_path"] != prepared.heading_path
+        or block["text"] != prepared.text
+    ):
+        raise Conflict()
+    actual = quote(block["text"], prepared.locator, block["locator"])
+    if actual is None or hashlib.sha256(actual.encode()).digest() != prepared.quote_sha256:
+        raise Conflict()
+
+
+def original(caller: Caller, request, attachment: bool) -> Response:
+    import hashlib
+
+    sessions, settings = scope(caller)
+    provider = source_provider(settings)
+    live = source_item(provider, request.item)
+    with unit_of_work(sessions, read_only=True) as session:
+        item, version, _ = readable_source_version(
+            session, caller, request.item, request.version, live
+        )
+    content = source_content(provider, request.item, request.version)
+    live = source_item(provider, request.item)
+    with unit_of_work(sessions, read_only=True) as session:
+        item, version, _ = readable_source_version(
+            session, caller, request.item, request.version, live
+        )
+    if hashlib.sha256(content).digest() != bytes(version["sha256"]):
+        raise NotFound()
     from pathlib import Path
 
     name = Path(item["path"]).name.replace('"', "").replace("\r", "").replace("\n", "")

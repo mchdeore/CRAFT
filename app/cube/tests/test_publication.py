@@ -5,13 +5,15 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
 from decimal import Decimal
+from threading import Event, local
 from uuid import uuid4
 
 import msgspec
 import pytest
 from agent_framework import ChatResponse, Content, Message
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session
 
 from app import create_app
 from app.agent import model
@@ -22,11 +24,12 @@ from app.approvals.handlers import (
     ApprovalRef,
     ApprovalRequest,
     Decision,
+    approved_preparation,
     decide_approval,
     read_approval,
     request_approval,
 )
-from app.cube import storage
+from app.cube import publication, storage
 from app.cube.handlers import (
     PrepareValues,
     SubmitValues,
@@ -38,9 +41,12 @@ from app.cube.handlers import (
 from app.cube.tests.test_intake import intake_source as intake_source
 from app.cube.tests.test_intake import table
 from app.infrastructure.database import metadata as m
+from app.infrastructure.database.unit_of_work import has_ambient_transaction
 from app.infrastructure.errors import ApiError
 from app.infrastructure.mcp.tests.http_fixture import live_server
 from app.infrastructure.operations.pipeline import ApprovalRequired
+from app.infrastructure.provider.simulated import SimulatedProvider
+from app.library.handlers import index_provider
 
 
 @pytest.fixture
@@ -191,6 +197,136 @@ def test_rejected_batch_has_no_effect(publication_source):
     assert read_approval(source["caller"], ApprovalRef(id=identifier)).status == "rejected"
 
 
+def test_registered_publication_prepares_outside_orm_transactions(publication_source, monkeypatch):
+    source = publication_source
+    request = values(source)
+    caller, identifier = approval(source, request)
+    active, seen = set(), []
+
+    def started(session, transaction):
+        active.add(transaction)
+
+    def ended(session, transaction):
+        active.discard(transaction)
+
+    def inspected(name, original):
+        def read(*args, **kwargs):
+            assert not active and not has_ambient_transaction()
+            seen.append(name)
+            return original(*args, **kwargs)
+
+        return read
+
+    for name in ("get_item", "read_content", "items"):
+        monkeypatch.setattr(
+            SimulatedProvider, name, inspected(name, getattr(SimulatedProvider, name))
+        )
+    event.listen(Session, "after_transaction_create", started)
+    event.listen(Session, "after_transaction_end", ended)
+    try:
+        result = submit_values(caller, request)
+    finally:
+        event.remove(Session, "after_transaction_create", started)
+        event.remove(Session, "after_transaction_end", ended)
+    assert result.approval_id == identifier and len(result.value_ids) == 4
+    assert {"get_item", "read_content"} <= set(seen) and not active
+    assert read_approval(source["caller"], ApprovalRef(id=identifier)).status == "executed"
+
+
+@pytest.mark.parametrize("change", ["version_hash", "block_text", "latest", "grant", "metadata"])
+def test_commit_revalidates_current_index_and_grants(publication_source, change, monkeypatch):
+    source = publication_source
+    request = values(source)
+    caller, identifier = approval(source, request)
+    prepare = publication.prepare_submission
+
+    def changed_after_preflight(caller, request):
+        prepared = prepare(caller, request)
+        evidence = prepared.sources[0]
+        if change == "latest":
+            source["provider"].write_content(source["path"], b"# New indexed source after review\n")
+            index_provider(source["settings"])
+        else:
+            with source["owner"].begin() as connection:
+                if change == "version_hash":
+                    mutation = (
+                        m.doc_versions.update()
+                        .where(m.doc_versions.c.id == evidence.version_id)
+                        .values(sha256=b"\x00" * 32)
+                    )
+                elif change == "block_text":
+                    mutation = (
+                        m.chunks.update()
+                        .where(m.chunks.c.id == evidence.block_id)
+                        .values(text="Changed indexed source text after review")
+                    )
+                elif change == "metadata":
+                    mutation = (
+                        m.provider_items.update()
+                        .where(m.provider_items.c.item == evidence.item)
+                        .values(title="Changed indexed title after review")
+                    )
+                else:
+                    mutation = m.mission_grants.delete().where(
+                        m.mission_grants.c.user_id == caller.user_id
+                    )
+                connection.execute(mutation)
+        return prepared
+
+    monkeypatch.setattr(publication, "prepare_submission", changed_after_preflight)
+    with pytest.raises(ApiError):
+        submit_values(caller, request)
+    assert not stored(source)
+    assert read_approval(source["caller"], ApprovalRef(id=identifier)).status == "failed"
+    with pytest.raises(ApprovalRequired):
+        submit_values(caller, request)
+
+
+def test_publication_refuses_wrong_preparation_type(publication_source, monkeypatch):
+    source = publication_source
+    request = values(source)
+    caller, identifier = approval(source, request)
+    monkeypatch.setattr(publication, "prepare_submission", lambda caller, request: object())
+    with pytest.raises(ApiError):
+        submit_values(caller, request)
+    assert not stored(source)
+    assert read_approval(source["caller"], ApprovalRef(id=identifier)).status == "failed"
+
+
+def test_private_preparation_is_bound_to_call_and_reset(publication_source, monkeypatch):
+    source = publication_source
+    request = values(source)
+    caller, identifier = approval(source, request)
+    submit = publication.submit
+    operation = submit_values.__operation__.name
+
+    def checked(caller, request):
+        for changed in (
+            replace(caller, user_id=uuid4()),
+            replace(caller, run_id=uuid4()),
+            replace(caller, conversation_id=uuid4()),
+            replace(caller, tool_call_id="foreign"),
+            replace(caller, origin="python"),
+            replace(caller, sessions=None),
+        ):
+            with pytest.raises(ApprovalRequired):
+                approved_preparation(changed, operation, request)
+        with pytest.raises(ApprovalRequired):
+            approved_preparation(caller, "foreign.operation", request)
+        with pytest.raises(ApprovalRequired):
+            approved_preparation(
+                caller, operation, msgspec.structs.replace(request, valid_from="2026-02-01")
+            )
+        bound, prepared = approved_preparation(caller, operation, request)
+        assert bound == identifier and type(prepared) is publication.PreparedPublication
+        return submit(caller, request)
+
+    monkeypatch.setattr(publication, "submit", checked)
+    assert submit_values(caller, request).approval_id == identifier
+    with pytest.raises(ApprovalRequired):
+        approved_preparation(caller, operation, request)
+
+
 @pytest.mark.parametrize(
     "change", ["number", "parameter", "quote", "simulated", "problem", "duplicate"]
 )
@@ -270,7 +406,7 @@ def test_partial_insert_failure_rolls_back_entire_batch(publication_source, monk
 def test_concurrent_resume_consumes_batch_once(publication_source):
     source = publication_source
     request = values(source)
-    caller, _ = approval(source, request)
+    caller, identifier = approval(source, request)
 
     def execute():
         try:
@@ -282,6 +418,53 @@ def test_concurrent_resume_consumes_batch_once(publication_source):
         results = list(executor.map(lambda _: execute(), range(2)))
     assert sum(result is not None for result in results) == 1
     assert len(stored(source)) == 4
+    assert read_approval(source["caller"], ApprovalRef(id=identifier)).status == "executed"
+
+
+def test_losing_preflight_failure_does_not_append_failed_receipt(publication_source, monkeypatch):
+    source = publication_source
+    request = values(source)
+    caller, identifier = approval(source, request)
+    prepare = publication.prepare_submission
+    failing_started, committed, attempt = Event(), Event(), local()
+
+    def preflight(caller, request):
+        prepared = prepare(caller, request)
+        if attempt.failing:
+            failing_started.set()
+            assert committed.wait(10)
+            raise RuntimeError("generated losing preparation interruption")
+        return prepared
+
+    def execute(failing):
+        attempt.failing = failing
+        if not failing:
+            assert failing_started.wait(10)
+        try:
+            return submit_values(caller, request)
+        except ApprovalRequired:
+            return None
+        finally:
+            if not failing:
+                committed.set()
+
+    monkeypatch.setattr(publication, "prepare_submission", preflight)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(execute, [True, False]))
+    winner = results[1]
+    assert results[0] is None and winner is not None
+    assert winner.approval_id == identifier
+    assert len(stored(source)) == 4
+    with source["owner"].connect() as connection:
+        events = m.metadata.tables["approval_events"]
+        terminal = list(
+            connection.execute(
+                select(events.c.kind).where(
+                    events.c.request_id == identifier, events.c.kind.in_(["executed", "failed"])
+                )
+            ).scalars()
+        )
+    assert terminal == ["executed"]
 
 
 def test_http_cannot_bypass_requester_review(publication_source):

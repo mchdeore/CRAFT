@@ -6,7 +6,7 @@ from uuid import UUID
 import msgspec
 
 from app.approvals import service
-from app.infrastructure.access import SIGNED_IN, Caller
+from app.infrastructure.access import SIGNED_IN, Caller, require
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import Shape
 
@@ -14,6 +14,12 @@ from app.infrastructure.shapes import Shape
 def approved_request_id(caller: Caller, operation_name: str, value) -> UUID:
     """Return the receipt for the exact approved call executing a database effect."""
     return service.approved_request_id(caller, operation_name, value)
+
+
+def approved_preparation(caller: Caller, operation_name: str, value) -> tuple[UUID, object]:
+    """Read only the server preparation bound to the current approved invocation."""
+    require(caller, SIGNED_IN)
+    return service.approved_preparation(caller, operation_name, value)
 
 
 Status = Literal["pending", "approved", "rejected", "executed", "failed"]

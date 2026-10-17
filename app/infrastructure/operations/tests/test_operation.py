@@ -92,6 +92,8 @@ def test_operation_validation_is_strict(settings: Settings) -> None:
         for body in [{"value": "7"}, {"value": 7, "unknown": True}]:
             response = client.post("/api/probe", json=body)
             assert response.status_code == 400 and response.json()["fields"]
+            cache_policy = response.headers.get("Cache-Control")
+            assert cache_policy == "no-store"
             with pytest.raises(InvalidInput):
                 probe(caller, body)
         assert client.post("/api/probe", content=b"{").json()["code"] == "invalid_input"
@@ -295,6 +297,8 @@ def test_native_output_constraints_are_checked_for_shapes_and_lists(settings: Se
         for path in ["/api/bad-output", "/api/bad-output-list"]:
             response = client.get(path)
             assert response.status_code == 500 and response.json()["code"] == "internal_error"
+            cache_policy = response.headers.get("Cache-Control")
+            assert cache_policy == "no-store"
     assert rows(app, "probe.bad_output")[-1]["error_code"] == "internal_error"
     assert rows(app, "probe.bad_output_list")[-1]["error_code"] == "internal_error"
 

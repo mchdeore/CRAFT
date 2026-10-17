@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.cube.handlers import compare_missions, get_value_evidence
 from app.cube.tests.test_parametric import demo_caller, install_units
 from app.infrastructure.database import metadata as m
-from app.infrastructure.errors import InvalidInput
+from app.infrastructure.errors import InvalidInput, NotFound
 from app.library.handlers import index_provider
 
 
@@ -57,24 +57,81 @@ def test_compare_scope(demo):
         app.state.engine.dispose()
 
 
-def test_evidence_status(cube_source):
+@pytest.mark.parametrize("indexed", [False, True], ids=["unindexed", "indexed"])
+def test_evidence_status(cube_source, indexed):
     install_units(cube_source)
     identifier = cube_source["add"](source_number="0.4", source_unit="kW")
     request = {"id": str(identifier)}
     initial = get_value_evidence(cube_source["caller"], request)
     matched = initial.citation_status == "current" and initial.conversion == "0.4 kW × 1000 = 400 W"
     assert matched and initial.quote
+    assert initial.value.kind == "exact" and initial.value.low == initial.value.high == 400
+    assert not initial.value.withdrawn and "400" in initial.quote
     original = cube_source["provider"].read_content(cube_source["item"], 1)
     cube_source["provider"].write_content(cube_source["path"], original.replace(b"400", b"450"))
     index_provider(cube_source["settings"])
     newer = get_value_evidence(cube_source["caller"], request)
     equal = newer.quote == initial.quote
     assert newer.citation_status == "newer_version" and equal
+    assert newer.conversion == "0.4 kW × 1000 = 400 W"
+    assert not newer.value.withdrawn and newer.value.low == newer.value.high == 400
+    assert "400" in newer.quote and "450" not in newer.quote
     cube_source["add"](450, valid=date(2026, 3, 1), version=2)
     cube_source["provider"].delete_item(cube_source["item"])
-    index_provider(cube_source["settings"])
+    if indexed:
+        index_provider(cube_source["settings"])
     withdrawn = get_value_evidence(cube_source["caller"], request)
     assert withdrawn.citation_status == "withdrawn" and withdrawn.value.withdrawn
+    assert withdrawn.value.kind == "unknown"
+    assert withdrawn.value.low is None and withdrawn.value.high is None
+    assert withdrawn.quote == ""
+    assert withdrawn.conversion == "No numeric source value."
+
+
+@pytest.mark.parametrize(
+    "change,indexed",
+    [
+        ("grant", False),
+        ("moved", False),
+        ("moved", True),
+        ("moved_withdrawn", False),
+        ("moved_withdrawn", True),
+    ],
+)
+def test_evidence_current_access_refusal_has_no_quote(cube_source, change, indexed):
+    source = cube_source
+    identifier = source["add"]()
+    request = {"id": str(identifier)}
+    with source["owner"].begin() as connection:
+        connection.execute(
+            m.mission_grants.update()
+            .where(
+                m.mission_grants.c.user_id == source["caller"].user_id,
+                m.mission_grants.c.mission_key == source["mission"],
+            )
+            .values(silo="engineering")
+        )
+    initial = get_value_evidence(source["caller"], request)
+    assert initial.citation_status == "current" and "400" in initial.quote
+    if change == "grant":
+        with source["owner"].begin() as connection:
+            connection.execute(
+                m.mission_grants.delete().where(
+                    m.mission_grants.c.user_id == source["caller"].user_id
+                )
+            )
+    else:
+        destination = source["provider"].path(source["path"].replace("/engineering/", "/budget/"))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source["provider"].path(source["path"]).rename(destination)
+        source["provider"].scan()
+        if change == "moved_withdrawn":
+            source["provider"].delete_item(source["item"])
+        if indexed:
+            index_provider(source["settings"])
+    with pytest.raises(NotFound) as denied:
+        get_value_evidence(source["caller"], request)
+    assert denied.value.status == 404
 
 
 def test_cube_contract():

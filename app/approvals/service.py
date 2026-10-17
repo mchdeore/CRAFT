@@ -3,15 +3,41 @@
 import hashlib
 import inspect
 import json
+from contextvars import ContextVar
+from dataclasses import dataclass
+from uuid import UUID
 
 import msgspec
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.approvals import storage
 from app.infrastructure.access import require
-from app.infrastructure.database.unit_of_work import approved_transaction, unit_of_work
+from app.infrastructure.database.unit_of_work import (
+    approved_transaction,
+    has_ambient_transaction,
+    unit_of_work,
+)
 from app.infrastructure.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.infrastructure.operations.pipeline import decode
 from app.infrastructure.operations.registry import registry
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _PreparedCall:
+    sessions: sessionmaker[Session]
+    user_id: UUID
+    run_id: UUID
+    conversation_id: UUID
+    tool_call_id: str | None
+    operation: str
+    approval_id: UUID
+    digest: bytes
+    prepared: object
+
+
+_prepared_call: ContextVar[_PreparedCall | None] = ContextVar(
+    "prepared_approved_call", default=None
+)
 
 
 def _sessions(caller):
@@ -159,12 +185,64 @@ def approved_request_id(caller, operation_name, value):
         return row["id"]
 
 
+def approved_preparation(caller, operation_name, value) -> tuple[UUID, object]:
+    from app.infrastructure.operations.pipeline import ApprovalRequired
+
+    prepared = _prepared_call.get()
+    if (
+        prepared is None
+        or caller.origin != "mcp"
+        or caller.sessions is not prepared.sessions
+        or caller.user_id != prepared.user_id
+        or caller.run_id != prepared.run_id
+        or caller.conversation_id != prepared.conversation_id
+        or caller.tool_call_id != prepared.tool_call_id
+        or operation_name != prepared.operation
+        or _call_digest(value) != prepared.digest
+    ):
+        raise ApprovalRequired()
+    return prepared.approval_id, prepared.prepared
+
+
 def execute_approved(caller, operation, value, invoke):
     """Commit one database effect with its event, or roll it back and retain failure."""
     from app.infrastructure.operations.pipeline import ApprovalRequired
+    from app.library.handlers import CitationCheck, prepare_source, validate_prepared_source
 
+    if (
+        caller.origin != "mcp"
+        or caller.sessions is None
+        or caller.user_id is None
+        or caller.run_id is None
+        or caller.conversation_id is None
+        or has_ambient_transaction()
+    ):
+        raise ApprovalRequired()
+    digest = _call_digest(value)
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        frozen = storage.approved_call(
+            session,
+            caller.user_id,
+            caller.run_id,
+            caller.conversation_id,
+            operation.name,
+            digest,
+            caller.tool_call_id,
+        )
+        if frozen is None:
+            raise ApprovalRequired()
     failure = None
     result = None
+    evidence = []
+    prepared = None
+    try:
+        for source in frozen["evidence"]:
+            check = msgspec.convert({"handle": source["handle"]}, CitationCheck)
+            evidence.append(prepare_source(caller, check.handle))
+        if operation.prepare_approved is not None:
+            prepared = operation.prepare_approved(caller, value)
+    except Exception as error:
+        failure = error
     with unit_of_work(_sessions(caller)) as session:
         storage.require_run(session, caller.user_id, caller.run_id, caller.conversation_id)
         row = storage.approved_call(
@@ -173,21 +251,40 @@ def execute_approved(caller, operation, value, invoke):
             caller.run_id,
             caller.conversation_id,
             operation.name,
-            _call_digest(value),
+            digest,
             caller.tool_call_id,
         )
-        if row is None:
+        if (
+            row is None
+            or row["id"] != frozen["id"]
+            or row["evidence"] != frozen["evidence"]
+            or _call_digest(value) != digest
+        ):
             raise ApprovalRequired()
         try:
             with session.begin_nested(), approved_transaction(caller.sessions, session):
-                from app.library.handlers import CitationCheck, check_citation
-
-                for evidence in row["evidence"]:
-                    check = msgspec.convert({"handle": evidence["handle"]}, CitationCheck)
-                    if check_citation(caller, check).status != "current":
-                        raise Conflict()
-                result = invoke()
-                storage.append_event(session, row["id"], "executed", caller.user_id, None)
+                if failure is not None:
+                    raise failure
+                for source in evidence:
+                    validate_prepared_source(caller, session, source)
+                token = _prepared_call.set(
+                    _PreparedCall(
+                        sessions=caller.sessions,
+                        user_id=caller.user_id,
+                        run_id=caller.run_id,
+                        conversation_id=caller.conversation_id,
+                        tool_call_id=caller.tool_call_id,
+                        operation=operation.name,
+                        approval_id=row["id"],
+                        digest=digest,
+                        prepared=prepared,
+                    )
+                )
+                try:
+                    result = invoke()
+                    storage.append_event(session, row["id"], "executed", caller.user_id, None)
+                finally:
+                    _prepared_call.reset(token)
         except Exception as error:
             storage.append_event(session, row["id"], "failed", caller.user_id, None)
             failure = error
