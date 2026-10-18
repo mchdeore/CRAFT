@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-from uuid import uuid4
 
 import msgspec
 import pytest
@@ -12,7 +11,6 @@ from sqlalchemy import select
 
 from app.agent.fake import FakeChatClient
 from app.agent.handlers import AskAgent, ask_agent
-from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.operations.registry import registry, tool_operations
 from app.library.tests.conftest import library as library
@@ -60,14 +58,14 @@ def test_fake_catalog_intents_request_actual_operations(question, expected):
     assert contents[0].arguments in ({}, {"limit": 25})
 
 
-def test_fake_formats_actual_capabilities_and_explains_empty_saved_skills():
-    result = capabilities(Caller(user_id=uuid4()))
+def test_fake_formats_actual_capabilities_and_explains_empty_saved_skills(chat):
+    result = capabilities(chat["caller"])
     text = response("List available tools", result).text
     for tool in result.tools:
         assert tool.name in text
     assert len(text) <= 12000
     skills = response("List skills", result).text.lower()
-    assert "saved skills" in skills and "not installed" in skills
+    assert "saved skills" in skills and "no saved skills yet" in skills
     assert not any(tool.name in skills for tool in result.tools)
 
 
@@ -125,7 +123,7 @@ def test_fake_catalog_runs_actual_authenticated_mcp_and_persists_answer(chat, qu
     ]
     assert any(message.get("content") == result.answer for message in saved_messages)
     if "skills" in question.lower():
-        assert "saved skills" in result.answer.lower() and "not installed" in result.answer.lower()
+        assert "no saved skills yet" in result.answer.lower()
     elif expected == "tools.list_capabilities":
         for operation in tool_operations(registry, agent=True):
             assert operation.tool_name in result.answer

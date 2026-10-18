@@ -47,13 +47,13 @@ class Capability(Shape):
 class CapabilityCatalog(Shape):
     tools: list[Capability]
     skills: list[str]
-    skills_status: Literal["not_installed"]
+    skills_status: Literal["not_installed", "installed"]
 
 
 @operation(SIGNED_IN, get="/tools/capabilities", tool=True)
 def list_capabilities(caller: Caller) -> CapabilityCatalog:
-    """List available agent tools and whether saved skills are installed."""
-    return service.capabilities()
+    """List available read tools and up to 100 owned saved-skill names."""
+    return service.capabilities(caller)
 
 
 @operation(SIGNED_IN, post="/tools/chart", tool=True)

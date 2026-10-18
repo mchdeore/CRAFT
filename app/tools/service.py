@@ -16,8 +16,9 @@ from app.infrastructure.errors import ApiError, InvalidInput, TooLarge
 from app.infrastructure.operations import observe
 
 
-def capabilities():
+def capabilities(caller):
     from app.infrastructure.operations.registry import registry, tool_operations
+    from app.skills.handlers import SkillList, list_skills
     from app.tools.handlers import Capability, CapabilityCatalog
 
     tools = [
@@ -29,7 +30,12 @@ def capabilities():
             tool_operations(registry, agent=True), key=lambda operation: operation.tool_name
         )
     ]
-    return CapabilityCatalog(tools=tools, skills=[], skills_status="not_installed")
+    catalog = list_skills(caller, SkillList(limit=100))
+    return CapabilityCatalog(
+        tools=tools,
+        skills=[definition.name for definition in catalog.items],
+        skills_status="installed",
+    )
 
 
 class NotConfigured(ApiError):

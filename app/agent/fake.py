@@ -132,7 +132,7 @@ def checked_catalog(value, kind: str, depth: int = 0):
             if kind == "documents":
                 return msgspec.convert(value, DocumentCatalog, strict=True)
             catalog = msgspec.convert(value, CapabilityCatalog, strict=True)
-            return None if catalog.skills else catalog
+            return None if catalog.skills and catalog.skills_status != "installed" else catalog
         except (msgspec.ValidationError, TypeError):
             pass
         if "structuredContent" in value:
@@ -157,6 +157,15 @@ def catalog_text(value: str):
 
 def catalog_summary(catalog, kind: str):
     if kind == "skills":
+        if catalog.skills_status == "installed":
+            lines = ["Saved skills available (overview limit 100):"]
+            lines.extend(f"- {catalog_text(name)}" for name in catalog.skills)
+            lines.append(
+                "Open Skills to select a saved revision for a new run."
+                if catalog.skills
+                else "No saved skills yet. Definitions can be created in the Skills page."
+            )
+            return "\n".join(lines)
         return (
             "Saved skills can be edited in the Skills page. "
             "Their use by the agent is not installed."
@@ -164,7 +173,9 @@ def catalog_summary(catalog, kind: str):
     if kind == "tools":
         lines = [
             "Available tools:",
-            "Saved skills can be edited in the Skills page; agent skill use is not installed.",
+            "Saved skills support native execution."
+            if catalog.skills_status == "installed"
+            else "Saved skills can be edited in the Skills page; agent skill use is not installed.",
         ]
         rows = [f"- `{tool.name}`: {catalog_text(tool.description)}" for tool in catalog.tools]
     else:

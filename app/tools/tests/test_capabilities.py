@@ -5,7 +5,6 @@ import inspect
 from collections.abc import Coroutine
 from dataclasses import replace
 from typing import Any, cast
-from uuid import uuid4
 
 import msgspec
 import pytest
@@ -27,12 +26,12 @@ def catalog(caller: Caller) -> handlers.CapabilityCatalog:
     return cast(handlers.CapabilityCatalog, result)
 
 
-def test_capabilities_match_actual_agent_allowlist():
-    result = catalog(Caller(user_id=uuid4()))
+def test_capabilities_match_actual_agent_allowlist(chat):
+    result = catalog(chat["caller"])
     expected = sorted(op.tool_name for op in tool_operations(registry, agent=True))
     assert [tool.name for tool in result.tools] == expected
     assert result.skills == []
-    assert result.skills_status == "not_installed"
+    assert result.skills_status == "installed"
     assert "ask_agent" not in expected
     for tool in result.tools:
         operation = next(op for op in registry.values() if op.tool_name == tool.name)
@@ -43,7 +42,7 @@ def test_capabilities_match_actual_agent_allowlist():
     assert set(msgspec.to_builtins(result)) == {"tools", "skills", "skillsStatus"}
 
 
-def test_capabilities_follow_registry_changes_and_effect_filter(monkeypatch):
+def test_capabilities_follow_registry_changes_and_effect_filter(chat, monkeypatch):
     def generated_probe(caller: Caller) -> None:
         """Inspect generated probe metadata safely."""
 
@@ -62,7 +61,7 @@ def test_capabilities_follow_registry_changes_and_effect_filter(monkeypatch):
     monkeypatch.setitem(registry, effect.name, effect)
     private = replace(probe, name="probe.generated_private_probe", tool=False)
     monkeypatch.setitem(registry, private.name, private)
-    result = catalog(Caller(user_id=uuid4()))
+    result = catalog(chat["caller"])
     names = [tool.name for tool in result.tools]
     assert "generated_catalog_probe" in names
     assert not {"generated_effect_probe", "generated_private_probe"}.intersection(names)

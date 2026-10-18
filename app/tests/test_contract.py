@@ -96,6 +96,12 @@ def test_python_shapes_match_compiled_typescript() -> None:
         python = root_schema(msgspec.json.schema(shape))
         assert set(declared["properties"]) == set(python["properties"])
         assert set(declared.get("required", [])) == set(python.get("required", []))
+        if shape is CapabilityCatalog:
+            assert declared["properties"]["skills"]["items"]["type"] == "string"
+            assert python["properties"]["skills"]["items"]["type"] == "string"
+            assert set(declared["properties"]["skillsStatus"]["enum"]) == set(
+                python["properties"]["skillsStatus"]["enum"]
+            )
         if shape is Me:
             jsonschema.validate(
                 json.loads((ROOT / "api/examples/session.json").read_text()), compiled

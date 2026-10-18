@@ -66,7 +66,7 @@ def save_skill(caller: Caller, request: SaveSkill) -> Skill:
     return Skill(**service.save(caller, request))
 
 
-@operation(SIGNED_IN, get="/skills")
+@operation(SIGNED_IN, get="/skills", tool=True)
 def list_skills(caller: Caller, request: SkillList) -> SkillCatalog:
     """Page through current owned definitions; references reflect the current tool registry."""
     result = service.list_owned(caller, request.after, request.limit)
@@ -81,7 +81,7 @@ def read_skill(caller: Caller, request: SkillRef) -> Skill:
     return Skill(**service.read(caller, request.id))
 
 
-@operation(SIGNED_IN, get="/skills/{id}/versions")
+@operation(SIGNED_IN, get="/skills/{id}/versions", tool=True)
 def read_skill_version(caller: Caller, request: SkillVersionRef) -> Skill:
     """Read a particular immutable revision without substituting the current definition."""
     return Skill(**service.read(caller, request.id, request.revision))

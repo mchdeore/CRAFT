@@ -98,7 +98,7 @@ export interface FacetExplanation {
 }
 export interface SimilarityExplanation { facets: FacetExplanation[] }
 export interface Capability { name: string; description: string }
-export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" }
+export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" | "installed" }
 export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
@@ -126,7 +126,8 @@ export interface RunRecovery {
 }
 export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
 export type RetrievalPath = RetrievalStep[];
-export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
+export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath; skills?: SkillVersionRef[] }
+export interface SkillUsage { runId: Id; skills: SkillVersionRef[] }
 export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
 export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }
 
