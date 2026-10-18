@@ -55,7 +55,8 @@ Errors from ordinary `/api` routes use this body. Readiness returns `Health` wit
 | Agent runs | 1 active per conversation (`409`), 3 per account (`429`) |
 | One run | 20 tool calls, 120 seconds |
 | Library search | 1 to 500 query characters, at most 8 results |
-| Document catalog | default25, limit1 to50; scan at most200 candidate source IDs; explicit truncation |
+| Document catalog | Default 25, limit 1 to 50; scan at most 200 candidate source IDs; explicit truncation |
+| Approval decision note | Optional or null; text at most 2,000 characters |
 | Chunk read | At most 20 blocks; explore before/after each 0 to 10, default 2 |
 | Summary upload | 25 MB; at most 100,000 converted characters |
 | Version differences | At most 500 blocks |
@@ -134,7 +135,7 @@ Document catalogs recheck live provider grants and indexed current version hashe
 
 ## 6. Agent tools
 
-Input types in this table include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The runtime calls the registered read tools through native HTTP MCP. All built tool effects are `NONE`.
+Input types include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The runtime calls them through native HTTP MCP. Read tools declare `NONE`. Note changes and value submission declare `DATA` and require requester approval when called by the agent.
 
 | Tool | Route | Input type | Effects |
 |---|---|---|---|
@@ -143,7 +144,7 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `check_citation` | `POST /api/library/citations/check` | `CitationCheck` | `NONE` |
 | `compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `NONE` |
 | `compare_versions` | `GET /api/library/documents/:item/compare` | `CompareVersions` | `NONE` |
-| `delete_note` | `DELETE /api/notes/:id` | `NoteRef` | `NONE` |
+| `delete_note` | `DELETE /api/notes/:id` | `NoteRef` | `DATA` |
 | `explain_similarity` | `POST /api/cube/similar/explain` | `ExplainSimilarity` | `NONE` |
 | `explore` | `POST /api/library/explore` | `ExploreInput` | `NONE` |
 | `find_missions` | `POST /api/cube/find` | `FindMissions` | `NONE` |
@@ -162,9 +163,9 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
-| `write_note` | `PUT /api/notes` | `WriteNote` | `NONE` |
+| `write_note` | `PUT /api/notes` | `WriteNote` | `DATA` |
 
-`/mcp` is a stateless JSON MCP mount outside the ordinary route map. It reuses the same registry server as standard input and output. The server lists every `tool=True` operation; the native framework transport applies its read-tool allowlist. Private handlers and observations are absent. Effectful calls return `approval_required`; a run credential grants no write approval.
+`/mcp` is a stateless JSON MCP mount outside the ordinary route map. It reuses the same registry server as standard input and output and lists every `tool=True` operation. Root runs offer read tools and approval-required writes; the single-call query helper offers read tools only. Private handlers and observations are absent. Unapproved or unsupported effectful calls return `approval_required`; a run credential alone grants no approval.
 
 Authentication requires `Authorization: Bearer` with the current run credential. Missing, malformed, unknown, expired or revoked credentials return HTTP 401 and `WWW-Authenticate: Bearer` before a protocol tool executes. A browser cookie alone is refused. Tool errors carry safe code/message objects in structured and text content. `craft/toolCallId` metadata links the model call; identity and parent context load from server-owned state. Raw credentials stay outside browser storage and model arguments. The loopback target and lifetime follow section 3 of the specification.
 
@@ -392,18 +393,18 @@ export interface Approval {
 }
 
 export interface ApprovalDetail extends Approval {
-  arguments: Record<string, unknown>; evidence: Citation[]; confidence?: Confidence;
+  arguments: Record<string, unknown>; evidence: Record<string, unknown>[];
   reasoning: string;                   // why the agent requests this action
-  retrievalPath: RetrievalPath;        // how it found the evidence
+  retrievalPath: Record<string, unknown>[]; // frozen retrieval records
   events: ApprovalEvent[];
 }
 
 export interface ApprovalEvent {
   kind: "requested" | "approved" | "rejected" | "executed" | "failed";
-  actorId: Id | null; at: Timestamp; note?: string;                  // null actor = the system
+  actorId: Id | null; at: Timestamp; note?: string | null;           // null actor = the system
 }
 
-export interface Decision { approve: boolean; note?: string }
+export interface Decision { approve: boolean; note?: string | null }
 
 export interface SubmitValues {
   mission: string; silo: string; stage: string | null; validFrom: string;
@@ -425,6 +426,9 @@ export interface SaveView {
 import type * as T from "./types";
 import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
 export interface Routes {
+  "GET /api/approvals": { query: { status?: T.ApprovalStatus }; response: T.Approval[] };
+  "GET /api/approvals/:id": { response: T.ApprovalDetail };
+  "POST /api/approvals/:id/decision": { body: T.Decision; response: T.Approval };
   "GET /api/tools": { response: T.ToolInfo[] };
   "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
   "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };

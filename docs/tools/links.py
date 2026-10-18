@@ -70,11 +70,7 @@ for line in text.splitlines():
         if source_mode == "github":
             url = f"https://github.com/{repository}/{kind}/{revision}/{path}"
         else:
-            url = (
-                "./index.md#2-application-concepts"
-                if kind == "tree"
-                else "./" + path.removeprefix("docs/")
-            )
+            url = "./index.md#concepts" if kind == "tree" else "./" + path.removeprefix("docs/")
         line = line.replace(source[0], f"[Source]({url})")
         line = line.rstrip().removesuffix("|").rstrip() + f"<br>Updated {date} |"
         linked.add(pdf[1])

@@ -33,4 +33,6 @@ Topic pages link to the canonical contract and specification sections. Build the
 docs/tools/build.sh
 ```
 
+The build stages versioned public documents and adds a Markdown download and a GitHub edit link to each topic. Downloads contain the public source file. The site check verifies those links and refuses hidden files, scripts and data artifacts in the published output.
+
 See [components](components.md), [connections](../spec/02-connections.md), [API contract](../API-Contract.md) and [document downloads](../downloads.md).

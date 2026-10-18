@@ -4,7 +4,7 @@
 
 ## Documents
 
-Downloads use Portable Document Format (PDF). API means application programming interface.
+PDF downloads preserve the document layout. Each topic page also has a Markdown source download and a GitHub edit link. API means application programming interface.
 
 | Document | Files and date |
 |---|---|

@@ -31,19 +31,13 @@ The development server listens on port 8000. Check readiness with `curl -i local
 
 ## Documents
 
-[Document downloads](https://mchdeore.github.io/CRAFT/) | [Specification](docs/spec/) | [API Contract](docs/API-Contract.md) | [Dependencies and Integration](docs/Dependencies-and-Integration.md)
+The [public wiki](https://mchdeore.github.io/CRAFT/) has topic guides, the specification and API reference. Every topic includes a Markdown download and a GitHub edit link. The public site also includes a simulated preview; the application runs separately with authentication.
+
+[Topic index](docs/index.md) · [API contract](docs/API-Contract.md) · [Dependencies](docs/Dependencies-and-Integration.md)
+
+Build the wiki and PDF downloads with `docs/tools/build.sh`.
 
 ## Contributing
 
 Fork the repository, create a branch, run the checks in `.github/workflows/ci.yml`, and open a pull request. Only the maintainer merges.
 
-## Kept locally
-
-`CRAFT-Data-Lake-Import-2026-10-14.zip`: data lake import from the president's document drive, messy documents from students and peers with example data for the database, and sample data for use-case demos; original external data documents as received on 14 October 2026.
-
-
-## Documentation
-
-The [topic index](docs/index.md) links the application concepts, local libraries and canonical reference pages. [Development](docs/wiki/development.md) describes the shared environment and checks. [Components](docs/wiki/components.md) identifies the owning code.
-
-Build the topic site and formatted downloads with `docs/tools/build.sh`. The documentation dependency group supplies the site generator; the existing print path supplies the specification PDFs.
