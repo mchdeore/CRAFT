@@ -170,6 +170,14 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 
 Authentication requires `Authorization: Bearer` with the current run credential. Missing, malformed, unknown, expired or revoked credentials return HTTP 401 and `WWW-Authenticate: Bearer` before a protocol tool executes. A browser cookie alone is refused. Tool errors carry safe code/message objects in structured and text content. `craft/toolCallId` metadata links the model call; identity and parent context load from server-owned state. Raw credentials stay outside browser storage and model arguments. The loopback target and lifetime follow section 3 of the specification.
 
+### Tool reference
+
+Signed-in users can fetch `GET /api/tools` to inspect registered tools. Each entry includes its description, route, approval metadata, input/output JSON schemas and `availableIn` channels: `api`, `mcp`, `chat` and `read_only_query`. These channels describe tool membership; access checks and service configuration still apply.
+
+`outputSchema` describes the native JSON result. HTTP returns 204 for no result. MCP sends JSON text and wraps list results in `structuredContent.items`; a null result has empty structured content. Raw responses and streams have `outputSchema: null`. The input schema is shared with MCP.
+
+`GET /api/tools/capabilities` keeps the read-only agent catalog. Saved skills remain `not_installed` until their storage and runtime integration are available.
+
 ## 7. Chat stream
 
 The chat route accepts AG-UI's `RunAgentInput`. `threadId` identifies the conversation. A new `runId` is a UUID echoed in `RUN_STARTED`; reuse without resume returns `409`. A paused run resumes with the same identifiers and `resume: {"approvalId": "…"}`. The server requires a requester-owned approved or rejected decision, restores its saved framework interrupt and supplies the decision itself. Browser approval booleans, changed arguments, foreign identifiers, pending decisions and replay are refused. Rejection executes no write. Approved synchronous local writes commit their effect and execution event together; failure rolls back the effect and records failure.
@@ -356,6 +364,9 @@ export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
   needsApproval: boolean; route: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown> | null;
+  availableIn: ("api" | "mcp" | "chat" | "read_only_query")[];
 }
 
 export interface Citation {

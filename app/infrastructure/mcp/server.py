@@ -15,16 +15,7 @@ from app.infrastructure.access import Caller
 from app.infrastructure.errors import ApiError, NotFound
 from app.infrastructure.operations.context import CallContext, current_call
 from app.infrastructure.operations.registry import Operation, tool_named, tool_operations
-
-
-def input_schema(operation: Operation) -> dict[str, Any]:
-    if operation.input is None:
-        return {"type": "object", "properties": {}, "additionalProperties": False}
-    schema = msgspec.json.schema(operation.input)
-    if "$ref" in schema:
-        root = schema["$ref"].rsplit("/", 1)[-1]
-        return {**schema["$defs"][root], "$defs": schema["$defs"]}
-    return schema
+from app.infrastructure.operations.schemas import input_schema as input_schema
 
 
 def error_result(error: ApiError) -> CallToolResult:
