@@ -5,6 +5,8 @@ export interface Routes {
   "GET /api/approvals/:id": { response: T.ApprovalDetail };
   "POST /api/approvals/:id/decision": { body: T.Decision; response: T.Approval };
   "GET /api/tools": { response: T.ToolInfo[] };
+  "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
+  "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };
   "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
   "POST /api/cube/values": { body: T.SubmitValues; response: T.ValueReceipt };

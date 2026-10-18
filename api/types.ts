@@ -17,6 +17,9 @@ export interface ChunkText { handle: CitationHandle; headingPath: string; text: 
 export interface LibraryHit { kind: "chunk" | "document"; handle: CitationHandle; title: string; headingPath: string; text: string; score: number; tags: Tags; classification: Classification; before: ChunkText | null; after: ChunkText | null }
 export interface LibraryHits { hits: LibraryHit[]; truncated: boolean }
 export interface DocumentRef { item: string; version?: number }
+export interface DocumentList { limit?: number }
+export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
+export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
@@ -94,6 +97,8 @@ export interface FacetExplanation {
   sources: string[]; otherSources: string[];
 }
 export interface SimilarityExplanation { facets: FacetExplanation[] }
+export interface Capability { name: string; description: string }
+export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" }
 export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";

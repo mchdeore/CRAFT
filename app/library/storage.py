@@ -49,6 +49,21 @@ def item(session: Session, caller: Caller, key: str):
     )
 
 
+def catalog_items(session: Session, caller: Caller):
+    """Take at most 200 readable indexed IDs plus a scan-limit sentinel."""
+    indexed = (
+        select(m.doc_versions.c.id).where(m.doc_versions.c.item == m.provider_items.c.item).exists()
+    )
+    return list(
+        session.execute(
+            select(m.provider_items.c.item)
+            .where(readable(caller), m.provider_items.c.deleted_at.is_(None), indexed)
+            .order_by(m.provider_items.c.item)
+            .limit(201)
+        ).scalars()
+    )
+
+
 def versions(session: Session, key: str):
     return (
         session.execute(

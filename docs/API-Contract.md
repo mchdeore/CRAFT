@@ -55,6 +55,7 @@ Errors from ordinary `/api` routes use this body. Readiness returns `Health` wit
 | Agent runs | 1 active per conversation (`409`), 3 per account (`429`) |
 | One run | 20 tool calls, 120 seconds |
 | Library search | 1 to 500 query characters, at most 8 results |
+| Document catalog | default25, limit1 to50; scan at most200 candidate source IDs; explicit truncation |
 | Chunk read | At most 20 blocks; explore before/after each 0 to 10, default 2 |
 | Summary upload | 25 MB; at most 100,000 converted characters |
 | Version differences | At most 500 blocks |
@@ -75,6 +76,8 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/approvals/:id` | — | `ApprovalDetail` | signed in; requester ownership | — |
 | `POST /api/approvals/:id/decision` | `Decision` | `Approval` | HTTP requester only | — |
 | `GET /api/tools` | — | `ToolInfo[]` | signed in; live resource access | — |
+| `GET /api/tools/capabilities` | — | `CapabilityCatalog` | signed in | `list_capabilities` |
+| `GET /api/library/documents` | —; query `DocumentList` | `DocumentCatalog` | signed in; current readable indexed sources | `list_documents` |
 | `POST /api/agent/runs` | `RunAgentInput` | `AG-UI event stream` | signed in; live resource access | — |
 | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | signed in; live resource access | `prepare_values` |
 | `POST /api/cube/values` | `SubmitValues` | `ValueReceipt` | signed in; requester-approved batch | `submit_values` |
@@ -127,6 +130,8 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/drafts` | `NewDraft` | `Draft` | signed in; `save_draft`, pauses for approval | B25 |
 | `POST /api/cube/views` | `SaveView` | `WorkspaceFile` | signed in; `save_view`, DOCUMENT, approval | B27 |
 
+Document catalogs recheck live provider grants and indexed current version hashes before returning titles. Catalogs contain safe source metadata and do not expose arbitrary database rows. Capability catalogs use the current read-only agent tool registry. An empty skills list with `skillsStatus: "not_installed"` identifies the absence of saved skills.
+
 ## 6. Agent tools
 
 Input types in this table include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The runtime calls the registered read tools through native HTTP MCP. All built tool effects are `NONE`.
@@ -148,6 +153,8 @@ Input types in this table include path fields; ordinary GET routes carry the oth
 | `list_missions` | `GET /api/cube/missions` | `ListMissions` | `NONE` |
 | `list_notes` | `GET /api/notes` | `NoteList` | `NONE` |
 | `list_parameters` | `GET /api/cube/parameters` | `none` | `NONE` |
+| `list_capabilities` | `GET /api/tools/capabilities` | — | `NONE` |
+| `list_documents` | `GET /api/library/documents` | `DocumentList` | `NONE` |
 | `make_chart` | `POST /api/tools/chart` | `ChartInput` | `NONE` |
 | `prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `NONE` |
 | `submit_values` | `POST /api/cube/values` | `SubmitValues` | `DATA` |
@@ -251,6 +258,9 @@ export interface ChunkText { handle: CitationHandle; headingPath: string; text: 
 export interface LibraryHit { kind: "chunk" | "document"; handle: CitationHandle; title: string; headingPath: string; text: string; score: number; tags: Tags; classification: Classification; before: ChunkText | null; after: ChunkText | null }
 export interface LibraryHits { hits: LibraryHit[]; truncated: boolean }
 export interface DocumentRef { item: string; version?: number }
+export interface DocumentList { limit?: number }
+export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
+export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
@@ -326,6 +336,8 @@ export interface FacetExplanation {
   sources: string[]; otherSources: string[];
 }
 export interface SimilarityExplanation { facets: FacetExplanation[] }
+export interface Capability { name: string; description: string }
+export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" }
 export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
@@ -414,6 +426,8 @@ import type * as T from "./types";
 import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
 export interface Routes {
   "GET /api/tools": { response: T.ToolInfo[] };
+  "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
+  "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };
   "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
   "POST /api/cube/values": { body: T.SubmitValues; response: T.ValueReceipt };
@@ -469,6 +483,8 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/approvals` | `Approval[]` | `api/examples/approvals.json` |
 | `GET /api/approvals/:id` | `ApprovalDetail` | `api/examples/approval-detail.json` |
 | `POST /api/approvals/:id/decision` | `Approval` | `api/examples/approval.json` |
+| `GET /api/tools/capabilities` | `CapabilityCatalog` | `api/examples/capabilities.json` |
+| `GET /api/library/documents` | `DocumentCatalog` | `api/examples/document-catalog.json` |
 | `GET /api/tools` | `ToolInfo[]` | `api/examples/tools.json` |
 | `POST /api/cube/candidates` | `Candidates` | `api/examples/candidates.json` |
 | `POST /api/cube/values` | `ValueReceipt` | `api/examples/value-receipt.json` |

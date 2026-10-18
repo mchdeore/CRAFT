@@ -10,6 +10,8 @@ from app.accounts.handlers import Me, SignIn
 from app.cube.handlers import MissionRef, ValueRef
 from app.infrastructure.paths import ROOT
 from app.infrastructure.shapes import ApiErrorBody
+from app.library.handlers import CatalogDocument, DocumentCatalog, DocumentList
+from app.tools.handlers import Capability, CapabilityCatalog
 
 
 def test_session_contract() -> None:
@@ -59,12 +61,22 @@ def root_schema(schema: dict) -> dict:
 def test_python_shapes_match_compiled_typescript() -> None:
     import jsonschema
 
-    for shape in [Me, SignIn, MissionRef, ValueRef]:
+    for shape in [
+        Me,
+        SignIn,
+        MissionRef,
+        ValueRef,
+        Capability,
+        CapabilityCatalog,
+        DocumentList,
+        CatalogDocument,
+        DocumentCatalog,
+    ]:
         compiled = typescript_schema(shape.__name__)
         declared = root_schema(compiled)
         python = root_schema(msgspec.json.schema(shape))
         assert set(declared["properties"]) == set(python["properties"])
-        assert set(declared["required"]) == set(python["required"])
+        assert set(declared.get("required", [])) == set(python.get("required", []))
         if shape is Me:
             jsonschema.validate(
                 json.loads((ROOT / "api/examples/session.json").read_text()), compiled

@@ -39,6 +39,23 @@ class CalculationResult(Shape):
     checked_at: str
 
 
+class Capability(Shape):
+    name: Annotated[str, msgspec.Meta(pattern=r"^[a-z0-9_]{1,64}$")]
+    description: Annotated[str, msgspec.Meta(min_length=1, max_length=240)]
+
+
+class CapabilityCatalog(Shape):
+    tools: list[Capability]
+    skills: list[str]
+    skills_status: Literal["not_installed"]
+
+
+@operation(SIGNED_IN, get="/tools/capabilities", tool=True)
+def list_capabilities(caller: Caller) -> CapabilityCatalog:
+    """List available agent tools and whether saved skills are installed."""
+    return service.capabilities()
+
+
 @operation(SIGNED_IN, post="/tools/chart", tool=True)
 async def make_chart(caller: Caller, request: ChartInput) -> ChartResult:
     """Render inline chart data locally; keep a generated file in the active workspace."""

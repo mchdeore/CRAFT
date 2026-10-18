@@ -1,6 +1,7 @@
 """Resource checks precede retrieval; services select short read transactions."""
 
 import math
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -310,6 +311,51 @@ def readable_source_version(session, caller: Caller, key: str, version: int | No
     ):
         raise NotFound()
     return item, selected, versions
+
+
+def documents(caller: Caller, request):
+    from app.library.handlers import CatalogDocument, DocumentCatalog
+
+    sessions, settings = scope(caller)
+    provider = source_provider(settings)
+    with unit_of_work(sessions, read_only=True) as session:
+        candidates = storage.catalog_items(session, caller)
+    rows = []
+    for key in candidates[:200]:
+        try:
+            live = source_item(provider, key)
+            with unit_of_work(sessions, read_only=True) as session:
+                _, selected, _ = readable_source_version(session, caller, key, None, live)
+                if max(row["version"] for row in live["versions"]) != selected["version"]:
+                    continue
+                version = selected["version"]
+        except NotFound:
+            continue
+        title = live.get("title")
+        classification = live.get("classification")
+        simulated = live.get("simulated")
+        if (
+            not isinstance(title, str)
+            or classification not in {"unclassified", "protected-a", "protected-b"}
+            or not isinstance(simulated, bool)
+        ):
+            continue
+        title = "".join(char for char in title if not unicodedata.category(char).startswith("C"))
+        rows.append(
+            CatalogDocument(
+                item=key,
+                title=title.strip()[:200] or "Untitled document",
+                version=version,
+                classification=classification,
+                simulated=simulated,
+            )
+        )
+        if len(rows) > request.limit:
+            break
+    return DocumentCatalog(
+        documents=rows[: request.limit],
+        truncated=len(candidates) > 200 or len(rows) > request.limit,
+    )
 
 
 def document(caller: Caller, request):

@@ -17,6 +17,29 @@ Classification = Literal["unclassified", "protected-a", "protected-b"]
 Facet = Literal["purpose", "design", "operations", "program", "cost_and_risk"]
 
 
+class DocumentList(Shape):
+    limit: Annotated[int, msgspec.Meta(ge=1, le=50)] = 25
+
+
+class CatalogDocument(Shape):
+    item: Annotated[str, msgspec.Meta(pattern=r"^itm_[0-9a-f]{12}$")]
+    title: Annotated[str, msgspec.Meta(min_length=1, max_length=200)]
+    version: Annotated[int, msgspec.Meta(ge=1)]
+    classification: Classification
+    simulated: bool
+
+
+class DocumentCatalog(Shape):
+    documents: list[CatalogDocument]
+    truncated: bool
+
+
+@operation(SIGNED_IN, get="/library/documents", tool=True)
+def list_documents(caller: Caller, request: DocumentList) -> DocumentCatalog:
+    """List currently readable indexed documents within bounded scan and result limits."""
+    return service.documents(caller, request)
+
+
 class FacetRequest(Shape):
     missions: list[str]
     facets: list[Facet]

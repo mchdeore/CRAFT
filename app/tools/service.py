@@ -1,6 +1,7 @@
 """Bound local rendering and transmit only an allowlisted numeric expression."""
 
 import base64
+import inspect
 import math
 import re
 from datetime import UTC, datetime
@@ -13,6 +14,22 @@ from starlette.concurrency import run_in_threadpool
 from app.conversations.handlers import WorkspaceUpload, store_generated_file
 from app.infrastructure.errors import ApiError, InvalidInput, TooLarge
 from app.infrastructure.operations import observe
+
+
+def capabilities():
+    from app.infrastructure.operations.registry import registry, tool_operations
+    from app.tools.handlers import Capability, CapabilityCatalog
+
+    tools = [
+        Capability(
+            name=operation.tool_name,
+            description=(inspect.getdoc(operation.function) or "").splitlines()[0][:240],
+        )
+        for operation in sorted(
+            tool_operations(registry, agent=True), key=lambda operation: operation.tool_name
+        )
+    ]
+    return CapabilityCatalog(tools=tools, skills=[], skills_status="not_installed")
 
 
 class NotConfigured(ApiError):
