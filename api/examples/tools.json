@@ -1,11 +1,247 @@
 [
   {
+    "name": "list_documents",
+    "operation": "library.list_documents",
+    "description": "List currently readable indexed documents within bounded scan and result limits.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/library/documents",
+    "inputSchema": {
+      "title": "DocumentList",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 25
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "$defs": {
+        "DocumentList": {
+          "title": "DocumentList",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 25
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "DocumentCatalog",
+      "type": "object",
+      "properties": {
+        "documents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogDocument"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "documents",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "DocumentCatalog": {
+          "title": "DocumentCatalog",
+          "type": "object",
+          "properties": {
+            "documents": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CatalogDocument"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "documents",
+            "truncated"
+          ],
+          "additionalProperties": false
+        },
+        "CatalogDocument": {
+          "title": "CatalogDocument",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string",
+              "pattern": "^itm_[0-9a-f]{12}$"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "classification": {
+              "enum": [
+                "protected-a",
+                "protected-b",
+                "unclassified"
+              ]
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "title",
+            "version",
+            "classification",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
+  },
+  {
     "name": "check_citation",
     "operation": "library.check_citation",
     "description": "Check a quote against its readable original version; for example a table-row citation.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/library/citations/check"
+    "route": "POST /api/library/citations/check",
+    "inputSchema": {
+      "title": "CitationCheck",
+      "type": "object",
+      "properties": {
+        "handle": {
+          "$ref": "#/$defs/CitationHandle"
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CitationCheck": {
+          "title": "CitationCheck",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "CitationStatus",
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "changed",
+            "current",
+            "newer_version",
+            "withdrawn"
+          ]
+        },
+        "latestVersion": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "status",
+        "latestVersion"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CitationStatus": {
+          "title": "CitationStatus",
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "changed",
+                "current",
+                "newer_version",
+                "withdrawn"
+              ]
+            },
+            "latestVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "status",
+            "latestVersion"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "compare_versions",
@@ -13,7 +249,143 @@
     "description": "Compare readable versions by block hash; for example versions one and three.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/library/documents/{item}/compare"
+    "route": "GET /api/library/documents/{item}/compare",
+    "inputSchema": {
+      "title": "CompareVersions",
+      "type": "object",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "fromVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "toVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "item",
+        "fromVersion",
+        "toVersion"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CompareVersions": {
+          "title": "CompareVersions",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "fromVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "toVersion": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "item",
+            "fromVersion",
+            "toVersion"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "VersionDiff",
+      "type": "object",
+      "properties": {
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiffBlock"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "blocks",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "VersionDiff": {
+          "title": "VersionDiff",
+          "type": "object",
+          "properties": {
+            "blocks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DiffBlock"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "blocks",
+            "truncated"
+          ],
+          "additionalProperties": false
+        },
+        "DiffBlock": {
+          "title": "DiffBlock",
+          "type": "object",
+          "properties": {
+            "change": {
+              "enum": [
+                "added",
+                "changed",
+                "moved",
+                "removed"
+              ]
+            },
+            "fromBlock": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "toBlock": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "change",
+            "fromBlock",
+            "toBlock"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "search",
@@ -21,7 +393,394 @@
     "description": "Find readable source blocks. Use for document questions; for example radiator margin.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/library/search"
+    "route": "POST /api/library/search",
+    "inputSchema": {
+      "title": "LibrarySearch",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "maxLength": 500,
+          "minLength": 1
+        },
+        "missions": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "silos": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stages": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kinds": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "chunk",
+                  "document"
+                ]
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 8
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "LibrarySearch": {
+          "title": "LibrarySearch",
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "missions": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "silos": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stages": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "kinds": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "chunk",
+                      "document"
+                    ]
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8,
+              "default": 8
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "LibraryHits",
+      "type": "object",
+      "properties": {
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LibraryHit"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "LibraryHits": {
+          "title": "LibraryHits",
+          "type": "object",
+          "properties": {
+            "hits": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LibraryHit"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "hits",
+            "truncated"
+          ],
+          "additionalProperties": false
+        },
+        "LibraryHit": {
+          "title": "LibraryHit",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "chunk",
+                "document"
+              ]
+            },
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "title": {
+              "type": "string"
+            },
+            "headingPath": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "score": {
+              "type": "number"
+            },
+            "tags": {
+              "$ref": "#/$defs/Tags"
+            },
+            "classification": {
+              "enum": [
+                "protected-a",
+                "protected-b",
+                "unclassified"
+              ]
+            },
+            "before": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkText"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "after": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChunkText"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "handle",
+            "title",
+            "headingPath",
+            "text",
+            "score",
+            "tags",
+            "classification",
+            "before",
+            "after"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "Tags": {
+          "title": "Tags",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "mission",
+            "silo",
+            "stage"
+          ],
+          "additionalProperties": false
+        },
+        "ChunkText": {
+          "title": "ChunkText",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "headingPath": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "handle",
+            "headingPath",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "get_document",
@@ -29,7 +788,285 @@
     "description": "Read a document outline and versions. Use a known item, such as itm_000000000001.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/library/documents/{item}"
+    "route": "GET /api/library/documents/{item}",
+    "inputSchema": {
+      "title": "DocumentRef",
+      "type": "object",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "DocumentRef": {
+          "title": "DocumentRef",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "item"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "LibraryDocument",
+      "type": "object",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "tags": {
+          "$ref": "#/$defs/Tags"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "summaryKind": {
+          "enum": [
+            "extract",
+            "generated"
+          ]
+        },
+        "outline": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Outline"
+          }
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "classification": {
+          "enum": [
+            "protected-a",
+            "protected-b",
+            "unclassified"
+          ]
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "item",
+        "version",
+        "title",
+        "path",
+        "tags",
+        "summary",
+        "summaryKind",
+        "outline",
+        "versions",
+        "simulated",
+        "classification",
+        "deleted"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "LibraryDocument": {
+          "title": "LibraryDocument",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "tags": {
+              "$ref": "#/$defs/Tags"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "summaryKind": {
+              "enum": [
+                "extract",
+                "generated"
+              ]
+            },
+            "outline": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Outline"
+              }
+            },
+            "versions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Version"
+              }
+            },
+            "simulated": {
+              "type": "boolean"
+            },
+            "classification": {
+              "enum": [
+                "protected-a",
+                "protected-b",
+                "unclassified"
+              ]
+            },
+            "deleted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "title",
+            "path",
+            "tags",
+            "summary",
+            "summaryKind",
+            "outline",
+            "versions",
+            "simulated",
+            "classification",
+            "deleted"
+          ],
+          "additionalProperties": false
+        },
+        "Tags": {
+          "title": "Tags",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "mission",
+            "silo",
+            "stage"
+          ],
+          "additionalProperties": false
+        },
+        "Outline": {
+          "title": "Outline",
+          "type": "object",
+          "properties": {
+            "block": {
+              "type": "integer"
+            },
+            "headingPath": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "block",
+            "headingPath"
+          ],
+          "additionalProperties": false
+        },
+        "Version": {
+          "title": "Version",
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "integer"
+            },
+            "sha256": {
+              "type": "string"
+            },
+            "indexedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "sha256",
+            "indexedAt"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "read_chunks",
@@ -37,7 +1074,172 @@
     "description": "Read up to twenty source blocks. Use after search; for example blocks 1 through 3.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/library/documents/{item}/chunks"
+    "route": "GET /api/library/documents/{item}/chunks",
+    "inputSchema": {
+      "title": "ChunkRange",
+      "type": "object",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "fromBlock": {
+          "type": "integer"
+        },
+        "toBlock": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "item",
+        "version",
+        "fromBlock",
+        "toBlock"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ChunkRange": {
+          "title": "ChunkRange",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "fromBlock": {
+              "type": "integer"
+            },
+            "toBlock": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "fromBlock",
+            "toBlock"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "ChunkPage",
+      "type": "object",
+      "properties": {
+        "chunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChunkText"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "chunks",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ChunkPage": {
+          "title": "ChunkPage",
+          "type": "object",
+          "properties": {
+            "chunks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ChunkText"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "chunks",
+            "truncated"
+          ],
+          "additionalProperties": false
+        },
+        "ChunkText": {
+          "title": "ChunkText",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "headingPath": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "handle",
+            "headingPath",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "explore",
@@ -45,7 +1247,227 @@
     "description": "Read blocks around a citation. Use for context; for example two blocks before and after.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/library/explore"
+    "route": "POST /api/library/explore",
+    "inputSchema": {
+      "title": "ExploreInput",
+      "type": "object",
+      "properties": {
+        "handle": {
+          "$ref": "#/$defs/CitationHandle"
+        },
+        "before": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 2
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 2
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ExploreInput": {
+          "title": "ExploreInput",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "before": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "default": 2
+            },
+            "after": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "default": 2
+            },
+            "query": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "ChunkPage",
+      "type": "object",
+      "properties": {
+        "chunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChunkText"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "chunks",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ChunkPage": {
+          "title": "ChunkPage",
+          "type": "object",
+          "properties": {
+            "chunks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ChunkText"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "chunks",
+            "truncated"
+          ],
+          "additionalProperties": false
+        },
+        "ChunkText": {
+          "title": "ChunkText",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "headingPath": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "handle",
+            "headingPath",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "ask_agent",
@@ -53,7 +1475,216 @@
     "description": "Ask the cited CRAFT runtime; for example a document question from an MCP application.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/agent/ask"
+    "route": "POST /api/agent/ask",
+    "inputSchema": {
+      "title": "AskAgent",
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conversationId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "AskAgent": {
+          "title": "AskAgent",
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "conversationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "question"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "AskAgentResult",
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AnswerCitation"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/AnswerConfidence"
+        },
+        "runId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "answer",
+        "citations",
+        "confidence",
+        "runId"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "AskAgentResult": {
+          "title": "AskAgentResult",
+          "type": "object",
+          "properties": {
+            "answer": {
+              "type": "string"
+            },
+            "citations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AnswerCitation"
+              }
+            },
+            "confidence": {
+              "$ref": "#/$defs/AnswerConfidence"
+            },
+            "runId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "answer",
+            "citations",
+            "confidence",
+            "runId"
+          ],
+          "additionalProperties": false
+        },
+        "AnswerCitation": {
+          "title": "AnswerCitation",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "title": {
+              "type": "string"
+            },
+            "headingPath": {
+              "type": "string"
+            },
+            "classification": {
+              "enum": [
+                "protected-a",
+                "protected-b",
+                "unclassified"
+              ]
+            },
+            "quote": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "handle",
+            "title",
+            "headingPath",
+            "classification",
+            "quote"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "AnswerConfidence": {
+          "title": "AnswerConfidence",
+          "type": "object",
+          "properties": {
+            "score": {
+              "type": "number"
+            },
+            "level": {
+              "enum": [
+                "high",
+                "low",
+                "medium"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "score",
+            "level",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp"
+    ]
   },
   {
     "name": "similar_missions",
@@ -61,7 +1692,231 @@
     "description": "Rank readable missions by cited facets; for example design and operations.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/cube/similar"
+    "route": "POST /api/cube/similar",
+    "inputSchema": {
+      "title": "SimilarMissions",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "facets": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "cost_and_risk",
+                  "design",
+                  "operations",
+                  "program",
+                  "purpose"
+                ]
+              },
+              "maxItems": 5,
+              "minItems": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 5
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "SimilarMissions": {
+          "title": "SimilarMissions",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "facets": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "cost_and_risk",
+                      "design",
+                      "operations",
+                      "program",
+                      "purpose"
+                    ]
+                  },
+                  "maxItems": 5,
+                  "minItems": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 5
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "SimilarPage",
+      "type": "object",
+      "properties": {
+        "missions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SimilarMission"
+          }
+        },
+        "facets": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "cost_and_risk",
+              "design",
+              "operations",
+              "program",
+              "purpose"
+            ]
+          }
+        }
+      },
+      "required": [
+        "missions",
+        "facets"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "SimilarPage": {
+          "title": "SimilarPage",
+          "type": "object",
+          "properties": {
+            "missions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SimilarMission"
+              }
+            },
+            "facets": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "cost_and_risk",
+                  "design",
+                  "operations",
+                  "program",
+                  "purpose"
+                ]
+              }
+            }
+          },
+          "required": [
+            "missions",
+            "facets"
+          ],
+          "additionalProperties": false
+        },
+        "SimilarMission": {
+          "title": "SimilarMission",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "$ref": "#/$defs/Mission"
+            },
+            "score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "comparable": {
+              "type": "boolean"
+            },
+            "facetScores": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "mission",
+            "score",
+            "comparable",
+            "facetScores"
+          ],
+          "additionalProperties": false
+        },
+        "Mission": {
+          "title": "Mission",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "currentStage": {
+              "type": "string"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "key",
+            "title",
+            "currentStage",
+            "aliases",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "explain_similarity",
@@ -69,7 +1924,193 @@
     "description": "Read both missions' permitted facet evidence; for example a design comparison.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/cube/similar/explain"
+    "route": "POST /api/cube/similar/explain",
+    "inputSchema": {
+      "title": "ExplainSimilarity",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "other": {
+          "type": "string"
+        },
+        "facets": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "cost_and_risk",
+                  "design",
+                  "operations",
+                  "program",
+                  "purpose"
+                ]
+              },
+              "maxItems": 5,
+              "minItems": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "key",
+        "other"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ExplainSimilarity": {
+          "title": "ExplainSimilarity",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "other": {
+              "type": "string"
+            },
+            "facets": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "cost_and_risk",
+                      "design",
+                      "operations",
+                      "program",
+                      "purpose"
+                    ]
+                  },
+                  "maxItems": 5,
+                  "minItems": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "key",
+            "other"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "SimilarityExplanation",
+      "type": "object",
+      "properties": {
+        "facets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FacetExplanation"
+          }
+        }
+      },
+      "required": [
+        "facets"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "SimilarityExplanation": {
+          "title": "SimilarityExplanation",
+          "type": "object",
+          "properties": {
+            "facets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FacetExplanation"
+              }
+            }
+          },
+          "required": [
+            "facets"
+          ],
+          "additionalProperties": false
+        },
+        "FacetExplanation": {
+          "title": "FacetExplanation",
+          "type": "object",
+          "properties": {
+            "facet": {
+              "enum": [
+                "cost_and_risk",
+                "design",
+                "operations",
+                "program",
+                "purpose"
+              ]
+            },
+            "score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "otherText": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "otherSources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "facet",
+            "score",
+            "text",
+            "otherText",
+            "sources",
+            "otherSources"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "list_missions",
@@ -77,7 +2118,91 @@
     "description": "Resolve readable mission names and aliases. Use before cube reads; for example sim-01.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/cube/missions"
+    "route": "GET /api/cube/missions",
+    "inputSchema": {
+      "title": "ListMissions",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "default": ""
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "$defs": {
+        "ListMissions": {
+          "title": "ListMissions",
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "default": ""
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Mission"
+      },
+      "$defs": {
+        "Mission": {
+          "title": "Mission",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "currentStage": {
+              "type": "string"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "key",
+            "title",
+            "currentStage",
+            "aliases",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "prepare_values",
@@ -85,7 +2210,431 @@
     "description": "Read cited candidates without writing values; for example a mass-budget table.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/cube/candidates"
+    "route": "POST /api/cube/candidates",
+    "inputSchema": {
+      "title": "PrepareValues",
+      "type": "object",
+      "properties": {
+        "handle": {
+          "$ref": "#/$defs/CitationHandle"
+        },
+        "mission": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "silo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "validFrom": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "PrepareValues": {
+          "title": "PrepareValues",
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "mission": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "validFrom": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "Candidates",
+      "type": "object",
+      "properties": {
+        "mission": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "silo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "validFrom": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          }
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "mission",
+        "silo",
+        "stage",
+        "validFrom",
+        "candidates",
+        "problems"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Candidates": {
+          "title": "Candidates",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "validFrom": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              }
+            },
+            "problems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "mission",
+            "silo",
+            "stage",
+            "validFrom",
+            "candidates",
+            "problems"
+          ],
+          "additionalProperties": false
+        },
+        "Candidate": {
+          "title": "Candidate",
+          "type": "object",
+          "properties": {
+            "row": {
+              "type": "integer"
+            },
+            "header": {
+              "type": "string"
+            },
+            "parameter": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceNumber": {
+              "type": "string"
+            },
+            "sourceUnit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "enum": [
+                "exact",
+                "not_applicable",
+                "range",
+                "unknown"
+              ]
+            },
+            "low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "citation": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "row",
+            "header",
+            "parameter",
+            "element",
+            "sourceNumber",
+            "sourceUnit",
+            "kind",
+            "low",
+            "high",
+            "citation",
+            "problem"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "submit_values",
@@ -93,7 +2642,275 @@
     "description": "Publish a reviewed batch of source candidates in one approval transaction.",
     "effects": "DATA",
     "needsApproval": true,
-    "route": "POST /api/cube/values"
+    "route": "POST /api/cube/values",
+    "inputSchema": {
+      "title": "SubmitValues",
+      "type": "object",
+      "properties": {
+        "mission": {
+          "type": "string"
+        },
+        "silo": {
+          "type": "string"
+        },
+        "validFrom": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "maxItems": 100,
+          "minItems": 1
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "mission",
+        "silo",
+        "validFrom",
+        "candidates"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "SubmitValues": {
+          "title": "SubmitValues",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "type": "string"
+            },
+            "silo": {
+              "type": "string"
+            },
+            "validFrom": {
+              "type": "string"
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              },
+              "maxItems": 100,
+              "minItems": 1
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "mission",
+            "silo",
+            "validFrom",
+            "candidates"
+          ],
+          "additionalProperties": false
+        },
+        "Candidate": {
+          "title": "Candidate",
+          "type": "object",
+          "properties": {
+            "row": {
+              "type": "integer"
+            },
+            "header": {
+              "type": "string"
+            },
+            "parameter": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceNumber": {
+              "type": "string"
+            },
+            "sourceUnit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "enum": [
+                "exact",
+                "not_applicable",
+                "range",
+                "unknown"
+              ]
+            },
+            "low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "citation": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "row",
+            "header",
+            "parameter",
+            "element",
+            "sourceNumber",
+            "sourceUnit",
+            "kind",
+            "low",
+            "high",
+            "citation",
+            "problem"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "ValueReceipt",
+      "type": "object",
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "valueIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "approvalId",
+        "valueIds"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ValueReceipt": {
+          "title": "ValueReceipt",
+          "type": "object",
+          "properties": {
+            "approvalId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "valueIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "required": [
+            "approvalId",
+            "valueIds"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat"
+    ]
   },
   {
     "name": "list_parameters",
@@ -101,7 +2918,101 @@
     "description": "Read the parameter dictionary and registered units. Use before filtering, such as kg or g.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/cube/parameters"
+    "route": "GET /api/cube/parameters",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Parameter"
+      },
+      "$defs": {
+        "Parameter": {
+          "title": "Parameter",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "whole": {
+              "type": "boolean"
+            },
+            "units": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Unit"
+              }
+            }
+          },
+          "required": [
+            "key",
+            "label",
+            "unit",
+            "min",
+            "max",
+            "whole",
+            "units"
+          ],
+          "additionalProperties": false
+        },
+        "Unit": {
+          "title": "Unit",
+          "type": "object",
+          "properties": {
+            "unit": {
+              "type": "string"
+            },
+            "multiplier": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "unit",
+            "multiplier",
+            "offset"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "find_missions",
@@ -109,7 +3020,473 @@
     "description": "Find readable missions matching all conditions. For example dry mass at most 150 kg.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/cube/find"
+    "route": "POST /api/cube/find",
+    "inputSchema": {
+      "title": "FindMissions",
+      "type": "object",
+      "properties": {
+        "silo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "knownAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "maxItems": 12,
+          "minItems": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 20
+        }
+      },
+      "required": [
+        "conditions"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "FindMissions": {
+          "title": "FindMissions",
+          "type": "object",
+          "properties": {
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "at": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "knownAt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "conditions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Condition"
+              },
+              "maxItems": 12,
+              "minItems": 1
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 20
+            }
+          },
+          "required": [
+            "conditions"
+          ],
+          "additionalProperties": false
+        },
+        "Condition": {
+          "title": "Condition",
+          "type": "object",
+          "properties": {
+            "parameter": {
+              "type": "string"
+            },
+            "op": {
+              "enum": [
+                "between",
+                "eq",
+                "ge",
+                "le"
+              ]
+            },
+            "value": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "parameter",
+            "op",
+            "value",
+            "unit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "FoundMissions",
+      "type": "object",
+      "properties": {
+        "missions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MatchedMission"
+          }
+        },
+        "at": {
+          "type": "string"
+        },
+        "knownAt": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "missions",
+        "at",
+        "knownAt",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "FoundMissions": {
+          "title": "FoundMissions",
+          "type": "object",
+          "properties": {
+            "missions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MatchedMission"
+              }
+            },
+            "at": {
+              "type": "string"
+            },
+            "knownAt": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "missions",
+            "at",
+            "knownAt",
+            "truncated"
+          ],
+          "additionalProperties": false
+        },
+        "MatchedMission": {
+          "title": "MatchedMission",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "$ref": "#/$defs/Mission"
+            },
+            "matched": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CubeValue"
+              }
+            }
+          },
+          "required": [
+            "mission",
+            "matched"
+          ],
+          "additionalProperties": false
+        },
+        "Mission": {
+          "title": "Mission",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "currentStage": {
+              "type": "string"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "key",
+            "title",
+            "currentStage",
+            "aliases",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CubeValue": {
+          "title": "CubeValue",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "mission": {
+              "type": "string"
+            },
+            "silo": {
+              "type": "string"
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "exact",
+                "not_applicable",
+                "range",
+                "unknown"
+              ]
+            },
+            "low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "type": "string"
+            },
+            "sourceNumber": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceUnit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "validFrom": {
+              "type": "string"
+            },
+            "recordedAt": {
+              "type": "string"
+            },
+            "citation": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "withdrawn": {
+              "type": "boolean"
+            },
+            "approvalId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "mission",
+            "silo",
+            "stage",
+            "element",
+            "parameter",
+            "kind",
+            "low",
+            "high",
+            "unit",
+            "sourceNumber",
+            "sourceUnit",
+            "validFrom",
+            "recordedAt",
+            "citation",
+            "withdrawn",
+            "approvalId",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "get_mission",
@@ -117,7 +3494,404 @@
     "description": "Read accepted mission values on a date. Use a key or alias, for example sim-01.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/cube/missions/{key}"
+    "route": "GET /api/cube/missions/{key}",
+    "inputSchema": {
+      "title": "MissionRef",
+      "type": "object",
+      "properties": {
+        "silo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "knownAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "MissionRef": {
+          "title": "MissionRef",
+          "type": "object",
+          "properties": {
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "at": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "knownAt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "MissionState",
+      "type": "object",
+      "properties": {
+        "mission": {
+          "$ref": "#/$defs/Mission"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CubeValue"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "at": {
+          "type": "string"
+        },
+        "knownAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mission",
+        "values",
+        "gaps",
+        "at",
+        "knownAt"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "MissionState": {
+          "title": "MissionState",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "$ref": "#/$defs/Mission"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CubeValue"
+              }
+            },
+            "gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "at": {
+              "type": "string"
+            },
+            "knownAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "mission",
+            "values",
+            "gaps",
+            "at",
+            "knownAt"
+          ],
+          "additionalProperties": false
+        },
+        "Mission": {
+          "title": "Mission",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "currentStage": {
+              "type": "string"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "key",
+            "title",
+            "currentStage",
+            "aliases",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CubeValue": {
+          "title": "CubeValue",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "mission": {
+              "type": "string"
+            },
+            "silo": {
+              "type": "string"
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "exact",
+                "not_applicable",
+                "range",
+                "unknown"
+              ]
+            },
+            "low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "type": "string"
+            },
+            "sourceNumber": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceUnit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "validFrom": {
+              "type": "string"
+            },
+            "recordedAt": {
+              "type": "string"
+            },
+            "citation": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "withdrawn": {
+              "type": "boolean"
+            },
+            "approvalId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "mission",
+            "silo",
+            "stage",
+            "element",
+            "parameter",
+            "kind",
+            "low",
+            "high",
+            "unit",
+            "sourceNumber",
+            "sourceUnit",
+            "validFrom",
+            "recordedAt",
+            "citation",
+            "withdrawn",
+            "approvalId",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "compare_missions",
@@ -125,7 +3899,451 @@
     "description": "Compare two to five readable missions in one scope. For example their mass and power.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/cube/compare"
+    "route": "POST /api/cube/compare",
+    "inputSchema": {
+      "title": "CompareMissions",
+      "type": "object",
+      "properties": {
+        "silo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "knownAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 2
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "keys",
+        "parameters"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CompareMissions": {
+          "title": "CompareMissions",
+          "type": "object",
+          "properties": {
+            "silo": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "at": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "knownAt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 5,
+              "minItems": 2
+            },
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1
+            }
+          },
+          "required": [
+            "keys",
+            "parameters"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "Comparison",
+      "type": "object",
+      "properties": {
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ComparisonRow"
+          }
+        },
+        "at": {
+          "type": "string"
+        },
+        "knownAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "parameters",
+        "rows",
+        "at",
+        "knownAt"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Comparison": {
+          "title": "Comparison",
+          "type": "object",
+          "properties": {
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ComparisonRow"
+              }
+            },
+            "at": {
+              "type": "string"
+            },
+            "knownAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "parameters",
+            "rows",
+            "at",
+            "knownAt"
+          ],
+          "additionalProperties": false
+        },
+        "ComparisonRow": {
+          "title": "ComparisonRow",
+          "type": "object",
+          "properties": {
+            "mission": {
+              "$ref": "#/$defs/Mission"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CubeValue"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "mission",
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        "Mission": {
+          "title": "Mission",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "currentStage": {
+              "type": "string"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "key",
+            "title",
+            "currentStage",
+            "aliases",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CubeValue": {
+          "title": "CubeValue",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "mission": {
+              "type": "string"
+            },
+            "silo": {
+              "type": "string"
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "exact",
+                "not_applicable",
+                "range",
+                "unknown"
+              ]
+            },
+            "low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "type": "string"
+            },
+            "sourceNumber": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceUnit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "validFrom": {
+              "type": "string"
+            },
+            "recordedAt": {
+              "type": "string"
+            },
+            "citation": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "withdrawn": {
+              "type": "boolean"
+            },
+            "approvalId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "mission",
+            "silo",
+            "stage",
+            "element",
+            "parameter",
+            "kind",
+            "low",
+            "high",
+            "unit",
+            "sourceNumber",
+            "sourceUnit",
+            "validFrom",
+            "recordedAt",
+            "citation",
+            "withdrawn",
+            "approvalId",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "get_value_evidence",
@@ -133,15 +4351,449 @@
     "description": "Read the cited source row and conversion for a value. Use an accepted value identifier.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/cube/values/{id}"
+    "route": "GET /api/cube/values/{id}",
+    "inputSchema": {
+      "title": "ValueRef",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ValueRef": {
+          "title": "ValueRef",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "ValueEvidence",
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/CubeValue"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "conversion": {
+          "type": "string"
+        },
+        "citationStatus": {
+          "enum": [
+            "changed",
+            "current",
+            "newer_version",
+            "withdrawn"
+          ]
+        }
+      },
+      "required": [
+        "value",
+        "quote",
+        "conversion",
+        "citationStatus"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ValueEvidence": {
+          "title": "ValueEvidence",
+          "type": "object",
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/CubeValue"
+            },
+            "quote": {
+              "type": "string"
+            },
+            "conversion": {
+              "type": "string"
+            },
+            "citationStatus": {
+              "enum": [
+                "changed",
+                "current",
+                "newer_version",
+                "withdrawn"
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "quote",
+            "conversion",
+            "citationStatus"
+          ],
+          "additionalProperties": false
+        },
+        "CubeValue": {
+          "title": "CubeValue",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "mission": {
+              "type": "string"
+            },
+            "silo": {
+              "type": "string"
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "exact",
+                "not_applicable",
+                "range",
+                "unknown"
+              ]
+            },
+            "low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "type": "string"
+            },
+            "sourceNumber": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceUnit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "validFrom": {
+              "type": "string"
+            },
+            "recordedAt": {
+              "type": "string"
+            },
+            "citation": {
+              "$ref": "#/$defs/CitationHandle"
+            },
+            "withdrawn": {
+              "type": "boolean"
+            },
+            "approvalId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "mission",
+            "silo",
+            "stage",
+            "element",
+            "parameter",
+            "kind",
+            "low",
+            "high",
+            "unit",
+            "sourceNumber",
+            "sourceUnit",
+            "validFrom",
+            "recordedAt",
+            "citation",
+            "withdrawn",
+            "approvalId",
+            "simulated"
+          ],
+          "additionalProperties": false
+        },
+        "CitationHandle": {
+          "title": "CitationHandle",
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "block": {
+              "type": "integer"
+            },
+            "locator": {
+              "type": "string"
+            },
+            "quoteSha256": {
+              "type": "string"
+            },
+            "simulated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "item",
+            "version",
+            "block",
+            "locator",
+            "quoteSha256",
+            "simulated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "write_note",
     "operation": "notes.write_note",
     "description": "Keep or replace an owned working note; for example a calculation scratchpad.",
-    "effects": "NONE",
-    "needsApproval": false,
-    "route": "PUT /api/notes"
+    "effects": "DATA",
+    "needsApproval": true,
+    "route": "PUT /api/notes",
+    "inputSchema": {
+      "title": "WriteNote",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "conversationId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "WriteNote": {
+          "title": "WriteNote",
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 100000
+            },
+            "conversationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "title",
+            "body"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "Note",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "conversationId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "conversationId",
+        "sizeBytes",
+        "createdAt",
+        "updatedAt",
+        "body"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Note": {
+          "title": "Note",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "title": {
+              "type": "string"
+            },
+            "conversationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sizeBytes": {
+              "type": "integer"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "conversationId",
+            "sizeBytes",
+            "createdAt",
+            "updatedAt",
+            "body"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat"
+    ]
   },
   {
     "name": "list_notes",
@@ -149,7 +4801,105 @@
     "description": "List private working-note titles and sizes; use before reading a saved note.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/notes"
+    "route": "GET /api/notes",
+    "inputSchema": {
+      "title": "NoteList",
+      "type": "object",
+      "properties": {
+        "conversationId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "$defs": {
+        "NoteList": {
+          "title": "NoteList",
+          "type": "object",
+          "properties": {
+            "conversationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NoteSummary"
+      },
+      "$defs": {
+        "NoteSummary": {
+          "title": "NoteSummary",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "title": {
+              "type": "string"
+            },
+            "conversationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sizeBytes": {
+              "type": "integer"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "conversationId",
+            "sizeBytes",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "read_note",
@@ -157,15 +4907,282 @@
     "description": "Read one owned working note; for example a previously listed scratchpad.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "GET /api/notes/{id}"
+    "route": "GET /api/notes/{id}",
+    "inputSchema": {
+      "title": "NoteRef",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "NoteRef": {
+          "title": "NoteRef",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "Note",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "conversationId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "conversationId",
+        "sizeBytes",
+        "createdAt",
+        "updatedAt",
+        "body"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Note": {
+          "title": "Note",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "title": {
+              "type": "string"
+            },
+            "conversationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sizeBytes": {
+              "type": "integer"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "conversationId",
+            "sizeBytes",
+            "createdAt",
+            "updatedAt",
+            "body"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "delete_note",
     "operation": "notes.delete_note",
     "description": "Remove one owned working note; use after its temporary work is complete.",
+    "effects": "DATA",
+    "needsApproval": true,
+    "route": "DELETE /api/notes/{id}",
+    "inputSchema": {
+      "title": "NoteRef",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "NoteRef": {
+          "title": "NoteRef",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "null"
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat"
+    ]
+  },
+  {
+    "name": "list_capabilities",
+    "operation": "tools.list_capabilities",
+    "description": "List available agent tools and whether saved skills are installed.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "DELETE /api/notes/{id}"
+    "route": "GET /api/tools/capabilities",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "title": "CapabilityCatalog",
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skillsStatus": {
+          "enum": [
+            "not_installed"
+          ]
+        }
+      },
+      "required": [
+        "tools",
+        "skills",
+        "skillsStatus"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CapabilityCatalog": {
+          "title": "CapabilityCatalog",
+          "type": "object",
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Capability"
+              }
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "skillsStatus": {
+              "enum": [
+                "not_installed"
+              ]
+            }
+          },
+          "required": [
+            "tools",
+            "skills",
+            "skillsStatus"
+          ],
+          "additionalProperties": false
+        },
+        "Capability": {
+          "title": "Capability",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,64}$"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 240,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name",
+            "description"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "make_chart",
@@ -173,7 +5190,229 @@
     "description": "Render inline chart data locally; keep a generated file in the active workspace.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/tools/chart"
+    "route": "POST /api/tools/chart",
+    "inputSchema": {
+      "title": "ChartInput",
+      "type": "object",
+      "properties": {
+        "spec": {
+          "type": "object"
+        },
+        "format": {
+          "enum": [
+            "png",
+            "svg"
+          ]
+        }
+      },
+      "required": [
+        "spec",
+        "format"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ChartInput": {
+          "title": "ChartInput",
+          "type": "object",
+          "properties": {
+            "spec": {
+              "type": "object"
+            },
+            "format": {
+              "enum": [
+                "png",
+                "svg"
+              ]
+            }
+          },
+          "required": [
+            "spec",
+            "format"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "ChartResult",
+      "type": "object",
+      "properties": {
+        "format": {
+          "enum": [
+            "png",
+            "svg"
+          ]
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "contentBase64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "mediaType",
+        "contentBase64",
+        "file"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "ChartResult": {
+          "title": "ChartResult",
+          "type": "object",
+          "properties": {
+            "format": {
+              "enum": [
+                "png",
+                "svg"
+              ]
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "contentBase64": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "file": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceFile"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "format",
+            "mediaType",
+            "contentBase64",
+            "file"
+          ],
+          "additionalProperties": false
+        },
+        "WorkspaceFile": {
+          "title": "WorkspaceFile",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "conversationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "sizeBytes": {
+              "type": "integer"
+            },
+            "origin": {
+              "enum": [
+                "agent",
+                "upload"
+              ]
+            },
+            "state": {
+              "enum": [
+                "export-pending",
+                "exported",
+                "failed",
+                "processing",
+                "ready",
+                "uploading"
+              ]
+            },
+            "simulated": {
+              "type": "boolean"
+            },
+            "classification": {
+              "enum": [
+                "protected-a",
+                "protected-b",
+                "unclassified"
+              ]
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "statusDetail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "exportApprovalId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "id",
+            "conversationId",
+            "name",
+            "mediaType",
+            "sizeBytes",
+            "origin",
+            "state",
+            "simulated",
+            "classification",
+            "createdAt"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   },
   {
     "name": "check_calculation",
@@ -181,6 +5420,174 @@
     "description": "Check a numeric or unit expression independently, without its source context.",
     "effects": "NONE",
     "needsApproval": false,
-    "route": "POST /api/tools/calculation-check"
+    "route": "POST /api/tools/calculation-check",
+    "inputSchema": {
+      "title": "CalculationInput",
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string",
+          "maxLength": 1000,
+          "minLength": 1
+        },
+        "craftResult": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "expression"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CalculationInput": {
+          "title": "CalculationInput",
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "maxLength": 1000,
+              "minLength": 1
+            },
+            "craftResult": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "expression"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "CalculationResult",
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string"
+        },
+        "wolframResult": {
+          "type": "string"
+        },
+        "craftResult": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agrees": {
+          "type": "boolean"
+        },
+        "checkedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expression",
+        "wolframResult",
+        "craftResult",
+        "agrees",
+        "checkedAt"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "CalculationResult": {
+          "title": "CalculationResult",
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string"
+            },
+            "wolframResult": {
+              "type": "string"
+            },
+            "craftResult": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "agrees": {
+              "type": "boolean"
+            },
+            "checkedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expression",
+            "wolframResult",
+            "craftResult",
+            "agrees",
+            "checkedAt"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp",
+      "chat",
+      "read_only_query"
+    ]
   }
 ]

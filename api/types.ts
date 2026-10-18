@@ -103,6 +103,9 @@ export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
   needsApproval: boolean; route: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown> | null;
+  availableIn: ("api" | "mcp" | "chat" | "read_only_query")[];
 }
 
 export interface Citation {

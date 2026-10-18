@@ -79,6 +79,9 @@ class ToolInfo(Shape):
     effects: str
     needs_approval: bool
     route: str
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None
+    available_in: list[Literal["api", "mcp", "chat", "read_only_query"]]
 
 
 class RunRef(Shape):
@@ -164,22 +167,34 @@ def resolve_run_token(caller: Caller, request: RunTokenDigest) -> RunPrincipal:
 
 @operation(SIGNED_IN, get="/tools")
 def list_tools(caller: Caller) -> list[ToolInfo]:
-    """List generated tool names and effects; for example readable library search."""
+    """Describe registered tool schemas and channels; for example readable library search."""
     import inspect
 
     from app.infrastructure.operations.registry import registry, tool_operations
+    from app.infrastructure.operations.schemas import input_schema, output_schema
 
-    return [
-        ToolInfo(
-            name=o.tool_name,
-            operation=o.name,
-            description=inspect.getdoc(o.function) or "",
-            effects=o.effects,
-            needs_approval=o.effects != "NONE",
-            route=str(o.method) + " /api" + str(o.path),
+    read_only = {o.name for o in tool_operations(registry, agent=True)}
+    result = []
+    for o in tool_operations(registry):
+        channels: list[Literal["api", "mcp", "chat", "read_only_query"]] = ["api", "mcp"]
+        if o.tool_name != "ask_agent":
+            channels.append("chat")
+        if o.name in read_only:
+            channels.append("read_only_query")
+        result.append(
+            ToolInfo(
+                name=o.tool_name,
+                operation=o.name,
+                description=inspect.getdoc(o.function) or "",
+                effects=o.effects,
+                needs_approval=o.effects != "NONE",
+                route=str(o.method) + " /api" + str(o.path),
+                input_schema=input_schema(o),
+                output_schema=output_schema(o),
+                available_in=channels,
+            )
         )
-        for o in tool_operations(registry)
-    ]
+    return result
 
 
 @operation(SIGNED_IN, post="/agent/runs")
