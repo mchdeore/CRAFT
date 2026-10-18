@@ -48,6 +48,10 @@ export interface Routes {
   "GET /api/notes": { query: { conversationId?: string }; response: T.NoteSummary[] };
   "GET /api/notes/:id": { response: T.Note };
   "DELETE /api/notes/:id": { response: void };
+  "PUT /api/skills/:id": { body: Omit<T.SaveSkill, "id">; response: T.Skill };
+  "GET /api/skills": { query: T.SkillList; response: T.SkillCatalog };
+  "GET /api/skills/:id": { response: T.Skill };
+  "GET /api/skills/:id/versions": { query: { revision: number }; response: T.Skill };
   "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
   "POST /api/tools/chart": { body: T.ChartInput; response: T.ChartResult };
   "POST /api/tools/calculation-check": { body: T.CalculationInput; response: T.CalculationResult };

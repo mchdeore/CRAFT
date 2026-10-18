@@ -12,6 +12,15 @@ from app.cube.handlers import MissionRef, ValueRef
 from app.infrastructure.paths import ROOT
 from app.infrastructure.shapes import ApiErrorBody
 from app.library.handlers import CatalogDocument, DocumentCatalog, DocumentList
+from app.skills.handlers import (
+    SaveSkill,
+    Skill,
+    SkillCatalog,
+    SkillList,
+    SkillRef,
+    SkillSummary,
+    SkillVersionRef,
+)
 from app.tools.handlers import Capability, CapabilityCatalog
 
 
@@ -74,6 +83,13 @@ def test_python_shapes_match_compiled_typescript() -> None:
         DocumentCatalog,
         RunRecoveryRef,
         RunRecovery,
+        SaveSkill,
+        Skill,
+        SkillCatalog,
+        SkillList,
+        SkillRef,
+        SkillSummary,
+        SkillVersionRef,
     ]:
         compiled = typescript_schema(shape.__name__)
         declared = root_schema(compiled)

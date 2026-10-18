@@ -157,9 +157,15 @@ def catalog_text(value: str):
 
 def catalog_summary(catalog, kind: str):
     if kind == "skills":
-        return "Saved skills are not installed. No saved skills are available."
+        return (
+            "Saved skills can be edited in the Skills page. "
+            "Their use by the agent is not installed."
+        )
     if kind == "tools":
-        lines = ["Available tools:", "Saved skills are not installed."]
+        lines = [
+            "Available tools:",
+            "Saved skills can be edited in the Skills page; agent skill use is not installed.",
+        ]
         rows = [f"- `{tool.name}`: {catalog_text(tool.description)}" for tool in catalog.tools]
     else:
         lines = ["Readable indexed documents (default result limit 25; source scan limit 200):"]
