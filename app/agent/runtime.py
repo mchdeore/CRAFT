@@ -29,6 +29,7 @@ from app.infrastructure.mcp.client import client as mcp_client
 from app.infrastructure.operations.context import current_call
 from app.infrastructure.operations.registry import registry, tool_named, tool_operations
 from app.infrastructure.paths import ROOT
+from app.skills import native as saved_skills
 
 RUN_SECONDS = 120
 TOOL_LIMIT = 20
@@ -146,6 +147,19 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     ref = conversations.ConversationRef(id=request.thread_id)
     await run_in_threadpool(conversations.load_for_run, caller, ref)
     resume_payload = None
+    allowed = [
+        operation.tool_name
+        for operation in tool_operations(registry, agent=_read_only_query.get())
+        if operation.tool_name != "ask_agent"
+    ]
+    initial_skills = []
+    if not resuming and request.skill is not None:
+        initial_skills = await run_in_threadpool(
+            saved_skills.load,
+            caller,
+            [{"id": str(request.skill.id), "revision": request.skill.revision}],
+            set(allowed),
+        )
     if resuming:
         state, resume_payload = await run_in_threadpool(service.resume, caller, request)
     else:
@@ -185,6 +199,11 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             deadline = started + max(0, RUN_SECONDS - elapsed)
             if elapsed >= RUN_SECONDS:
                 raise TimeoutError()
+            initial_skills = await run_in_threadpool(
+                saved_skills.load, trusted, saved.state.get("craftSkills", []), set(allowed)
+            )
+        skills = saved_skills.SavedSkillsProvider(initial_skills, allowed)
+        saved.state["craftSkills"] = skills.references
         history = (await run_in_threadpool(conversations.load_for_run, trusted, ref)).messages
         user = None
         if not resuming:
@@ -210,11 +229,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             caller.settings.mcp_url,
             token.token,
             results,
-            allowed=[
-                o.tool_name
-                for o in tool_operations(registry, agent=_read_only_query.get())
-                if o.tool_name != "ask_agent"
-            ],
+            allowed=allowed,
         )
         async with asyncio.timeout_at(deadline):
             await transport.connect()
@@ -224,9 +239,9 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             instructions=instructions,
             name="craft",
             saved=saved,
-            context_providers=[],
+            context_providers=[skills],
             tools=[transport],
-            middleware=[ToolCallMiddleware(trace, budget, TOOL_LIMIT)],
+            middleware=[ToolCallMiddleware(trace, budget, TOOL_LIMIT, skills.completed)],
             default_options={
                 "max_tokens": caller.settings.model_max_output_tokens,
                 "allow_multiple_tool_calls": False,
@@ -302,6 +317,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                             "runId": str(request.run_id),
                             "model": caller.settings.model_main,
                             "instructionsVersion": version,
+                            "skills": [dict(reference) for reference in skills.references],
                             "path": [dict(step) for step in trace],
                         },
                     }
@@ -424,6 +440,20 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         }.values()
                     )
                 try:
+                    if saved.state.get("craftSkills"):
+                        output.append(
+                            {
+                                "id": str(uuid4()),
+                                "role": "activity",
+                                "activityType": "craft.skills",
+                                "content": {
+                                    "runId": str(request.run_id),
+                                    "skills": [
+                                        dict(reference) for reference in saved.state["craftSkills"]
+                                    ],
+                                },
+                            }
+                        )
                     if output:
                         await run_in_threadpool(
                             conversations.append_for_run,

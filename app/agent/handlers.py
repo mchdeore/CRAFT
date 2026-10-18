@@ -12,6 +12,7 @@ from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import Shape
 from app.library.handlers import CitationHandle
+from app.skills.handlers import SkillVersionRef
 
 
 class EmbeddingInput(Shape):
@@ -44,6 +45,7 @@ class RunAgentInput(Shape, forbid_unknown_fields=False):
     run_id: UUID
     messages: list[dict[str, Any]]
     resume: Any = None
+    skill: SkillVersionRef | None = None
 
 
 class AGUIEvent(Shape, omit_defaults=True):

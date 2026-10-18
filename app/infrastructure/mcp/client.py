@@ -21,8 +21,9 @@ async def call_observed(call_next):
 
 
 class ToolCallMiddleware(FunctionMiddleware):
-    def __init__(self, trace, budget, limit):
+    def __init__(self, trace, budget, limit, on_completed=None):
         self.trace, self.budget, self.limit = trace, budget, limit
+        self.on_completed = on_completed
 
     async def process(self, context, call_next):
         self.budget["calls"] += 1
@@ -55,6 +56,8 @@ class ToolCallMiddleware(FunctionMiddleware):
         )
         try:
             await call_observed(call_next)
+            if self.on_completed is not None:
+                self.on_completed(context)
         finally:
             current_call.reset(token)
 

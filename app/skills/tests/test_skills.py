@@ -363,12 +363,15 @@ def test_revision_grants_are_append_only_and_owner_pair_is_enforced(http, chat):
             transaction.rollback()
 
 
-def test_catalog_distinguishes_stored_editor_from_unattached_native_skill_execution(http):
+def test_catalog_lists_owned_definitions_for_native_skill_execution(http):
     create(http)
     response = http.get("/api/tools/capabilities")
     assert response.status_code == 200
-    assert response.json()["skills"] == [] and response.json()["skillsStatus"] == "not_installed"
+    assert response.json()["skills"] == ["Engineering comparison"]
+    assert response.json()["skillsStatus"] == "installed"
     from app.agent.fake import catalog_summary
+    from app.tools.handlers import CapabilityCatalog
 
-    assert "agent" in catalog_summary(None, "skills").lower()
-    assert "edit" in catalog_summary(None, "skills").lower()
+    summary = catalog_summary(msgspec.convert(response.json(), CapabilityCatalog), "skills")
+    assert "Engineering comparison" in summary
+    assert "saved revision" in summary

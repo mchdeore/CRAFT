@@ -119,9 +119,9 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/notes/:id` | — | `Note` | signed in; live resource access | `read_note` |
 | `DELETE /api/notes/:id` | — | `void` | signed in; live resource access | `delete_note` |
 | `PUT /api/skills/:id` | `SaveSkill` without path `id` | `Skill` | signed in; owned definition | — |
-| `GET /api/skills` | query `SkillList` | `SkillCatalog` | signed in; owned definitions | — |
+| `GET /api/skills` | query `SkillList` | `SkillCatalog` | signed in; owned definitions | `list_skills` |
 | `GET /api/skills/:id` | path `SkillRef` | `Skill` | signed in; owned definition | — |
-| `GET /api/skills/:id/versions` | path `SkillRef`; required query `revision` | `Skill` | signed in; owned revision | — |
+| `GET /api/skills/:id/versions` | path `SkillRef`; required query `revision` | `Skill` | signed in; owned revision | `read_skill_version` |
 | `POST /api/agent/ask` | `AskAgent` | `AskAgentResult` | signed in; live resource access | `ask_agent` |
 | `POST /api/tools/chart` | `ChartInput` | `ChartResult` | signed in; live resource access | `make_chart` |
 | `POST /api/tools/calculation-check` | `CalculationInput` | `CalculationResult` | signed in; live resource access | `check_calculation` |
@@ -136,7 +136,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/drafts` | `NewDraft` | `Draft` | signed in; `save_draft`, pauses for approval | B25 |
 | `POST /api/cube/views` | `SaveView` | `WorkspaceFile` | signed in; `save_view`, DOCUMENT, approval | B27 |
 
-Document catalogs recheck live provider grants and indexed current version hashes before returning titles. Catalogs contain safe source metadata and do not expose arbitrary database rows. Capability catalogs use the current read-only agent tool registry. `skillsStatus: "not_installed"` means saved-skill use by the agent is unavailable. The Skills API lists stored definitions separately.
+Document catalogs recheck live provider grants and indexed current version hashes before returning titles. Catalogs contain safe source metadata and do not expose arbitrary database rows. Capability catalogs list current read tools and owned saved-skill names.
 
 ## 6. Agent tools
 
@@ -159,6 +159,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `list_missions` | `GET /api/cube/missions` | `ListMissions` | `NONE` |
 | `list_notes` | `GET /api/notes` | `NoteList` | `NONE` |
 | `list_parameters` | `GET /api/cube/parameters` | `none` | `NONE` |
+| `list_skills` | `GET /api/skills` | `SkillList` | `NONE` |
 | `list_capabilities` | `GET /api/tools/capabilities` | — | `NONE` |
 | `list_documents` | `GET /api/library/documents` | `DocumentList` | `NONE` |
 | `make_chart` | `POST /api/tools/chart` | `ChartInput` | `NONE` |
@@ -166,6 +167,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `submit_values` | `POST /api/cube/values` | `SubmitValues` | `DATA` |
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
+| `read_skill_version` | `GET /api/skills/:id/versions` | `SkillVersionRef` | `NONE` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
 | `write_note` | `PUT /api/notes` | `WriteNote` | `DATA` |
@@ -180,7 +182,7 @@ Signed-in users can fetch `GET /api/tools` to inspect registered tools. Each ent
 
 `outputSchema` describes the native JSON result. HTTP returns 204 for no result. MCP sends JSON text and wraps list results in `structuredContent.items`; a null result has empty structured content. Raw responses and streams have `outputSchema: null`. The input schema is shared with MCP.
 
-`GET /api/tools/capabilities` keeps the read-only agent catalog. Its skills list describes agent-attached definitions; `not_installed` refers to agent execution. The Skills API stores editable definitions independently.
+`GET /api/tools/capabilities` returns read tools and an overview of up to 100 owned skill names. `skillsStatus: "installed"` indicates native skill loading is supported. Use the paged Skills API for complete discovery; a catalog entry grants no source access or execution approval.
 
 ### Saved skills
 
@@ -190,13 +192,17 @@ Save with `PUT /api/skills/:id`. A new skill uses `expectedRevision: 0`; an edit
 
 `GET /api/skills` pages through current definitions, ordered by UUID. Use `limit` (1–100, default 50) and the returned `nextCursor` as `after`. `GET /api/skills/:id` opens the latest revision; use `/api/skills/:id/versions?revision=1` to read a specific saved definition.
 
-New saves accept distinct registered tool names. Reads retain the original references and list removed names in `unavailableTools`. Unowned and missing definitions return `404`. Saving a definition does not execute its instructions or install it in the agent.
+New saves accept distinct registered tool names. Reads retain the original references and list removed names in `unavailableTools`. Unowned and missing definitions return `404`. Saving retains the definition without executing its instructions.
+
+To use a saved workflow, discover it with `list_skills` and load its exact ID/revision with `read_skill_version`. A new chat run can select a definition with `skill: {"id": "…", "revision": 1}`. The native agent receives that definition and calls registered tools; effectful calls keep the requester approval gate. Removed or channel-excluded references prevent selection.
+
+Recovery retains selected revisions and eligible revisions read through MCP. An intervening edit cannot replace a paused run's definition. A later run can select the new revision; an unselected new run starts with no saved skills. Run-linked `craft.skills` history records immutable references even when a run pauses without an answer.
 
 ## 7. Chat stream
 
 The chat route accepts AG-UI's `RunAgentInput`. `threadId` identifies the conversation. A new `runId` is a UUID echoed in `RUN_STARTED`; reuse without resume returns `409`. A paused run resumes with the same identifiers and `resume: {"approvalId": "…"}`. The server requires a requester-owned approved or rejected decision, restores its saved framework interrupt and supplies the decision itself. Browser approval booleans, changed arguments, foreign identifiers, pending decisions and replay are refused. Rejection executes no write. Approved synchronous local writes commit their effect and execution event together; failure rolls back the effect and records failure.
 
-The server reads only the run identifiers, the newest input message for a new run, and the approval identifier for resume. It loads history, tools, context and state itself. The response is `text/event-stream`, with one AG-UI event per `data:` line. The body limit is 1 MiB. Browser context, tools, state, instructions and identity cannot replace server state. Root runs offer reviewed writes; the single-call query helper offers read tools only. Active time and tool calls retain their budgets across resume. Root runs propose one effectful call at a time; parallel approval proposals stop before any request or write is created. The native tool-call identifier and frozen arguments bind each execution to its approval.
+The server reads run identifiers, the newest input message and optional owned skill reference for a new run, and the approval identifier for resume. Browser skill selection cannot replace the stored revisions on resume. It loads history, tools, context and state itself. The response is `text/event-stream`, with one AG-UI event per `data:` line. The body limit is 1 MiB. Browser context, tools, state, instructions and identity cannot replace server state. Root runs offer reviewed writes; the single-call query helper offers read tools only. Active time and tool calls retain their budgets across resume. Root runs propose one effectful call at a time; parallel approval proposals stop before any request or write is created. The native tool-call identifier and frozen arguments bind each execution to its approval.
 
 The complete synthetic stream is `api/examples/chat-answer.sse`.
 
@@ -375,7 +381,7 @@ export interface FacetExplanation {
 }
 export interface SimilarityExplanation { facets: FacetExplanation[] }
 export interface Capability { name: string; description: string }
-export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" }
+export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" | "installed" }
 export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
@@ -403,7 +409,8 @@ export interface RunRecovery {
 }
 export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
 export type RetrievalPath = RetrievalStep[];
-export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
+export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath; skills?: SkillVersionRef[] }
+export interface SkillUsage { runId: Id; skills: SkillVersionRef[] }
 export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
 export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }
 
@@ -446,7 +453,7 @@ export interface Routes {
   "GET /api/tools": { response: T.ToolInfo[] };
   "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
   "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };
-  "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
+  "POST /api/agent/runs": { body: RunAgentInput & { skill?: T.SkillVersionRef | null }; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
   "POST /api/cube/values": { body: T.SubmitValues; response: T.ValueReceipt };
   "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
