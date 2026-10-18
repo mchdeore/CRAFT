@@ -118,6 +118,10 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/notes` | —; query `{ conversationId?: string }` | `NoteSummary[]` | signed in; live resource access | `list_notes` |
 | `GET /api/notes/:id` | — | `Note` | signed in; live resource access | `read_note` |
 | `DELETE /api/notes/:id` | — | `void` | signed in; live resource access | `delete_note` |
+| `PUT /api/skills/:id` | `SaveSkill` without path `id` | `Skill` | signed in; owned definition | — |
+| `GET /api/skills` | query `SkillList` | `SkillCatalog` | signed in; owned definitions | — |
+| `GET /api/skills/:id` | path `SkillRef` | `Skill` | signed in; owned definition | — |
+| `GET /api/skills/:id/versions` | path `SkillRef`; required query `revision` | `Skill` | signed in; owned revision | — |
 | `POST /api/agent/ask` | `AskAgent` | `AskAgentResult` | signed in; live resource access | `ask_agent` |
 | `POST /api/tools/chart` | `ChartInput` | `ChartResult` | signed in; live resource access | `make_chart` |
 | `POST /api/tools/calculation-check` | `CalculationInput` | `CalculationResult` | signed in; live resource access | `check_calculation` |
@@ -132,7 +136,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/drafts` | `NewDraft` | `Draft` | signed in; `save_draft`, pauses for approval | B25 |
 | `POST /api/cube/views` | `SaveView` | `WorkspaceFile` | signed in; `save_view`, DOCUMENT, approval | B27 |
 
-Document catalogs recheck live provider grants and indexed current version hashes before returning titles. Catalogs contain safe source metadata and do not expose arbitrary database rows. Capability catalogs use the current read-only agent tool registry. An empty skills list with `skillsStatus: "not_installed"` identifies the absence of saved skills.
+Document catalogs recheck live provider grants and indexed current version hashes before returning titles. Catalogs contain safe source metadata and do not expose arbitrary database rows. Capability catalogs use the current read-only agent tool registry. `skillsStatus: "not_installed"` means saved-skill use by the agent is unavailable. The Skills API lists stored definitions separately.
 
 ## 6. Agent tools
 
@@ -176,7 +180,17 @@ Signed-in users can fetch `GET /api/tools` to inspect registered tools. Each ent
 
 `outputSchema` describes the native JSON result. HTTP returns 204 for no result. MCP sends JSON text and wraps list results in `structuredContent.items`; a null result has empty structured content. Raw responses and streams have `outputSchema: null`. The input schema is shared with MCP.
 
-`GET /api/tools/capabilities` keeps the read-only agent catalog. Saved skills remain `not_installed` until their storage and runtime integration are available.
+`GET /api/tools/capabilities` keeps the read-only agent catalog. Its skills list describes agent-attached definitions; `not_installed` refers to agent execution. The Skills API stores editable definitions independently.
+
+### Saved skills
+
+The Skills API keeps private definitions independently of conversations. Each skill has a stable UUID and immutable numbered revisions. A definition contains a name, description, instructions, example inputs and registered tool names.
+
+Save with `PUT /api/skills/:id`. A new skill uses `expectedRevision: 0`; an edit uses the opened revision. Send a new `mutationId` for each edit and reuse it when retrying the same request. An identical retry returns its original saved revision. A stale edit or changed request under the same mutation ID returns `409 conflict`.
+
+`GET /api/skills` pages through current definitions, ordered by UUID. Use `limit` (1–100, default 50) and the returned `nextCursor` as `after`. `GET /api/skills/:id` opens the latest revision; use `/api/skills/:id/versions?revision=1` to read a specific saved definition.
+
+New saves accept distinct registered tool names. Reads retain the original references and list removed names in `unavailableTools`. Unowned and missing definitions return `404`. Saving a definition does not execute its instructions or install it in the agent.
 
 ## 7. Chat stream
 
@@ -260,7 +274,7 @@ Problem names are unknown header, no unit, unknown unit, not a number, outside t
 
 Built forms match `api/types.ts`. The final group records the remaining table 5.2 agreements. AG-UI messages use the protocol package schema.
 
-```ts
+```typescript
 import type { Message as AgUiMessage } from "@ag-ui/core";
 
 export type Id = string;
@@ -344,6 +358,8 @@ export interface VersionDiff { blocks: {change: "added" | "removed" | "changed" 
 export interface PrepareValues { handle: CitationHandle; mission?: string; silo?: string; stage?: string; validFrom?: string }
 export interface Candidate { row: number; header: string; parameter: string | null; element: string | null; sourceNumber: string; sourceUnit: string | null; kind: ValueKind; low: number | null; high: number | null; citation: CitationHandle; problem: string | null }
 export interface Candidates { mission: string | null; silo: string | null; stage: string | null; validFrom: string | null; candidates: Candidate[]; problems: string[] }
+export interface SubmitValues { mission: string; silo: string; stage: string | null; validFrom: string; candidates: Candidate[] }
+export interface ValueReceipt { approvalId: Id; valueIds: Id[] }
 
 export type Facet = "purpose" | "design" | "operations" | "program" | "cost_and_risk";
 export interface SimilarMissions { key: string; facets?: Facet[]; limit?: number }
@@ -396,6 +412,13 @@ export interface NoteList { conversationId?: Id | null }
 export interface NoteRef { id: Id }
 export interface NoteSummary { id: Id; title: string; conversationId: Id | null; sizeBytes: number; createdAt: string; updatedAt: string }
 export interface Note extends NoteSummary { body: string }
+export interface SkillRef { id: Id }
+export interface SkillVersionRef extends SkillRef { revision: number }
+export interface SkillList { after?: Id | null; limit?: number }
+export interface SaveSkill extends SkillRef { expectedRevision: number; mutationId: Id; name: string; description: string; instructions: string; exampleInputs: string[]; toolNames: string[] }
+export interface SkillSummary { id: Id; revision: number; name: string; description: string; toolNames: string[]; unavailableTools: string[]; createdAt: string; updatedAt: string }
+export interface Skill extends SkillSummary { instructions: string; exampleInputs: string[] }
+export interface SkillCatalog { items: SkillSummary[]; nextCursor: Id | null }
 export interface AskAgent { question: string; conversationId?: Id | null }
 export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
 
@@ -404,55 +427,16 @@ export interface ChartResult { format: "svg" | "png"; mediaType: string; content
 export interface CalculationInput { expression: string; craftResult?: string | number | null; unit?: string | null }
 export interface CalculationResult { expression: string; wolframResult: string; craftResult: string | number | null; agrees: boolean; checkedAt: string }
 
-// Remaining forms for table 5.2.
-export type Timestamp = string;   // ISO 8601, UTC
-
-export interface ExportRequest { destination: string; justification: string }            // S4
-
-export interface NewDraft { title: string; body: string; basedOn?: Id }                   // S4
-
-export interface DraftSummary { id: Id; title: string; basedOn: Id | null; createdAt: Timestamp }
-
-export interface Draft extends DraftSummary { body: string }
-
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | "failed";
-
-export interface Approval {
-  id: Id; conversationId: Id; runId: Id; tool: string; summary: string;
-  status: ApprovalStatus; requestedAt: Timestamp;
-}
-
-export interface ApprovalDetail extends Approval {
-  arguments: Record<string, unknown>; evidence: Record<string, unknown>[];
-  reasoning: string;                   // why the agent requests this action
-  retrievalPath: Record<string, unknown>[]; // frozen retrieval records
-  events: ApprovalEvent[];
-}
-
-export interface ApprovalEvent {
-  kind: "requested" | "approved" | "rejected" | "executed" | "failed";
-  actorId: Id | null; at: Timestamp; note?: string | null;           // null actor = the system
-}
-
+export interface Approval { id: Id; conversationId: Id; runId: Id; tool: string; summary: string; status: ApprovalStatus; requestedAt: string }
+export interface ApprovalEvent { kind: "requested" | "approved" | "rejected" | "executed" | "failed"; actorId: Id | null; at: string; note?: string | null }
+export interface ApprovalDetail extends Approval { arguments: Record<string, unknown>; evidence: Record<string, unknown>[]; reasoning: string; retrievalPath: Record<string, unknown>[]; events: ApprovalEvent[] }
 export interface Decision { approve: boolean; note?: string | null }
-
-export interface SubmitValues {
-  mission: string; silo: string; stage: string | null; validFrom: string;
-  candidates: Candidate[];             // only candidates without a problem
-}
-
-export interface ValueReceipt { approvalId: Id; valueIds: Id[] }
-
-export interface SaveView {
-  conversationId: Id; name: string;
-  operation: "find_missions" | "get_mission" | "compare_missions" | "similar_missions";
-  input: Record<string, unknown>;      // that operation's request
-}
 ```
 
 ## 14. `api/routes.ts`
 
-```ts
+```typescript
 import type * as T from "./types";
 import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
 export interface Routes {
@@ -503,6 +487,10 @@ export interface Routes {
   "GET /api/notes": { query: { conversationId?: string }; response: T.NoteSummary[] };
   "GET /api/notes/:id": { response: T.Note };
   "DELETE /api/notes/:id": { response: void };
+  "PUT /api/skills/:id": { body: Omit<T.SaveSkill, "id">; response: T.Skill };
+  "GET /api/skills": { query: T.SkillList; response: T.SkillCatalog };
+  "GET /api/skills/:id": { response: T.Skill };
+  "GET /api/skills/:id/versions": { query: { revision: number }; response: T.Skill };
   "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
   "POST /api/tools/chart": { body: T.ChartInput; response: T.ChartResult };
   "POST /api/tools/calculation-check": { body: T.CalculationInput; response: T.CalculationResult };
@@ -553,6 +541,10 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `PUT /api/notes` | `Note` | `api/examples/note.json` |
 | `GET /api/notes` | `NoteSummary[]` | `api/examples/notes.json` |
 | `GET /api/notes/:id` | `Note` | `api/examples/note.json` |
+| `PUT /api/skills/:id` | `Skill` | `api/examples/skill.json` |
+| `GET /api/skills` | `SkillCatalog` | `api/examples/skills.json` |
+| `GET /api/skills/:id` | `Skill` | `api/examples/skill.json` |
+| `GET /api/skills/:id/versions` | `Skill` | `api/examples/skill.json` |
 | `POST /api/agent/ask` | `AskAgentResult` | `api/examples/ask-agent.json` |
 | `POST /api/tools/chart` | `ChartResult` | `api/examples/chart.json` |
 | `POST /api/tools/calculation-check` | `CalculationResult` | `api/examples/calculation-check.json` |

@@ -135,6 +135,13 @@ export interface NoteList { conversationId?: Id | null }
 export interface NoteRef { id: Id }
 export interface NoteSummary { id: Id; title: string; conversationId: Id | null; sizeBytes: number; createdAt: string; updatedAt: string }
 export interface Note extends NoteSummary { body: string }
+export interface SkillRef { id: Id }
+export interface SkillVersionRef extends SkillRef { revision: number }
+export interface SkillList { after?: Id | null; limit?: number }
+export interface SaveSkill extends SkillRef { expectedRevision: number; mutationId: Id; name: string; description: string; instructions: string; exampleInputs: string[]; toolNames: string[] }
+export interface SkillSummary { id: Id; revision: number; name: string; description: string; toolNames: string[]; unavailableTools: string[]; createdAt: string; updatedAt: string }
+export interface Skill extends SkillSummary { instructions: string; exampleInputs: string[] }
+export interface SkillCatalog { items: SkillSummary[]; nextCursor: Id | null }
 export interface AskAgent { question: string; conversationId?: Id | null }
 export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
 

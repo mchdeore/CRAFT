@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -358,4 +359,41 @@ notes = Table(
     UniqueConstraint("owner", "title"),
     CheckConstraint("char_length(title) BETWEEN 1 AND 200", name="title"),
     CheckConstraint("char_length(body) <= 100000", name="body"),
+)
+
+skills = Table(
+    "skills",
+    metadata,
+    identifier(),
+    Column("owner", UUID, ForeignKey("users.id"), nullable=False),
+    Column("revision", Integer, nullable=False, server_default=text("0")),
+    timestamp("created_at"),
+    UniqueConstraint("id", "owner"),
+    CheckConstraint("revision >= 0", name="revision"),
+)
+Index("ix_skills_owner_id", skills.c.owner, skills.c.id)
+
+skill_revisions = Table(
+    "skill_revisions",
+    metadata,
+    Column("skill_id", UUID, primary_key=True),
+    Column("owner", UUID, nullable=False),
+    Column("revision", Integer, primary_key=True),
+    Column("mutation_id", UUID, nullable=False),
+    Column("request_hash", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("instructions", Text, nullable=False),
+    Column("example_inputs", ARRAY(Text), nullable=False),
+    Column("tool_names", ARRAY(Text), nullable=False),
+    timestamp("created_at"),
+    UniqueConstraint("owner", "mutation_id"),
+    ForeignKeyConstraint(["skill_id", "owner"], ["skills.id", "skills.owner"]),
+    CheckConstraint("revision > 0", name="revision"),
+    CheckConstraint("request_hash ~ '^[0-9a-f]{64}$'", name="request_hash"),
+    CheckConstraint("char_length(name) BETWEEN 1 AND 200", name="name"),
+    CheckConstraint("char_length(description) <= 2000", name="description"),
+    CheckConstraint("char_length(instructions) BETWEEN 1 AND 100000", name="instructions"),
+    CheckConstraint("cardinality(example_inputs) <= 20", name="example_inputs"),
+    CheckConstraint("cardinality(tool_names) <= 100", name="tool_names"),
 )

@@ -1,0 +1,17 @@
+{
+  "id": "01997bd1-0000-7000-8000-000000000001",
+  "revision": 1,
+  "name": "Engineering comparison",
+  "description": "Compare generated engineering parameters.",
+  "toolNames": [
+    "list_documents",
+    "read_note"
+  ],
+  "unavailableTools": [],
+  "createdAt": "2026-10-18T00:00:00+00:00",
+  "updatedAt": "2026-10-18T00:00:00+00:00",
+  "instructions": "Read the selected documents and compare their values.",
+  "exampleInputs": [
+    "Compare the two power budgets"
+  ]
+}
