@@ -13,6 +13,27 @@ def scope(caller):
     return caller.sessions
 
 
+def recovery(caller, request):
+    from app.agent.handlers import RunRecovery
+
+    with unit_of_work(scope(caller)) as session:
+        row = storage.recovery(session, caller.user_id, request.id)
+        if row is None:
+            raise NotFound()
+        status = row["status"] or "none"
+        approval_id = row["approval_id"]
+        approval_status = row["approval_status"] if approval_id is not None else None
+        return RunRecovery(
+            status=status,
+            run_id=row["run_id"],
+            started_at=row["started_at"].isoformat() if row["started_at"] is not None else None,
+            ended_at=row["ended_at"].isoformat() if row["ended_at"] is not None else None,
+            approval_id=approval_id,
+            approval_status=approval_status,
+            can_resume=status == "paused" and approval_status in {"approved", "rejected"},
+        )
+
+
 def start(caller, request, version):
     try:
         with unit_of_work(scope(caller)) as session:

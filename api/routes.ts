@@ -37,6 +37,7 @@ export interface Routes {
   "GET /api/conversations": { response: T.ConversationSummary[] };
   "POST /api/conversations": { body: T.NewConversation; response: T.ConversationSummary };
   "GET /api/conversations/:id": { response: T.Conversation };
+  "GET /api/conversations/:id/run": { response: T.RunRecovery };
   "PATCH /api/conversations/:id": { body: T.ConversationUpdate; response: T.ConversationSummary };
   "GET /api/conversations/:id/files": { response: T.WorkspaceFile[] };
   "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };

@@ -7,6 +7,7 @@ from pathlib import Path
 import msgspec
 
 from app.accounts.handlers import Me, SignIn
+from app.agent.handlers import RunRecovery, RunRecoveryRef
 from app.cube.handlers import MissionRef, ValueRef
 from app.infrastructure.paths import ROOT
 from app.infrastructure.shapes import ApiErrorBody
@@ -71,6 +72,8 @@ def test_python_shapes_match_compiled_typescript() -> None:
         DocumentList,
         CatalogDocument,
         DocumentCatalog,
+        RunRecoveryRef,
+        RunRecovery,
     ]:
         compiled = typescript_schema(shape.__name__)
         declared = root_schema(compiled)
@@ -220,3 +223,25 @@ def test_contract_json_examples() -> None:
         example = ROOT / path
         assert example.parent == ROOT / "api/examples" and example.is_file()
         assert jsonschema.Draft7Validator(schema).is_valid(json.loads(example.read_text()))
+
+
+def test_run_recovery_example_wire_shape() -> None:
+    import jsonschema
+
+    example = json.loads((ROOT / "api/examples/run-recovery.json").read_text())
+    parsed = msgspec.convert(example, RunRecovery)
+    assert msgspec.to_builtins(parsed) == example
+    assert parsed.status == "paused" and parsed.approval_status == "pending"
+    assert parsed.run_id is not None and parsed.approval_id is not None
+    assert parsed.can_resume is False
+    validator = jsonschema.Draft7Validator(typescript_schema("RunRecovery"))
+    assert validator.is_valid(example)
+    for field in ("runId", "startedAt", "endedAt", "approvalId", "approvalStatus"):
+        assert validator.is_valid(example | {field: None})
+    for field in example:
+        assert not validator.is_valid(
+            {key: value for key, value in example.items() if key != field}
+        )
+    assert not validator.is_valid(example | {"status": "unknown"})
+    assert not validator.is_valid(example | {"approvalStatus": "unknown"})
+    assert not validator.is_valid(example | {"canResume": "true"})

@@ -291,3 +291,8 @@ def execute_approved(caller, operation, value, invoke):
     if failure is not None:
         raise failure
     return result
+
+
+def status_expression():
+    """Return the existing append-only event status expression without reading data."""
+    return storage.status_expression()

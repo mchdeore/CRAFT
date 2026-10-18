@@ -108,6 +108,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/conversations` | — | `ConversationSummary[]` | signed in; owned conversation | — |
 | `POST /api/conversations` | `NewConversation` | `ConversationSummary` | signed in; owned conversation | — |
 | `GET /api/conversations/:id` | — | `Conversation` | signed in; owned conversation | — |
+| `GET /api/conversations/:id/run` | — | `RunRecovery` | signed in; active owned conversation | — |
 | `PATCH /api/conversations/:id` | `ConversationUpdate` | `ConversationSummary` | signed in; owned conversation | — |
 | `GET /api/conversations/:id/files` | — | `WorkspaceFile[]` | signed in; owned conversation | — |
 | `POST /api/conversations/:id/files` | `Blob`; query `{ classification?: T.Classification }` | `WorkspaceFile` | signed in; owned conversation | — |
@@ -176,6 +177,18 @@ The chat route accepts AG-UI's `RunAgentInput`. `threadId` identifies the conver
 The server reads only the run identifiers, the newest input message for a new run, and the approval identifier for resume. It loads history, tools, context and state itself. The response is `text/event-stream`, with one AG-UI event per `data:` line. The body limit is 1 MiB. Browser context, tools, state, instructions and identity cannot replace server state. Root runs offer reviewed writes; the single-call query helper offers read tools only. Active time and tool calls retain their budgets across resume. Root runs propose one effectful call at a time; parallel approval proposals stop before any request or write is created. The native tool-call identifier and frozen arguments bind each execution to its approval.
 
 The complete synthetic stream is `api/examples/chat-answer.sse`.
+
+`GET /api/conversations/:id/run` returns the latest requester-owned recorded run for an active owned conversation. Running or paused records take precedence over terminal history; within either group, `startedAt` and then run UUID descend. With no run, `status` is `none`, identifiers and timestamps are null, and `canResume` is false. A recorded `running` status does not establish worker liveness. Timestamps describe the stored run: `endedAt` can be present for a paused stream and does not make that run terminal.
+
+The response contains status, run UUID, timestamps, optional approval UUID/status and `canResume`. It projects no native snapshot, model settings, credentials, messages, tool arguments or document content. A paused approval appears only when one well-formed native interrupt links to the actual requester/run/conversation approval record. Its persisted interrupt identity includes the run UUID. Missing or malformed linkage leaves approval fields null and `canResume` false. Pending approvals require a human decision; only approved or rejected records are eligible for explicit resume. Executed and failed approvals cannot invite replay. The GET makes no changes and starts no worker. The decision and run POST routes recheck the current stored approval and native state when used.
+
+### Recover a paused run
+
+1. Read `GET /api/conversations/:id/run` for the saved conversation's status.
+2. Read `GET /api/approvals/:id` to review the current proposed change. Submit an explicit decision with `POST /api/approvals/:id/decision` and `{"approve": true}` or `{"approve": false}`.
+3. Refresh the run and approval. When the matching decision is approved or rejected and `canResume` is true, explicitly continue through the chat route using the saved run and conversation UUIDs and `resume: {"approvalId": "…"}`.
+
+A decision alone executes no work. Rejection continues without the proposed change. Repeated decisions while paused return `409`; a decision after the run finishes returns `404`. Replaying a completed resume returns `409`.
 
 | Event | Meaning |
 |---|---|
@@ -355,6 +368,12 @@ export interface NewConversation { title?: string }
 export interface ConversationUpdate { title?: string; archived?: boolean }
 export interface ConversationSummary { id: Id; title: string; updatedAt: string; archived: boolean; pendingApprovals: number }
 export interface Conversation extends ConversationSummary { messages: AgUiMessage[] }
+export interface RunRecoveryRef { id: Id }
+export interface RunRecovery {
+  status: "none" | "running" | "paused" | "finished" | "failed" | "cancelled";
+  runId: Id | null; startedAt: string | null; endedAt: string | null;
+  approvalId: Id | null; approvalStatus: ApprovalStatus | null; canResume: boolean;
+}
 export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
 export type RetrievalPath = RetrievalStep[];
 export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
@@ -462,6 +481,7 @@ export interface Routes {
   "GET /api/conversations": { response: T.ConversationSummary[] };
   "POST /api/conversations": { body: T.NewConversation; response: T.ConversationSummary };
   "GET /api/conversations/:id": { response: T.Conversation };
+  "GET /api/conversations/:id/run": { response: T.RunRecovery };
   "PATCH /api/conversations/:id": { body: T.ConversationUpdate; response: T.ConversationSummary };
   "GET /api/conversations/:id/files": { response: T.WorkspaceFile[] };
   "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };
@@ -515,6 +535,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/conversations` | `ConversationSummary[]` | `api/examples/conversations.json` |
 | `POST /api/conversations` | `ConversationSummary` | `api/examples/conversation-summary.json` |
 | `GET /api/conversations/:id` | `Conversation` | `api/examples/conversation.json` |
+| `GET /api/conversations/:id/run` | `RunRecovery` | `api/examples/run-recovery.json` |
 | `PATCH /api/conversations/:id` | `ConversationSummary` | `api/examples/conversation-summary.json` |
 | `GET /api/conversations/:id/files` | `WorkspaceFile[]` | `api/examples/workspace-files.json` |
 | `POST /api/conversations/:id/files` | `WorkspaceFile` | `api/examples/workspace-file.json` |

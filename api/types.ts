@@ -115,6 +115,12 @@ export interface NewConversation { title?: string }
 export interface ConversationUpdate { title?: string; archived?: boolean }
 export interface ConversationSummary { id: Id; title: string; updatedAt: string; archived: boolean; pendingApprovals: number }
 export interface Conversation extends ConversationSummary { messages: AgUiMessage[] }
+export interface RunRecoveryRef { id: Id }
+export interface RunRecovery {
+  status: "none" | "running" | "paused" | "finished" | "failed" | "cancelled";
+  runId: Id | null; startedAt: string | null; endedAt: string | null;
+  approvalId: Id | null; approvalStatus: ApprovalStatus | null; canResume: boolean;
+}
 export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
 export type RetrievalPath = RetrievalStep[];
 export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }

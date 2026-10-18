@@ -1,0 +1,9 @@
+{
+  "status": "paused",
+  "runId": "00000000-0000-4000-8000-000000000201",
+  "startedAt": "2026-10-17T12:00:00+00:00",
+  "endedAt": "2026-10-17T12:01:00+00:00",
+  "approvalId": "00000000-0000-4000-8000-000000000202",
+  "approvalStatus": "pending",
+  "canResume": false
+}
