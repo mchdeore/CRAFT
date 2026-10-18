@@ -85,6 +85,27 @@ class RunRef(Shape):
     run: UUID
 
 
+class RunRecoveryRef(Shape):
+    id: UUID
+
+
+class RunRecovery(Shape):
+    status: Literal["none", "running", "paused", "finished", "failed", "cancelled"]
+    run_id: UUID | None
+    started_at: str | None
+    ended_at: str | None
+    approval_id: UUID | None
+    approval_status: Literal["pending", "approved", "rejected", "executed", "failed"] | None
+    can_resume: bool
+
+
+@operation(SIGNED_IN, get="/conversations/{id}/run")
+def get_run_recovery(caller: Caller, request: RunRecoveryRef) -> RunRecovery:
+    from app.agent.service import recovery
+
+    return recovery(caller, request)
+
+
 class RunTokenDigest(Shape):
     digest: Annotated[bytes, msgspec.Meta(min_length=32, max_length=32)]
 

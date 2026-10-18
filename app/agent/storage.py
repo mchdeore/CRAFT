@@ -9,6 +9,8 @@ from sqlalchemy import (
     LargeBinary,
     Table,
     Text,
+    case,
+    cast,
     func,
     select,
     text,
@@ -241,3 +243,77 @@ def principal(session, digest, at):
             ).scalars()
         )
     }
+
+
+def recovery(session: Session, user, conversation):
+    """Project owned metadata and verified linkage without loading native snapshots."""
+    from app.approvals.handlers import approval_status_expression
+
+    approval_requests = metadata.tables["approval_requests"]
+    conversations = metadata.tables["conversations"]
+    users = metadata.tables["users"]
+    latest = (
+        select(agent_runs.c.id)
+        .where(agent_runs.c.conversation_id == conversation, agent_runs.c.started_by == user)
+        .order_by(
+            agent_runs.c.status.in_(("running", "paused")).desc(),
+            agent_runs.c.started_at.desc(),
+            agent_runs.c.id.desc(),
+        )
+        .limit(1)
+        .correlate(None)
+        .scalar_subquery()
+    )
+    native = agent_sessions.c.state
+    state = native.op("->", return_type=JSONB)("state")
+    pending = state.op("->", return_type=JSONB)("craftApprovals")
+    single = pending.op("->", return_type=JSONB)(0)
+    identifier = single.op("->>", return_type=Text)("id")
+    interrupt = single.op("->>", return_type=Text)("interrupt")
+    count = case(
+        (func.jsonb_typeof(pending) == "array", func.jsonb_array_length(pending)),
+        else_=None,
+    )
+    linked = (
+        (func.jsonb_typeof(native) == "object")
+        & (func.jsonb_typeof(state) == "object")
+        & (count == 1)
+        & (func.jsonb_typeof(single) == "object")
+        & (func.jsonb_typeof(single.op("->", return_type=JSONB)("id")) == "string")
+        & (func.jsonb_typeof(single.op("->", return_type=JSONB)("interrupt")) == "string")
+        & (func.length(interrupt) > 0)
+        & (cast(approval_requests.c.id, Text) == identifier)
+        & (approval_requests.c.interrupt_id == cast(agent_runs.c.id, Text) + ":" + interrupt)
+        & (approval_requests.c.run_id == agent_runs.c.id)
+        & (approval_requests.c.conversation_id == conversations.c.id)
+        & (approval_requests.c.requested_by == user)
+    )
+    return (
+        session.execute(
+            select(
+                agent_runs.c.id.label("run_id"),
+                agent_runs.c.status,
+                agent_runs.c.started_at,
+                agent_runs.c.ended_at,
+                approval_requests.c.id.label("approval_id"),
+                approval_status_expression().label("approval_status"),
+            )
+            .select_from(conversations)
+            .join(users, users.c.id == conversations.c.owner_id)
+            .outerjoin(agent_runs, agent_runs.c.id == latest)
+            .outerjoin(
+                agent_sessions,
+                (agent_sessions.c.conversation_id == conversations.c.id)
+                & (agent_runs.c.status == "paused"),
+            )
+            .outerjoin(approval_requests, linked)
+            .where(
+                conversations.c.id == conversation,
+                conversations.c.owner_id == user,
+                conversations.c.archived_at.is_(None),
+                users.c.disabled_at.is_(None),
+            )
+        )
+        .mappings()
+        .first()
+    )

@@ -16,6 +16,11 @@ def approved_request_id(caller: Caller, operation_name: str, value) -> UUID:
     return service.approved_request_id(caller, operation_name, value)
 
 
+def approval_status_expression():
+    """Share the canonical status projection with trusted metadata queries."""
+    return service.status_expression()
+
+
 def approved_preparation(caller: Caller, operation_name: str, value) -> tuple[UUID, object]:
     """Read only the server preparation bound to the current approved invocation."""
     require(caller, SIGNED_IN)
