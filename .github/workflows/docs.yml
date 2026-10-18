@@ -22,7 +22,9 @@ jobs:
         with:
           fetch-depth: 0  # each PDF shows the date of its source's last change
           persist-credentials: false
-          sparse-checkout: docs
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          version: "0.12.23"
       - name: Tools (Linux)
         if: runner.os == 'Linux'
         env:
@@ -60,11 +62,7 @@ jobs:
       - name: Build
         run: docs/tools/build.sh "$RUNNER_TEMP/site"
       - name: Only the public files
-        run: |
-          cd "$RUNNER_TEMP/site"
-          extra="$(ls | grep -Ev '^(index\.html|CRAFT-[A-Za-z0-9-]+\.pdf)$' || true)"
-          if [ -n "$extra" ]; then echo "Not public, not deployed: $extra"; exit 1; fi
-          ls -l
+        run: python3 docs/tools/check_site.py "$RUNNER_TEMP/site" --public
       - if: github.event_name != 'pull_request' && github.event.repository.private == false
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
         with:

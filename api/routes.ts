@@ -1,19 +1,25 @@
 import type * as T from "./types";
 import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
 export interface Routes {
+  "GET /api/approvals": { query: { status?: T.ApprovalStatus }; response: T.Approval[] };
+  "GET /api/approvals/:id": { response: T.ApprovalDetail };
+  "POST /api/approvals/:id/decision": { body: T.Decision; response: T.Approval };
   "GET /api/tools": { response: T.ToolInfo[] };
+  "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
+  "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };
   "POST /api/agent/runs": { body: RunAgentInput; stream: AGUIEvent };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
+  "POST /api/cube/values": { body: T.SubmitValues; response: T.ValueReceipt };
   "POST /api/library/citations/check": { body: T.CitationCheck; response: T.CitationStatus };
   "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number }; response: T.VersionDiff };
   "GET /health/live": { response: T.Health };
   "GET /health/ready": { response: T.Health };
   "POST /api/library/search": { body: T.LibrarySearch; response: T.LibraryHits };
-  "GET /api/library/documents/:item": { response: T.LibraryDocument };
-  "GET /api/library/documents/:item/chunks": { response: T.ChunkPage };
+  "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
+  "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
-  "GET /api/library/documents/:item/preview": { response: Blob };
-  "GET /api/library/documents/:item/download": { response: Blob };
+  "GET /api/library/documents/:item/preview": { query: { version: number; locator?: string }; response: Blob };
+  "GET /api/library/documents/:item/download": { query: { version: number; locator?: string }; response: Blob };
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
@@ -27,4 +33,21 @@ export interface Routes {
   "POST /api/summarize/upload": { body: Blob; response: T.SummaryResult };
   "POST /api/cube/similar": { body: T.SimilarMissions; response: T.SimilarPage };
   "POST /api/cube/similar/explain": { body: T.ExplainSimilarity; response: T.SimilarityExplanation };
+
+  "GET /api/conversations": { response: T.ConversationSummary[] };
+  "POST /api/conversations": { body: T.NewConversation; response: T.ConversationSummary };
+  "GET /api/conversations/:id": { response: T.Conversation };
+  "PATCH /api/conversations/:id": { body: T.ConversationUpdate; response: T.ConversationSummary };
+  "GET /api/conversations/:id/files": { response: T.WorkspaceFile[] };
+  "POST /api/conversations/:id/files": { body: Blob; query: { classification?: T.Classification }; response: T.WorkspaceFile };
+  "GET /api/conversations/:id/files/:fileId/content": { response: Blob };
+  "DELETE /api/conversations/:id/files/:fileId": { response: void };
+
+  "PUT /api/notes": { body: T.WriteNote; response: T.Note };
+  "GET /api/notes": { query: { conversationId?: string }; response: T.NoteSummary[] };
+  "GET /api/notes/:id": { response: T.Note };
+  "DELETE /api/notes/:id": { response: void };
+  "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
+  "POST /api/tools/chart": { body: T.ChartInput; response: T.ChartResult };
+  "POST /api/tools/calculation-check": { body: T.CalculationInput; response: T.CalculationResult };
 }

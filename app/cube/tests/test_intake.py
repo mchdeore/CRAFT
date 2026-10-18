@@ -1,7 +1,9 @@
 """Source cells become proposals; dictionary, citations, grants and all domain rows stay intact."""
 
+import hashlib
 import math
 from collections import defaultdict
+from datetime import datetime
 from uuid import UUID
 
 import msgspec
@@ -17,13 +19,14 @@ from app.infrastructure.errors import InvalidInput, NotFound
 from app.library.handlers import (
     ChunkRange,
     CitationCheck,
+    CitationHandle,
     check_citation,
     convert_source,
     index_provider,
     read_chunks,
 )
-from app.seed.tests.test_demo import demo as demo
 from app.seed.vocabulary import PARAMETERS
+from app.tests.support.demo import demo as demo
 
 
 @pytest.fixture
@@ -269,13 +272,94 @@ def test_ground_truth_values(demo):
 
     caller = local_caller("demo", demo["settings"])
     grouped = defaultdict(list)
+    assert len({value["id"] for value in demo["truth"]["values"]}) == 120
+    deleted = {row["item"] for row in demo["truth"]["deletes"]}
     for value in demo["truth"]["values"]:
         citation = value["citation"]
+        assert value["withdrawn"] == (citation["item"] in deleted)
         grouped[
             (citation["item"], citation["version"], citation["block"], value["validFrom"])
         ].append(value)
-    compared = 0
+    stored_checked = derived = blocked = 0
     for (item, version, block, valid), values in grouped.items():
+        records = {}
+        with demo["sessions"].begin() as session:
+            text = session.execute(
+                select(m.chunks.c.text)
+                .join(m.doc_versions)
+                .where(
+                    m.doc_versions.c.item == item,
+                    m.doc_versions.c.version == version,
+                    m.chunks.c.block == block,
+                )
+            ).scalar_one()
+            assert (
+                session.execute(
+                    select(m.provider_items.c.item).where(m.provider_items.c.item == item)
+                ).scalar_one()
+                == item
+            )
+            for value in values:
+                record = dict(
+                    session.execute(
+                        select(m.cube_values).where(m.cube_values.c.id == UUID(value["id"]))
+                    )
+                    .mappings()
+                    .one()
+                )
+                citation = value["citation"]
+                assert (
+                    record["mission_key"],
+                    record["silo"],
+                    record["stage"],
+                    record["element_id"],
+                    record["parameter"],
+                    record["kind"],
+                    record["source_number"],
+                    record["source_unit"],
+                ) == (
+                    value["mission"],
+                    value["silo"],
+                    value["stage"],
+                    value["element"],
+                    value["parameter"],
+                    value["storedKind"],
+                    value["sourceNumber"],
+                    value["sourceUnit"],
+                )
+                assert record["valid_from"].isoformat() == value["validFrom"]
+                assert record["recorded_at"] == datetime.fromisoformat(value["recordedAt"])
+                assert (record["item"], record["version"], record["block"], record["locator"]) == (
+                    citation["item"],
+                    citation["version"],
+                    citation["block"],
+                    citation["locator"],
+                )
+                assert bytes(record["quote_sha256"]).hex() == citation["quoteSha256"]
+                assert hashlib.sha256(
+                    text.splitlines()[value["rowIndex"]].encode()
+                ).digest() == bytes(record["quote_sha256"])
+                assert (
+                    record["simulated"] == citation["simulated"]
+                    and record["approval_request_id"] is None
+                )
+                if value["storedLow"] is None:
+                    assert record["low"] is None and record["high"] is None
+                else:
+                    assert math.isclose(float(record["low"]), value["storedLow"], rel_tol=1e-12)
+                    assert math.isclose(float(record["high"]), value["storedHigh"], rel_tol=1e-12)
+                records[value["id"]] = record
+                stored_checked += 1
+        if item in deleted:
+            with pytest.raises(NotFound):
+                read_chunks(
+                    caller, ChunkRange(item=item, version=version, from_block=block, to_block=block)
+                )
+            handle = msgspec.convert(values[0]["citation"], CitationHandle)
+            with pytest.raises(NotFound):
+                prepare_values(caller, PrepareValues(handle=handle, valid_from=valid))
+            blocked += len(values)
+            continue
         handle = (
             read_chunks(
                 caller, ChunkRange(item=item, version=version, from_block=block, to_block=block)
@@ -289,32 +373,26 @@ def test_ground_truth_values(demo):
             for candidate in result.candidates
             if candidate.element is None and candidate.problem is None
         }
-        with demo["sessions"].begin() as session:
-            for value in values:
-                record = (
-                    session.execute(
-                        select(m.cube_values).where(m.cube_values.c.id == UUID(value["id"]))
-                    )
-                    .mappings()
-                    .one()
-                )
-                candidate = totals[value["parameter"]]
+        for value in values:
+            record = records[value["id"]]
+            candidate = totals[value["parameter"]]
+            matched = (
+                candidate.kind == record["kind"] and candidate.source_unit == record["source_unit"]
+            )
+            if record["low"] is None:
+                matched = matched and candidate.low is None and candidate.high is None
+            else:
                 matched = (
-                    candidate.kind == record["kind"]
-                    and candidate.source_unit == record["source_unit"]
+                    matched
+                    and math.isclose(candidate.low, float(record["low"]), rel_tol=1e-12)
+                    and math.isclose(candidate.high, float(record["high"]), rel_tol=1e-12)
+                    and candidate.source_number == record["source_number"]
                 )
-                if record["low"] is None:
-                    matched = matched and candidate.low is None and candidate.high is None
-                else:
-                    matched = (
-                        matched
-                        and math.isclose(candidate.low, float(record["low"]), rel_tol=1e-12)
-                        and math.isclose(candidate.high, float(record["high"]), rel_tol=1e-12)
-                        and candidate.source_number == record["source_number"]
-                    )
-                assert matched
-                compared += 1
-    assert compared == 120
+            assert matched
+            derived += 1
+    assert stored_checked == 120
+    assert derived == 96 and blocked == 24
+    assert derived + blocked == stored_checked
 
 
 def test_first_parameter_column_and_transposed_elements(intake_source):

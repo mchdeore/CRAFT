@@ -68,6 +68,7 @@ Each request resolves its session, checks the operation permission, applies the 
 | `CRAFT_PASSWORD_MIN_LENGTH` | 12 |
 | `CRAFT_ALLOWED_ORIGINS` | `http://localhost:8000` |
 | `CRAFT_DEV_PAGE` | 0 (disabled) |
+| `CRAFT_MCP_URL` | `http://127.0.0.1:8000/mcp` (loopback only) |
 
 Settings validate at startup. `CRAFT_DEV_PAGE=1` mounts the single temporary `/dev` page for same-origin sign-in, current-account lookup, library search and sign-out. The page uses text nodes for document content and stores no session token. The keep-alive update extends idle expiry by eight hours, at most once a minute, and never beyond the twelve-hour absolute expiry.
 
@@ -83,6 +84,8 @@ Settings validate at startup. `CRAFT_DEV_PAGE=1` mounts the single temporary `/d
 
 Every access checks the owner; a conversation identifier grants no permission. History comes only from `messages`. CRAFT stores conversation history and agent state under section 7. Model response storage follows section 4.1; run tokens follow section 3.3. Workspace labels and export approval follow section 7.3.
 
+Conversation routes list at most 100 owned records in descending update order. Create and rename accept titles of 1 to 200 characters. Missing or foreign identifiers return 404. Archived history remains readable; runs and file operations require an active conversation. Sign-out preserves all records. Upload state and classification follow section 7.3. Downloads record linked metadata without names or bytes.
+
 ## 9.6 Deferred access
 
 | Later | What changes | What stays |
@@ -95,3 +98,11 @@ Every access checks the owner; a conversation identifier grants no permission. H
 Entra sign-in uses OpenID Connect with tokens on the server. Accounts link by tenant and object identifier, never email. Local credentials are disabled after migration.
 
 The single `/summarize` shell is available with the development page disabled. It contains no source content before sign-in. Summary selection and uploads require the real session and allowed Origin. Source permissions apply before a model call. Browser controls retain only the selected source or owned File object and clear results on failure or sign-out.
+
+HTTP MCP uses its own short-lived run credential. A session cookie alone is refused.
+The token binds an enabled account and a running, unarchived owned conversation;
+current roles load again for each request and tool call. Only its SHA-256 digest is
+stored, and replacement revokes the previous value. Expiry, pause, run end and
+disconnect stop later use. The browser never receives this credential. Tokens remain
+outside model arguments and server logs. Tool metadata cannot replace the trusted
+user, conversation, run or parent-call context.

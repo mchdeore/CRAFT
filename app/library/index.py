@@ -12,7 +12,7 @@ from app.infrastructure.config.settings import Settings
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.unit_of_work import unit_of_work
-from app.infrastructure.provider.simulated import SimulatedProvider
+from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.convert import convert
 from app.library.diff import compare
@@ -22,7 +22,7 @@ from app.library.summaries import make as make_summary
 
 
 def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
-    provider = SimulatedProvider(settings.provider_root)
+    provider = get_provider(settings.provider_root)
     provider.scan()
     sessions, engine = make_owner_sessions(settings)
     caller = Caller(sessions=sessions, settings=settings)
@@ -61,16 +61,8 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 )
             )
             if rebuild:
-                session.execute(
-                    m.vectors.delete().where(
-                        m.vectors.c.owner_kind.in_(["chunk", "doc_version", "facet_text"])
-                    )
-                )
-                session.execute(m.facet_texts.delete())
+                storage.clear_index(session, list(records))
                 dirty.update(missions)
-                session.execute(m.version_diffs.delete())
-                session.execute(m.chunks.delete())
-                session.execute(m.doc_versions.delete())
             for item in records.values():
                 columns = {
                     k: item[k]

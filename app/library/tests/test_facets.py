@@ -4,13 +4,13 @@ import json
 
 from sqlalchemy import select
 
-from app.cube.tests.conftest import cube_source as cube_source
 from app.cube.tests.test_similarity import pair as pair
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
 from app.library import facets
 from app.library.handlers import index_provider
+from app.tests.support.cube import cube_source as cube_source
 
 
 def records(source):

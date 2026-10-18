@@ -12,7 +12,7 @@ from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.metadata import metadata, mission_grants
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.paths import ROOT
-from app.infrastructure.provider.simulated import SimulatedProvider
+from app.infrastructure.provider import get_provider
 
 
 def seed(settings: Settings) -> dict[str, int]:
@@ -23,7 +23,7 @@ def seed(settings: Settings) -> dict[str, int]:
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
-    SimulatedProvider(root, clock="2026-01-01T00:00:00+00:00").scan()
+    get_provider(root, clock="2026-01-01T00:00:00+00:00").scan()
     sessions, engine = make_owner_sessions(settings)
     users = metadata.tables["users"]
     roles = metadata.tables["user_roles"]

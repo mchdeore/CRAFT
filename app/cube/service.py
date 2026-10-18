@@ -145,8 +145,6 @@ def list_parameters(caller):
 
 
 def prepare_values(caller, request):
-    from app.cube import intake
-
     document = library.get_document(
         caller,
         library.DocumentRef(item=request.handle.item, version=request.handle.version),
@@ -162,10 +160,22 @@ def prepare_values(caller, request):
     )
     if not page.chunks or page.chunks[0].handle != request.handle:
         raise NotFound()
-    chunk = page.chunks[0]
-    target = request.mission if request.mission is not None else document.tags.mission
-    silo = request.silo if request.silo is not None else document.tags.silo
-    stage = request.stage if request.stage is not None else document.tags.stage
+    return prepare_values_from_chunk(
+        caller,
+        request,
+        page.chunks[0],
+        (document.tags.mission, document.tags.silo, document.tags.stage),
+    )
+
+
+def prepare_values_from_chunk(caller, request, chunk, source_scope):
+    """Derive candidates from a checked chunk and the current intake dictionary."""
+    from app.cube import intake
+
+    source_mission, source_silo, source_stage = source_scope
+    target = request.mission if request.mission is not None else source_mission
+    silo = request.silo if request.silo is not None else source_silo
+    stage = request.stage if request.stage is not None else source_stage
     if request.valid_from is not None:
         try:
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", request.valid_from):
@@ -194,6 +204,12 @@ def prepare_values(caller, request):
         stage,
         request.valid_from,
     )
+
+
+def submit_values(caller, request):
+    from app.cube import publication
+
+    return publication.submit(caller, request)
 
 
 def find_missions(caller, request):
@@ -390,13 +406,17 @@ def get_value_evidence(caller, request):
         dictionary = storage.dictionary(session)
     selected = state.with_sources([row], state.sources(caller))[0]
     value = value_shape(selected, dictionary)
-    quote = library.citation_quote(caller, value.citation)
     status = library.citation_status(caller, value.citation)
-    if value.withdrawn:
+    if value.withdrawn or status == "withdrawn":
         status = "withdrawn"
+        value = msgspec.structs.replace(value, kind="unknown", low=None, high=None, withdrawn=True)
+        quote = ""
+    else:
+        quote = library.citation_quote(caller, value.citation)
     conversion = "No numeric source value."
     if (
-        row["source_number"] is not None
+        not value.withdrawn
+        and row["source_number"] is not None
         and row["source_unit"] in dictionary[row["parameter"]]["conversions"]
     ):
         multiplier, offset = dictionary[row["parameter"]]["conversions"][row["source_unit"]]

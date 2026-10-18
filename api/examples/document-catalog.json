@@ -1,0 +1,12 @@
+{
+  "documents": [
+    {
+      "item": "itm_0123456789ab",
+      "title": "Synthetic engineering notes",
+      "version": 1,
+      "classification": "unclassified",
+      "simulated": true
+    }
+  ],
+  "truncated": false
+}

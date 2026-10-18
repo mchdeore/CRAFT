@@ -1,3 +1,5 @@
+import type { Message as AgUiMessage } from "@ag-ui/core";
+
 export type Id = string;
 export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
@@ -15,6 +17,9 @@ export interface ChunkText { handle: CitationHandle; headingPath: string; text: 
 export interface LibraryHit { kind: "chunk" | "document"; handle: CitationHandle; title: string; headingPath: string; text: string; score: number; tags: Tags; classification: Classification; before: ChunkText | null; after: ChunkText | null }
 export interface LibraryHits { hits: LibraryHit[]; truncated: boolean }
 export interface DocumentRef { item: string; version?: number }
+export interface DocumentList { limit?: number }
+export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
+export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
@@ -42,6 +47,8 @@ export interface CubeValue {
 export interface FoundMissions {
   missions: { mission: Mission; matched: CubeValue[] }[]; at: string; knownAt: string; truncated: boolean;
 }
+export interface MissionRef { key: string; silo?: string; stage?: string; at?: string; knownAt?: string }
+export interface ValueRef { id: Id }
 export interface MissionState {
   mission: Mission; values: CubeValue[]; gaps: string[];         // parameter keys without a value
   at: string; knownAt: string;
@@ -74,6 +81,8 @@ export interface VersionDiff { blocks: {change: "added" | "removed" | "changed" 
 export interface PrepareValues { handle: CitationHandle; mission?: string; silo?: string; stage?: string; validFrom?: string }
 export interface Candidate { row: number; header: string; parameter: string | null; element: string | null; sourceNumber: string; sourceUnit: string | null; kind: ValueKind; low: number | null; high: number | null; citation: CitationHandle; problem: string | null }
 export interface Candidates { mission: string | null; silo: string | null; stage: string | null; validFrom: string | null; candidates: Candidate[]; problems: string[] }
+export interface SubmitValues { mission: string; silo: string; stage: string | null; validFrom: string; candidates: Candidate[] }
+export interface ValueReceipt { approvalId: Id; valueIds: Id[] }
 
 export type Facet = "purpose" | "design" | "operations" | "program" | "cost_and_risk";
 export interface SimilarMissions { key: string; facets?: Facet[]; limit?: number }
@@ -88,6 +97,8 @@ export interface FacetExplanation {
   sources: string[]; otherSources: string[];
 }
 export interface SimilarityExplanation { facets: FacetExplanation[] }
+export interface Capability { name: string; description: string }
+export interface CapabilityCatalog { tools: Capability[]; skills: string[]; skillsStatus: "not_installed" }
 export interface ToolInfo {
   name: string; operation: string; description: string;
   effects: "NONE" | "DATA" | "DOCUMENT" | "EXTERNAL" | "FINAL";
@@ -99,3 +110,32 @@ export interface Citation {
   classification: Classification; quote: string;
 }
 export interface AnswerMeta { messageId: string; citations: Citation[]; confidence: Confidence }
+
+export interface NewConversation { title?: string }
+export interface ConversationUpdate { title?: string; archived?: boolean }
+export interface ConversationSummary { id: Id; title: string; updatedAt: string; archived: boolean; pendingApprovals: number }
+export interface Conversation extends ConversationSummary { messages: AgUiMessage[] }
+export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
+export type RetrievalPath = RetrievalStep[];
+export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath }
+export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
+export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }
+
+export interface WriteNote { title: string; body: string; conversationId?: Id | null }
+export interface NoteList { conversationId?: Id | null }
+export interface NoteRef { id: Id }
+export interface NoteSummary { id: Id; title: string; conversationId: Id | null; sizeBytes: number; createdAt: string; updatedAt: string }
+export interface Note extends NoteSummary { body: string }
+export interface AskAgent { question: string; conversationId?: Id | null }
+export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
+
+export interface ChartInput { spec: Record<string, unknown>; format: "svg" | "png" }
+export interface ChartResult { format: "svg" | "png"; mediaType: string; contentBase64: string | null; file: WorkspaceFile | null }
+export interface CalculationInput { expression: string; craftResult?: string | number | null; unit?: string | null }
+export interface CalculationResult { expression: string; wolframResult: string; craftResult: string | number | null; agrees: boolean; checkedAt: string }
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | "failed";
+export interface Approval { id: Id; conversationId: Id; runId: Id; tool: string; summary: string; status: ApprovalStatus; requestedAt: string }
+export interface ApprovalEvent { kind: "requested" | "approved" | "rejected" | "executed" | "failed"; actorId: Id | null; at: string; note?: string | null }
+export interface ApprovalDetail extends Approval { arguments: Record<string, unknown>; evidence: Record<string, unknown>[]; reasoning: string; retrievalPath: Record<string, unknown>[]; events: ApprovalEvent[] }
+export interface Decision { approve: boolean; note?: string | null }

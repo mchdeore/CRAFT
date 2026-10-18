@@ -1,0 +1,70 @@
+{
+  "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61",
+  "title": "Synthetic saved conversation",
+  "updatedAt": "2026-10-16T00:00:00Z",
+  "archived": false,
+  "pendingApprovals": 0,
+  "messages": [
+    {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e65",
+      "role": "user",
+      "content": "Synthetic question"
+    },
+    {
+      "id": "0490f617-5a01-5afe-a8eb-8b2384905bb6",
+      "role": "assistant",
+      "content": "| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 400 | W |"
+    },
+    {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e66",
+      "role": "activity",
+      "activityType": "craft.answer",
+      "content": {
+        "messageId": "0490f617-5a01-5afe-a8eb-8b2384905bb6",
+        "citations": [
+          {
+            "handle": {
+              "item": "itm_259f893facac",
+              "version": 1,
+              "block": 1,
+              "locator": "heading=1;block=1;rows=1-1",
+              "quoteSha256": "647045c0107055e5e9047787e76c64f55c4139efdbc9e7c42ebb510f3bac0fb6",
+              "simulated": true
+            },
+            "title": "budget",
+            "headingPath": "1 Budget",
+            "classification": "unclassified",
+            "quote": "| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 400 | W |"
+          }
+        ],
+        "confidence": {
+          "score": 0.0,
+          "level": "low",
+          "reason": "Evidence is insufficient for drafting before calibration."
+        }
+      }
+    },
+    {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e67",
+      "role": "activity",
+      "activityType": "craft.retrieval",
+      "content": {
+        "messageId": "0490f617-5a01-5afe-a8eb-8b2384905bb6",
+        "runId": "887c9dbb-e979-48cb-979b-92ced1638fa5",
+        "model": "fake",
+        "instructionsVersion": "0000000000000000000000000000000000000000000000000000000000000000",
+        "path": [
+          {
+            "tool": "search",
+            "operation": "library.search",
+            "arguments": {
+              "query": "synthetic question"
+            },
+            "at": "2026-10-16T00:00:00Z",
+            "toolCallId": "call_1"
+          }
+        ]
+      }
+    }
+  ]
+}

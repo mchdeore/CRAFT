@@ -1,11 +1,42 @@
 """Readable library queries use explicit sessions and never choose transactions."""
 
+from collections.abc import Sequence
+
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.grants import readable
+
+
+def clear_index(session: Session, items: Sequence[str]) -> None:
+    """Remove derived rows for these source items, preserving other providers."""
+    if not items:
+        return
+    documents = select(m.doc_versions.c.id).where(m.doc_versions.c.item.in_(items))
+    chunks = select(m.chunks.c.id).where(m.chunks.c.doc_version_id.in_(documents))
+    facets = select(m.facet_texts.c.id).where(m.facet_texts.c.sources.overlap(list(items)))
+    session.execute(
+        m.vectors.delete().where(
+            or_(
+                and_(m.vectors.c.owner_kind == "doc_version", m.vectors.c.owner_id.in_(documents)),
+                and_(m.vectors.c.owner_kind == "chunk", m.vectors.c.owner_id.in_(chunks)),
+                and_(m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets)),
+            )
+        )
+    )
+    session.execute(m.facet_texts.delete().where(m.facet_texts.c.id.in_(facets)))
+    session.execute(
+        m.version_diffs.delete().where(
+            or_(
+                m.version_diffs.c.from_version.in_(documents),
+                m.version_diffs.c.to_version.in_(documents),
+            )
+        )
+    )
+    session.execute(m.chunks.delete().where(m.chunks.c.id.in_(chunks)))
+    session.execute(m.doc_versions.delete().where(m.doc_versions.c.id.in_(documents)))
 
 
 def item(session: Session, caller: Caller, key: str):
@@ -15,6 +46,21 @@ def item(session: Session, caller: Caller, key: str):
         )
         .mappings()
         .first()
+    )
+
+
+def catalog_items(session: Session, caller: Caller):
+    """Take at most 200 readable indexed IDs plus a scan-limit sentinel."""
+    indexed = (
+        select(m.doc_versions.c.id).where(m.doc_versions.c.item == m.provider_items.c.item).exists()
+    )
+    return list(
+        session.execute(
+            select(m.provider_items.c.item)
+            .where(readable(caller), m.provider_items.c.deleted_at.is_(None), indexed)
+            .order_by(m.provider_items.c.item)
+            .limit(201)
+        ).scalars()
     )
 
 
@@ -211,7 +257,9 @@ def facet_vectors(session: Session, identifiers, model):
     }
 
 
-def candidates(session: Session, caller: Caller, request, query_vector, model="fake-embed@1"):
+def candidates(
+    session: Session, caller: Caller, request, query_vector, model="fake-embed@1", *, items=None
+):
     session.execute(text("set local hnsw.iterative_scan = 'strict_order'"))
     latest = (
         select(m.doc_versions.c.item, func.max(m.doc_versions.c.version).label("version"))
@@ -225,6 +273,8 @@ def candidates(session: Session, caller: Caller, request, query_vector, model="f
         and_(m.doc_versions.c.item == latest.c.item, m.doc_versions.c.version == latest.c.version),
     )
     filters = [readable(caller), m.provider_items.c.deleted_at.is_(None)]
+    if items is not None:
+        filters.append(m.provider_items.c.item.in_(items))
     for field, values in [
         ("mission_key", request.missions),
         ("silo", request.silos),

@@ -11,7 +11,7 @@ def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
     return service.read_readable(caller, request.item, request.version)
 ```
 
-`@operation(access, *, get|post|put|patch|delete=path, tool=False, effects=NONE)`
+`@operation(access, *, get|post|put|patch|delete=path, tool=False, effects=NONE, prepare_approved=None)`
 
 | Declaration | Required | Values and rule |
 |---|---|---|
@@ -22,6 +22,7 @@ def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
 | `get=` … `delete=` | no | The HTTP route under `/api`. At most one |
 | `tool=True` | no | Also an MCP tool. Needs a route and a docstring (what, when, one example) |
 | `effects=` | no, default `NONE` | `NONE`, `DATA`, `DOCUMENT`, `EXTERNAL`, `FINAL`. An agent call with an effect other than `NONE` pauses for approval |
+| `prepare_approved=` | no, default `None` | Internal preparation callback for an approved synchronous effect; returns a typed server-owned snapshot before the write transaction |
 | names | generated | Operation `<feature>.<function>` (routes, logs); tool = `<function>` |
 | errors | raised | `InvalidInput`, `NotSignedIn`, `Forbidden`, `NotFound`, `Conflict`, `RateLimited`. Other failures return `internal_error` |
 
@@ -89,3 +90,13 @@ Each operation declares a permission. Account roles are rows in `user_roles` (§
 - Deferred: OpenTelemetry export (Agent Framework already emits traces) to Azure Monitor; retention.
 
 Health probes preserve availability when log storage is unavailable. Liveness emits its operation event to stdout without database work. Readiness emits a database row only when the database is ready; an unavailable result emits stdout only and keeps the three-second deadline.
+
+The current HTTP MCP mount reuses the local registry server. Private typed agent
+handlers resolve run-token digests through short read-only transactions and issue or
+revoke credentials through short writes. They are neither routes nor tools. Current
+roles and active run/account state are checked before protocol requests and tool
+execution. The tool-call identifier arrives in `craft/toolCallId` metadata; parent
+context comes from server-owned state. `agent.tool` observes the native outbound
+call without input/output logging, and links to the same run and model tool call as
+the checked `origin=mcp` operation. Native SDK private transport fields do not become
+public top-level AG-UI event fields.

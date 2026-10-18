@@ -17,7 +17,7 @@ from app.cube.handlers import (
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import InvalidInput, NotFound
 from app.library import handlers as library
-from app.seed.tests.test_demo import demo as demo
+from app.tests.support.demo import demo as demo
 
 
 @pytest.fixture

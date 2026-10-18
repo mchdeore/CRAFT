@@ -153,6 +153,8 @@ create index on workspace_files (conversation_id, created_at desc);    -- delete
 | Workspace | The files of one conversation, uploaded or made by the agent. A file is simulated only if all its inputs are, and takes the highest classification among them. Deleted when the conversation is archived; keeping one or sending it outside CRAFT is an export, which needs approval. Every download is in the call log |
 | User documents | `drafts` belong to their owner. Append-only. Shared documents (Vision) build on this pattern |
 
+Answer retrieval records live in `messages.content` as typed `craft.retrieval` AG-UI activities beside `craft.answer`. The activity holds messageId, runId, model, instructionsVersion and path. No new table is needed. File operations use the existing workspace table and declared application grants. Limits are 25 MiB per file and 50 files; conversation-row locks serialize counting and updates. Archive and run start share account serialization. Archive refuses active runs, removes workspace rows and retains history.
+
 ## 7.4 Seed and health
 
 - Seed (not a migration): `uv run craft seed base` loads demo users, their mission grants and a small provider folder; `uv run craft seed demo` adds the demo set (section 8.17). `uv run craft index` then builds the library (fake embeddings in fake-model mode). Seeding and indexing run as `craft_owner`, like a migration, and are idempotent. Account creation and grants through `craft users` use the application login.

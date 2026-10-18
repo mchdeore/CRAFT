@@ -54,6 +54,8 @@ def decode(operation: Operation, value: Any) -> Any:
             raise InvalidInput(fields=[FieldError(path="$", message="No input is accepted.")])
         return None
     try:
+        if value is None:
+            value = {}
         if isinstance(value, operation.input):
             return msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
         if isinstance(value, (bytes, bytearray)):
@@ -171,7 +173,9 @@ def checked_input(operation: Operation, caller: Caller, value: Any) -> Any:
             raise TooLarge()
     request = decode(operation, value)
     if caller.origin == "mcp" and operation.effects != "NONE":
-        raise ApprovalRequired()
+        from app.approvals.service import require_approved
+
+        require_approved(caller, operation, request)
     return caller, request
 
 
@@ -299,7 +303,19 @@ def wrap(operation: Operation) -> Any:
                     resolved, value = checked_input(operation, resolved, await request.read())
                 else:
                     resolved, value = checked(operation, caller, request)
-                if inspect.iscoroutinefunction(fn):
+                if resolved.origin == "mcp" and operation.effects != "NONE":
+                    from app.approvals.service import execute_approved
+
+                    output = await run_in_threadpool(
+                        execute_approved,
+                        resolved,
+                        operation,
+                        value,
+                        lambda: validate_output(
+                            operation, fn(resolved, value) if operation.input else fn(resolved)
+                        ),
+                    )
+                elif inspect.iscoroutinefunction(fn):
                     output = await fn(resolved, value) if operation.input else await fn(resolved)
                 else:
                     output = await run_in_threadpool(fn, resolved, value)
@@ -333,6 +349,17 @@ def wrap(operation: Operation) -> Any:
             error = None
             try:
                 resolved, value = checked(operation, caller, request)
+                if resolved.origin == "mcp" and operation.effects != "NONE":
+                    from app.approvals.service import execute_approved
+
+                    return execute_approved(
+                        resolved,
+                        operation,
+                        value,
+                        lambda: validate_output(
+                            operation, fn(resolved, value) if operation.input else fn(resolved)
+                        ),
+                    )
                 result = fn(resolved, value) if operation.input else fn(resolved)
                 return validate_output(operation, result)
             except ApiError as failure:
@@ -421,7 +448,7 @@ def endpoint(operation: Operation) -> Any:
                     encoded(),
                     source=iterator,
                     media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
                 )
             elif inspect.iscoroutinefunction(wrapper):
                 result = await wrapper(caller, values or None)
@@ -438,12 +465,14 @@ def endpoint(operation: Operation) -> Any:
                 response = json_response(result, status)
             for action in response_actions.get() or []:
                 response.set_cookie(**action)
-            return response
         except ApiError as error:
-            return error_response(error)
+            response = error_response(error)
         finally:
             transport_request.reset(token)
             response_actions.reset(action_token)
+        if not operation.name.startswith("health."):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     handle.__dict__["__operation__"] = operation
     return handle

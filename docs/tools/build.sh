@@ -12,6 +12,7 @@ CHROME="${CHROME:-$(command -v google-chrome chromium | head -1 || true)}"
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+export UV_PROJECT_ENVIRONMENT="$WORK/venv"
 rm -f "$OUT"/CRAFT-*.pdf "$OUT/index.html"
 
 version() {  # version <path>: "<date>|<commit>" of its last change, or "<today>|draft"
@@ -81,8 +82,35 @@ done
 build docs/API-Contract.md API-Contract "API Contract"
 build docs/Dependencies-and-Integration.md Dependencies-and-Integration "Dependencies and Integration"
 
-python3 "$T/links.py" "$ROOT/docs/index.md" "$WORK/manifest.tsv" "$WORK/board.md" "$(git -C "$ROOT" rev-parse HEAD)"
-{ echo '<meta name="viewport" content="width=device-width, initial-scale=1">'
-  echo "<style>"; cat "$T/site.css"; echo "</style>"; } > "$WORK/site-head.html"
-pandoc -f gfm -t html5 -s --columns=10000 -M document-css=false --metadata pagetitle="CRAFT Documents" \
-  -H "$WORK/site-head.html" "$WORK/board.md" -o "$OUT/index.html"
+python3 "$T/links.py" "$ROOT/docs/downloads.md" "$WORK/manifest.tsv" "$WORK/downloads.md" "$(git -C "$ROOT" rev-parse HEAD)"
+
+# Stage verified downloads with the Markdown topics, then let MkDocs own the site.
+uv run --locked --only-group docs python - "$ROOT" "$WORK" "$OUT" <<'PYDOCS'
+from pathlib import Path
+import shutil
+import sys
+import yaml
+import runpy
+import subprocess
+root, work, output = map(Path, sys.argv[1:])
+source = work / "source"
+helpers = runpy.run_path(str(root / "docs/tools/source_links.py"))
+paths = subprocess.check_output(["git", "-C", str(root), "ls-files", "-z", "--", "docs"])
+helpers["stage_public_sources"](root, source, paths.decode().rstrip("\0").split("\0"))
+shutil.copyfile(work / "downloads.md", source / "downloads.md")
+helpers["prepare"](root / "docs", source, work / "markdown")
+for pdf in output.glob("CRAFT-*.pdf"):
+    shutil.copyfile(pdf, source / pdf.name)
+config = yaml.safe_load((root / "mkdocs.yml").read_text())
+config["docs_dir"] = str(source)
+config["site_dir"] = str(output)
+(work / "mkdocs.yml").write_text(yaml.safe_dump(config, sort_keys=False))
+PYDOCS
+uv run --locked --only-group docs mkdocs build --strict --config-file "$WORK/mkdocs.yml"
+python3 - "$WORK/markdown" "$OUT/markdown" <<'PYMARKDOWN'
+from pathlib import Path
+import shutil
+import sys
+shutil.copytree(Path(sys.argv[1]), Path(sys.argv[2]), dirs_exist_ok=True)
+PYMARKDOWN
+python3 "$T/check_site.py" "$OUT" --public

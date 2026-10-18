@@ -16,7 +16,7 @@ from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.paths import ROOT
-from app.infrastructure.provider.simulated import SimulatedProvider
+from app.infrastructure.provider import Provider, get_provider
 from app.library.handlers import convert_source as convert
 from app.library.handlers import index_provider
 from app.seed import files
@@ -39,7 +39,7 @@ def active_files(root: Path) -> dict[str, str]:
     }
 
 
-def item_at(provider: SimulatedProvider, path: str) -> dict:
+def item_at(provider: Provider, path: str) -> dict:
     return next(
         row
         for row in provider.items().values()
@@ -98,7 +98,7 @@ def budgets(
 
 
 def source_values(
-    provider: SimulatedProvider, mission: dict, paths: tuple[str, str], generation: int, seed: int
+    provider: Provider, mission: dict, paths: tuple[str, str], generation: int, seed: int
 ) -> list[dict]:
     definitions = {row[0]: row for row in PARAMETERS}
     records = []
@@ -181,7 +181,7 @@ def prepare(root: Path, seed: int) -> tuple[dict, list[str]]:
     ):
         return previous, []
     generation = previous.get("generation", 0) + 1 if previous else 1
-    provider = SimulatedProvider(root, clock=CLOCK)
+    provider = get_provider(root, clock=CLOCK)
     rng = random.Random(seed)
     truth = {
         "seed": seed,
@@ -367,7 +367,7 @@ def prepare(root: Path, seed: int) -> tuple[dict, list[str]]:
 
 
 def finish(root: Path, truth: dict, pending: list[str]) -> dict:
-    provider = SimulatedProvider(root, clock=CLOCK)
+    provider = get_provider(root, clock=CLOCK)
     for item in pending:
         provider.delete_item(item)
     truth["deletes"] = [{"item": item} for item in pending] or truth["deletes"]

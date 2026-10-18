@@ -1,12 +1,15 @@
 """Deterministic scripted model responses and separate hash-derived embeddings."""
 
 import hashlib
+import html
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Sequence
 from typing import Any
 
+import msgspec
 from agent_framework import (
     BaseChatClient,
     ChatMiddlewareLayer,
@@ -79,6 +82,110 @@ def summary_task(question: str):
     return {"sentences": sentences, "filings": filings}
 
 
+def catalog_task(question: str):
+    question = re.sub(r"\s+", " ", question.casefold()).strip(" .?!")
+    listing = (
+        r"(?:please )?(?:list|show|enumerate)"
+        r"(?: (?:me|my|the|all|available|saved|installed))* "
+    )
+    if re.fullmatch(listing + r"skills", question) or re.fullmatch(
+        r"(?:what|which) (?:saved )?skills (?:are available|are installed|do you have)", question
+    ):
+        return "skills"
+    if re.fullmatch(listing + r"tools", question) or re.fullmatch(
+        r"(?:what|which) tools (?:can you use|are available|do you have)", question
+    ):
+        return "tools"
+    documents = (
+        r"(?:please )?(?:list|show|enumerate)"
+        r"(?: (?:me|my|the|all|available|readable|indexed|current))* "
+        r"(?:documents|files|database)(?: in (?:the )?database)?"
+    )
+    if (
+        re.fullmatch(documents, question)
+        or re.fullmatch(
+            r"(?:what|which)(?: (?:readable|indexed|current|available))* documents "
+            r"(?:are in (?:the )?database|can (?:you|i|we) read|are available)",
+            question,
+        )
+        or re.fullmatch(r"what is in (?:the )?database", question)
+    ):
+        return "documents"
+    return None
+
+
+def checked_catalog(value, kind: str, depth: int = 0):
+    from app.library.handlers import DocumentCatalog
+    from app.tools.handlers import CapabilityCatalog
+
+    if depth > 3:
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return None
+    if isinstance(value, dict):
+        if value.get("isError") is True:
+            return None
+        try:
+            if kind == "documents":
+                return msgspec.convert(value, DocumentCatalog, strict=True)
+            catalog = msgspec.convert(value, CapabilityCatalog, strict=True)
+            return None if catalog.skills else catalog
+        except (msgspec.ValidationError, TypeError):
+            pass
+        if "structuredContent" in value:
+            return checked_catalog(value["structuredContent"], kind, depth + 1)
+        if value.get("type") == "text" and isinstance(value.get("text"), str):
+            return checked_catalog(value["text"], kind, depth + 1)
+        if isinstance(value.get("content"), list):
+            return checked_catalog(value["content"], kind, depth + 1)
+    elif isinstance(value, list):
+        for block in value:
+            if isinstance(block, dict) and block.get("type") == "text":
+                found = checked_catalog(block, kind, depth + 1)
+                if found is not None:
+                    return found
+    return None
+
+
+def catalog_text(value: str):
+    value = "".join(char for char in value if not unicodedata.category(char).startswith("C"))
+    return re.sub(r"([\\`*_{}\[\]()#+.!|~-])", r"\\\1", html.escape(value))
+
+
+def catalog_summary(catalog, kind: str):
+    if kind == "skills":
+        return "Saved skills are not installed. No saved skills are available."
+    if kind == "tools":
+        lines = ["Available tools:", "Saved skills are not installed."]
+        rows = [f"- `{tool.name}`: {catalog_text(tool.description)}" for tool in catalog.tools]
+    else:
+        lines = ["Readable indexed documents (default result limit 25; source scan limit 200):"]
+        if catalog.truncated:
+            lines.append(
+                "Listing truncated at a scan or result limit; more readable documents may exist."
+            )
+        if not catalog.documents:
+            lines.append("No currently readable indexed documents were returned.")
+        rows = [
+            f"- {catalog_text(row.title)} — version {row.version}; {row.classification}; "
+            + ("simulated" if row.simulated else "not simulated")
+            for row in catalog.documents
+        ]
+    size = sum(len(line) + 1 for line in lines)
+    for row in rows:
+        if size + len(row) + 1 > 11900:
+            lines.append(
+                "Catalog display limit reached; this answer omits additional catalog rows."
+            )
+            break
+        lines.append(row)
+        size += len(row) + 1
+    return "\n".join(lines)
+
+
 class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
     def __init__(self, role: str = "main"):
         super().__init__()
@@ -104,12 +211,40 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
             (self.role + question + str(len(tool_results))).encode()
         ).hexdigest()
         task = summary_task(question)
+        catalog_kind = catalog_task(question)
         if task is not None:
             contents = [Content.from_text(json.dumps(task))]
         elif self.role == "check":
             contents = [
                 Content.from_text(json.dumps({"supported": bool(tool_results), "simulated": True}))
             ]
+        elif catalog_kind is not None:
+            if tool_results:
+                catalog = next(
+                    (
+                        result
+                        for content in tool_results
+                        if (result := checked_catalog(content.result, catalog_kind)) is not None
+                    ),
+                    None,
+                )
+                contents = [
+                    Content.from_text(
+                        catalog_summary(catalog, catalog_kind)
+                        if catalog is not None
+                        else "No checked readable catalog was returned."
+                    )
+                ]
+            else:
+                contents = [
+                    Content.from_function_call(
+                        call_id="call_" + signature[:16],
+                        name="list_documents"
+                        if catalog_kind == "documents"
+                        else "list_capabilities",
+                        arguments={},
+                    )
+                ]
         elif tool_results:
             found = next(
                 (row for content in tool_results if (row := evidence(content.result)) is not None),

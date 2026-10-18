@@ -3,8 +3,9 @@ from collections import Counter
 import msgspec
 import pytest
 
-from app.infrastructure.errors import InvalidInput
+from app.infrastructure.errors import InvalidInput, NotFound
 from app.infrastructure.provider.simulated import SimulatedProvider
+from app.library import storage
 from app.library.handlers import (
     ChunkRange,
     DocumentRef,
@@ -85,13 +86,46 @@ def test_preview_and_download(library) -> None:
 def test_deleted_item_leaves_search(library) -> None:
     caller = library["callers"]["demo"]
     hit = search(caller, LibrarySearch(query="radiator margin")).hits[0]
+    with library["sessions"].begin() as session:
+        versions = [
+            (row["version"], bytes(row["sha256"]))
+            for row in storage.versions(session, hit.handle.item)
+        ]
+    assert versions
     SimulatedProvider(library["root"]).delete_item(hit.handle.item)
     build(library["settings"])
     assert not any(
         h.handle.item == hit.handle.item
         for h in search(caller, LibrarySearch(query="radiator margin")).hits
     )
-    assert get_document(caller, DocumentRef(item=hit.handle.item)).deleted
+    with pytest.raises(NotFound):
+        get_document(caller, DocumentRef(item=hit.handle.item))
+    with library["sessions"].begin() as session:
+        item = storage.item(session, caller, hit.handle.item)
+        assert item is not None and item["deleted_at"] is not None
+        assert [
+            (row["version"], bytes(row["sha256"]))
+            for row in storage.versions(session, hit.handle.item)
+        ] == versions
+
+
+@pytest.mark.parametrize("change", ["delete", "move"])
+def test_live_provider_removal_precedes_reindex(library, change) -> None:
+    caller = library["callers"]["demo"]
+    hit = search(caller, LibrarySearch(query="radiator margin")).hits[0]
+    provider = SimulatedProvider(library["root"])
+    if change == "delete":
+        provider.delete_item(hit.handle.item)
+    else:
+        record = provider.get_item(hit.handle.item)
+        destination = provider.path("missions/msn-withheld/engineering/st3-design/moved.md")
+        destination.parent.mkdir(parents=True)
+        provider.path(record["path"]).rename(destination)
+        provider.scan()
+        assert provider.get_item(hit.handle.item)["mission_key"] == "msn-withheld"
+    # Cached metadata still describes the old readable source.
+    found = search(caller, LibrarySearch(query="radiator margin"))
+    assert all(row.handle.item != hit.handle.item for row in found.hits)
 
 
 def test_plain_preview_is_sandboxed(library) -> None:

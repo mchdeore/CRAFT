@@ -1,0 +1,10 @@
+{
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search readable indexed document passages."
+    }
+  ],
+  "skills": [],
+  "skillsStatus": "not_installed"
+}

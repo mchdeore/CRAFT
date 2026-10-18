@@ -4,8 +4,14 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --locked --no-dev --no-install-project
+COPY packages/runtime/pyproject.toml packages/runtime/pyproject.toml
+COPY packages/python_workspace/pyproject.toml packages/python_workspace/pyproject.toml
+COPY packages/data_provider/pyproject.toml packages/data_provider/pyproject.toml
+COPY packages/provider_fleet/pyproject.toml packages/provider_fleet/pyproject.toml
+COPY packages/process_manager/pyproject.toml packages/process_manager/pyproject.toml
+RUN uv sync --locked --no-dev --no-install-workspace
 COPY app ./app
+COPY packages/process_manager ./packages/process_manager
 COPY migrations ./migrations
 COPY alembic.ini ./
 RUN uv sync --locked --no-dev

@@ -20,7 +20,12 @@ TEST_DATABASE = "craft_test"
 
 @pytest.fixture(scope="session")
 def settings() -> Settings:
-    return msgspec.structs.replace(Settings.from_env(), database_name=TEST_DATABASE)
+    source = read_env() | {
+        "CRAFT_MODEL_MAIN": "fake",
+        "CRAFT_MODEL_KEY": "",
+        "CRAFT_MODEL_ENDPOINT": "",
+    }
+    return msgspec.structs.replace(Settings.from_env(source), database_name=TEST_DATABASE)
 
 
 @pytest.fixture(scope="session", autouse=True)

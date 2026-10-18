@@ -1,6 +1,6 @@
 """Dictionary, dated mission values, comparison and source evidence."""
 
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
 import msgspec
@@ -8,7 +8,10 @@ import msgspec
 from app.cube import service
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.config.settings import Settings
-from app.infrastructure.operations import operation
+from app.infrastructure.operations import DATA, operation
+
+if TYPE_CHECKING:
+    from app.cube.publication import PreparedPublication
 from app.infrastructure.shapes import Shape
 from app.library.handlers import CitationHandle, Facet
 
@@ -234,6 +237,37 @@ class Candidates(Shape):
 def prepare_values(caller: Caller, request: PrepareValues) -> Candidates:
     """Read cited candidates without writing values; for example a mass-budget table."""
     return service.prepare_values(caller, request)
+
+
+class SubmitValues(Shape):
+    mission: str
+    silo: str
+    valid_from: str
+    candidates: Annotated[list[Candidate], msgspec.Meta(min_length=1, max_length=100)]
+    stage: str | None = None
+
+
+class ValueReceipt(Shape):
+    approval_id: UUID
+    value_ids: list[UUID]
+
+
+def _prepare_publication(caller: Caller, request: SubmitValues) -> "PreparedPublication":
+    from app.cube.publication import prepare_submission
+
+    return prepare_submission(caller, request)
+
+
+@operation(
+    SIGNED_IN,
+    post="/cube/values",
+    tool=True,
+    effects=DATA,
+    prepare_approved=_prepare_publication,
+)
+def submit_values(caller: Caller, request: SubmitValues) -> ValueReceipt:
+    """Publish a reviewed batch of source candidates in one approval transaction."""
+    return service.submit_values(caller, request)
 
 
 @operation(SIGNED_IN, get="/cube/parameters", tool=True)

@@ -3,15 +3,41 @@
 from typing import Annotated, Literal
 
 import msgspec
+from sqlalchemy.orm import Session
 from starlette.responses import Response
 
-from app.infrastructure.access import SIGNED_IN, Caller
-from app.infrastructure.operations import operation
+from app.infrastructure.access import SIGNED_IN, Caller, require
+from app.infrastructure.operations import observe, operation
 from app.infrastructure.shapes import RawFile, Shape
 from app.library import service
 
+PreparedSource = service.PreparedSource
+
 Classification = Literal["unclassified", "protected-a", "protected-b"]
 Facet = Literal["purpose", "design", "operations", "program", "cost_and_risk"]
+
+
+class DocumentList(Shape):
+    limit: Annotated[int, msgspec.Meta(ge=1, le=50)] = 25
+
+
+class CatalogDocument(Shape):
+    item: Annotated[str, msgspec.Meta(pattern=r"^itm_[0-9a-f]{12}$")]
+    title: Annotated[str, msgspec.Meta(min_length=1, max_length=200)]
+    version: Annotated[int, msgspec.Meta(ge=1)]
+    classification: Classification
+    simulated: bool
+
+
+class DocumentCatalog(Shape):
+    documents: list[CatalogDocument]
+    truncated: bool
+
+
+@operation(SIGNED_IN, get="/library/documents", tool=True)
+def list_documents(caller: Caller, request: DocumentList) -> DocumentCatalog:
+    """List currently readable indexed documents within bounded scan and result limits."""
+    return service.documents(caller, request)
 
 
 class FacetRequest(Shape):
@@ -40,6 +66,20 @@ class CitationHandle(Shape):
     locator: str
     quote_sha256: str
     simulated: bool
+
+
+@observe("library.prepare_source")
+def prepare_source(caller: Caller, handle: CitationHandle) -> PreparedSource:
+    """Sample current source evidence for server-owned approved execution."""
+    require(caller, SIGNED_IN)
+    return service.prepare_source(caller, handle)
+
+
+@observe("library.validate_prepared_source")
+def validate_prepared_source(caller: Caller, session: Session, prepared: PreparedSource) -> None:
+    """Recheck indexed provenance and current grants without provider access."""
+    require(caller, SIGNED_IN)
+    service.validate_prepared_source(session, caller, prepared)
 
 
 class Tags(Shape):

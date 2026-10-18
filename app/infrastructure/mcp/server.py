@@ -3,6 +3,7 @@
 import inspect
 from collections.abc import Mapping
 from dataclasses import replace
+from time import perf_counter
 from typing import Any
 
 import msgspec
@@ -12,7 +13,8 @@ from starlette.concurrency import run_in_threadpool
 
 from app.infrastructure.access import Caller
 from app.infrastructure.errors import ApiError, NotFound
-from app.infrastructure.operations.registry import Operation
+from app.infrastructure.operations.context import CallContext, current_call
+from app.infrastructure.operations.registry import Operation, tool_named, tool_operations
 
 
 def input_schema(operation: Operation) -> dict[str, Any]:
@@ -34,32 +36,61 @@ def error_result(error: ApiError) -> CallToolResult:
     )
 
 
-def build_server(registry: Mapping[str, Operation], caller: Caller) -> Server:
+def build_server(registry: Mapping[str, Operation], caller) -> Server:
     server = Server("craft")
-    trusted = replace(caller, origin="mcp")
+
+    async def context():
+        if isinstance(caller, Caller):
+            return replace(caller, origin="mcp"), None
+        return await caller()
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
+        await context()
         return [
             Tool(
                 name=o.tool_name,
                 description=inspect.getdoc(o.function) or "",
                 inputSchema=input_schema(o),
             )
-            for o in registry.values()
-            if o.tool
+            for o in tool_operations(registry)
         ]
 
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
-        operation = next((o for o in registry.values() if o.tool and o.tool_name == name), None)
+        operation = tool_named(registry, name)
         if operation is None:
             return error_result(NotFound())
         try:
-            if inspect.iscoroutinefunction(operation.function):
-                result = await operation.function(trusted, arguments)
-            else:
-                result = await run_in_threadpool(operation.function, trusted, arguments)
+            trusted, principal = await context()
+            meta = server.request_context.meta
+            identifier = meta.model_dump().get("craft/toolCallId") if meta is not None else None
+            if identifier is not None and (
+                not isinstance(identifier, str) or not 1 <= len(identifier) <= 200
+            ):
+                from app.infrastructure.errors import InvalidInput
+
+                raise InvalidInput()
+            trusted = replace(trusted, tool_call_id=identifier or trusted.tool_call_id)
+            token = None
+            if principal is not None and principal.parent_call_id is not None:
+                token = current_call.set(
+                    CallContext(
+                        principal.request_id,
+                        principal.parent_call_id,
+                        None,
+                        trusted,
+                        perf_counter(),
+                    )
+                )
+            try:
+                if inspect.iscoroutinefunction(operation.function):
+                    result = await operation.function(trusted, arguments)
+                else:
+                    result = await run_in_threadpool(operation.function, trusted, arguments)
+            finally:
+                if token is not None:
+                    current_call.reset(token)
             encoded = msgspec.to_builtins(result)
             structured = (
                 encoded
@@ -76,3 +107,59 @@ def build_server(registry: Mapping[str, Operation], caller: Caller) -> Server:
             return error_result(error)
 
     return server
+
+
+class HttpTransport:
+    """One registry server with a fresh stateless manager for each app lifespan."""
+
+    def __init__(self, registry):
+        from app.infrastructure.mcp import auth
+
+        self.server = build_server(registry, auth.current)
+        self.manager: Any = None
+
+    def run(self):
+        from contextlib import asynccontextmanager
+
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        @asynccontextmanager
+        async def lifespan():
+            manager = StreamableHTTPSessionManager(
+                self.server,
+                json_response=True,
+                stateless=True,
+                security_settings=TransportSecuritySettings(
+                    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+                ),
+            )
+            self.manager = manager
+            try:
+                async with manager.run():
+                    yield
+            finally:
+                self.manager = None
+
+        return lifespan()
+
+    async def __call__(self, scope, receive, send):
+        from starlette.requests import Request
+
+        from app.infrastructure.errors import error_response
+        from app.infrastructure.mcp import auth
+
+        try:
+            entry = await auth.authenticate(Request(scope, receive))
+        except ApiError as error:
+            response = error_response(error)
+            response.headers["WWW-Authenticate"] = "Bearer"
+            await response(scope, receive, send)
+            return
+        token = auth.credential.set(entry)
+        try:
+            if self.manager is None:
+                raise RuntimeError("MCP transport lifespan is unavailable")
+            await self.manager.handle_request(scope, receive, send)
+        finally:
+            auth.credential.reset(token)

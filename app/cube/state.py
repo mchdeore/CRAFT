@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
-from app.infrastructure.provider.simulated import SimulatedProvider
+from app.infrastructure.provider import get_provider
 
 
 def readable_values(caller: Caller):
@@ -69,4 +69,4 @@ def with_sources(rows: list[dict], items: dict) -> list[dict]:
 def sources(caller: Caller) -> dict:
     if caller.settings is None:
         return {}
-    return SimulatedProvider(caller.settings.provider_root).items()
+    return get_provider(caller.settings.provider_root).items()

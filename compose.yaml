@@ -15,7 +15,8 @@ services:
       retries: 30
   app:
     build: .
-    environment:                                        # the app's own settings only
+    restart: unless-stopped
+    environment: &app_environment                       # the app's own settings only
       CRAFT_APP_DB_PASSWORD: ${CRAFT_APP_DB_PASSWORD:?set it in .env}
       CRAFT_PROVIDER_ROOT: /provider
       CRAFT_DATABASE_HOST: db
@@ -28,7 +29,9 @@ services:
       CRAFT_MODEL_ENDPOINT: ${CRAFT_MODEL_ENDPOINT:-}
       CRAFT_MODEL_KEY: ${CRAFT_MODEL_KEY:-}
       CRAFT_MODEL_MAX_OUTPUT_TOKENS: ${CRAFT_MODEL_MAX_OUTPUT_TOKENS:-4000}
-    volumes:
+      CRAFT_WOLFRAM_APP_ID: ${CRAFT_WOLFRAM_APP_ID:-}
+      CRAFT_MCP_URL: ${CRAFT_MCP_URL:-http://127.0.0.1:8000/mcp}
+    volumes: &provider_mount
       - ${CRAFT_PROVIDER_ROOT:-./var/provider}:/provider:ro
     ports: ["8000:8000"]
     healthcheck:
@@ -37,6 +40,18 @@ services:
       retries: 30
     depends_on:
       db:
+        condition: service_healthy
+
+  mcp:
+    build: .
+    profiles: ["mcp"]
+    stdin_open: true
+    network_mode: "service:app"
+    environment: *app_environment
+    volumes: *provider_mount
+    command: ["craft", "mcp", "--as", "${CRAFT_MCP_ACCOUNT:-demo}"]
+    depends_on:
+      app:
         condition: service_healthy
 
 volumes:

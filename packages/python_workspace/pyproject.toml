@@ -1,0 +1,40 @@
+[project]
+name = "craft-python-workspace"
+version = "0.1.0"
+description = "Isolated Python workspace and local engineering analysis"
+requires-python = "==3.12.*"
+dependencies = [
+  "ipykernel==6.29.5",
+  "jupyter-client==8.6.3",
+  "numpy==2.3.4",
+  "pandas==2.3.3",
+  "statsmodels==0.14.5",
+  "vl-convert-python==1.9.0.post1",
+]
+
+[project.optional-dependencies]
+wolfram = ["httpx==0.28.1"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.10"]
+
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+markers = ["docker: requires a working Docker daemon and the restricted workspace image"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
