@@ -353,3 +353,211 @@ def test_long_username_can_sign_in(account, owner_engine) -> None:
         )
     account.username = username
     assert login(account).status_code == 200
+
+
+PAGES_ORIGIN = "https://pages.craft.test"
+
+
+@pytest.fixture
+def cross_origin_client(account, settings):
+    import msgspec
+
+    configured = msgspec.structs.replace(
+        settings,
+        cross_origin_browser=True,
+        allowed_origins=PAGES_ORIGIN + ",https://api.craft.test",
+    )
+    with TestClient(
+        create_app(configured),
+        base_url="https://api.craft.test",
+        headers={"Origin": PAGES_ORIGIN},
+    ) as client:
+        yield client
+
+
+def test_default_browser_mode_does_not_allow_cross_origin_preflight(account):
+    response = account.client.options(
+        "/api/session",
+        headers={
+            "Origin": PAGES_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 404
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.parametrize("headers", ["content-type", "content-type,x-file-name,x-simulated"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("origin", [PAGES_ORIGIN, "https://api.craft.test"])
+def test_enabled_browser_preflight_allows_only_configured_origin(
+    cross_origin_client, headers, method, origin
+):
+    response = cross_origin_client.options(
+        "/api/session",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": method,
+            "Access-Control-Request-Headers": headers,
+        },
+    )
+    assert response.status_code == 200
+    assert UUID(response.headers["x-request-id"])
+    assert response.headers["access-control-allow-origin"] == origin
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "Origin" in response.headers["vary"]
+    assert "*" not in response.headers["access-control-allow-headers"]
+    assert "TRACE" not in response.headers["access-control-allow-methods"]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "https://untrusted.craft.test", "Access-Control-Request-Method": "POST"},
+        {"Origin": "null", "Access-Control-Request-Method": "POST"},
+        {"Access-Control-Request-Method": "TRACE"},
+        {"Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "x-untrusted"},
+    ],
+)
+def test_enabled_browser_preflight_refuses_unconfigured_request(cross_origin_client, headers):
+    response = cross_origin_client.options("/api/session", headers=headers)
+    assert response.status_code == 400
+    assert UUID(response.headers["x-request-id"])
+    if "Origin" in headers:
+        assert "access-control-allow-origin" not in response.headers
+
+
+def test_enabled_browser_login_and_logout_keep_cookie_security(account, cross_origin_client):
+    response = cross_origin_client.post(
+        "/api/session", json={"username": account.username, "password": PASSWORD}
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
+    cookie = response.headers["set-cookie"].lower()
+    assert "samesite=none" in cookie and "secure" in cookie and "httponly" in cookie
+    assert "path=/" in cookie and "domain=" not in cookie
+    assert "set-cookie" not in response.headers["access-control-expose-headers"].lower()
+    identity = cross_origin_client.get("/api/account-probe")
+    assert identity.status_code == 200 and identity.json()["id"] == str(account.id)
+    assert cross_origin_client.get("/api/me").status_code == 200
+    token = response.cookies.get("__Host-craft_session")
+    signed_out = cross_origin_client.delete("/api/session")
+    assert signed_out.status_code == 204
+    assert "samesite=none" in signed_out.headers["set-cookie"].lower()
+    assert "max-age=0" in signed_out.headers["set-cookie"].lower()
+    cross_origin_client.cookies.clear()
+    cross_origin_client.headers["Cookie"] = "__Host-craft_session=" + token
+    revoked = cross_origin_client.get("/api/me")
+    assert revoked.status_code == 401
+    assert revoked.headers["access-control-allow-origin"] == PAGES_ORIGIN
+
+
+def test_enabled_browser_wrong_password_remains_readable_and_unauthenticated(
+    account, cross_origin_client, owner_engine
+):
+    response = cross_origin_client.post(
+        "/api/session", json={"username": account.username, "password": "wrong"}
+    )
+    assert response.status_code == 401 and response.json()["code"] == "not_signed_in"
+    assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
+    assert "set-cookie" not in response.headers
+    assert cross_origin_client.get("/api/me").status_code == 401
+    with owner_engine.connect() as connection:
+        assert not connection.execute(
+            select(storage.auth_sessions.c.id).where(storage.auth_sessions.c.user_id == account.id)
+        ).all()
+
+
+def test_enabled_browser_origin_guard_still_refuses_login_without_mutation(
+    account, cross_origin_client, owner_engine
+):
+    for origin in ("https://untrusted.craft.test", "null", None):
+        if origin is None:
+            cross_origin_client.headers.pop("Origin", None)
+        else:
+            cross_origin_client.headers["Origin"] = origin
+        response = cross_origin_client.post(
+            "/api/session", json={"username": account.username, "password": PASSWORD}
+        )
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+        assert "set-cookie" not in response.headers
+    with owner_engine.connect() as connection:
+        assert not connection.execute(
+            select(storage.auth_sessions.c.id).where(storage.auth_sessions.c.user_id == account.id)
+        ).all()
+
+
+def test_enabled_browser_fresh_roles_and_expiry(
+    account, cross_origin_client, owner_engine, monkeypatch
+):
+    clock = [datetime(2026, 1, 1, tzinfo=UTC)]
+    monkeypatch.setattr(access, "now", lambda: clock[0])
+    assert (
+        cross_origin_client.post(
+            "/api/session", json={"username": account.username, "password": PASSWORD}
+        ).status_code
+        == 200
+    )
+    denied = cross_origin_client.get("/api/account-admin")
+    assert (
+        denied.status_code == 403 and denied.headers["access-control-allow-origin"] == PAGES_ORIGIN
+    )
+    with owner_engine.begin() as connection:
+        connection.execute(storage.user_roles.insert().values(user_id=account.id, role="admin"))
+    assert cross_origin_client.get("/api/account-admin").status_code == 204
+    with owner_engine.begin() as connection:
+        connection.execute(
+            storage.user_roles.delete().where(
+                storage.user_roles.c.user_id == account.id, storage.user_roles.c.role == "admin"
+            )
+        )
+    assert cross_origin_client.get("/api/account-admin").status_code == 403
+    clock[0] += timedelta(hours=12)
+    expired = cross_origin_client.get("/api/me")
+    assert (
+        expired.status_code == 401
+        and expired.headers["access-control-allow-origin"] == PAGES_ORIGIN
+    )
+
+
+def test_enabled_browser_handled_errors_keep_exact_cors(account, cross_origin_client):
+    not_found = cross_origin_client.get("/api/no-such-fixture-route")
+    invalid = cross_origin_client.post("/api/session", json={"username": account.username})
+    assert not_found.status_code == 404 and invalid.status_code == 400
+    for response in (not_found, invalid):
+        assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
+        assert response.headers["access-control-allow-credentials"] == "true"
+    for _ in range(5):
+        cross_origin_client.post(
+            "/api/session", json={"username": account.username, "password": "wrong"}
+        )
+    limited = cross_origin_client.post(
+        "/api/session", json={"username": account.username, "password": PASSWORD}
+    )
+    assert (
+        limited.status_code == 429
+        and limited.headers["access-control-allow-origin"] == PAGES_ORIGIN
+    )
+
+
+def test_enabled_browser_can_update_its_owned_chat(account, cross_origin_client):
+    assert (
+        cross_origin_client.post(
+            "/api/session", json={"username": account.username, "password": PASSWORD}
+        ).status_code
+        == 200
+    )
+    response = cross_origin_client.patch(
+        "/api/conversations/" + str(account.conversation),
+        json={"title": "Generated renamed conversation"},
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
+    assert response.json()["id"] == str(account.conversation)
+    assert response.json()["title"] == "Generated renamed conversation"
+    reopened = cross_origin_client.get("/api/conversations/" + str(account.conversation))
+    assert (
+        reopened.status_code == 200 and reopened.json()["title"] == "Generated renamed conversation"
+    )

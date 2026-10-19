@@ -23,6 +23,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
     password_min_length: Annotated[int, msgspec.Meta(ge=12)] = 12
     allowed_origins: str = "http://localhost:8000"
+    cross_origin_browser: bool = False
     dev_page: bool = False
     model_main: str = "fake"
     model_check: str = "gpt-5.2"
@@ -56,6 +57,10 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             except ValueError:
                 valid = False
             if not valid:
+                raise SystemExit("bad setting: allowed_origins: invalid configuration")
+            if settings.cross_origin_browser and any(
+                not origin.startswith("https://") for origin in origins
+            ):
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
             validate_models(settings)
             validate_mcp_url(settings.mcp_url)

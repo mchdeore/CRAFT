@@ -72,6 +72,11 @@ class AGUIEvent(Shape, omit_defaults=True):
     value: Any = None
     timestamp: Any = None
     raw_event: Any = None
+    metadata: dict[str, Any] | None = None
+    subagent_run_id: str | None = None
+    subtype: Literal["message", "tool-call"] | None = None
+    entity_id: str | None = None
+    encrypted_value: str | None = None
 
 
 class ToolInfo(Shape):
