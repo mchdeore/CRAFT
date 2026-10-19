@@ -39,6 +39,7 @@ plugins:
   - search
 exclude_docs: |
   tools/**
+  preview/**
 validation:
   links:
     not_found: warn

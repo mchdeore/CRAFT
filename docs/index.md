@@ -2,7 +2,7 @@
 
 CRAFT answers questions about project documents with cited sources and maintains an engineering datacube. The application provides authenticated conversations, document tools and a local Python workspace.
 
-This public site contains documentation and a [simulated preview](preview/index.html). Run the application separately to use its authenticated APIs.
+This site contains CRAFT documentation. Run the application separately to use its authenticated APIs.
 
 ## Start here
 
