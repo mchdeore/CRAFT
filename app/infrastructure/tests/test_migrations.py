@@ -9,6 +9,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, Engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.paths import ROOT
@@ -77,3 +78,44 @@ def test_migration_round_trip(isolated_migrations: tuple[Config, Connection]) ->
     assert "workspace_files" in inspect(connection).get_table_names()
     command.upgrade(config, "head")
     assert_models(connection)
+
+
+def test_reasoning_messages_survive_upgrade_and_incompatible_downgrade(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0013")
+    owner = connection.execute(
+        text(
+            "insert into users (username, display_name) "
+            "values ('generated-reasoning', 'Generated') returning id"
+        )
+    ).scalar_one()
+    conversation = connection.execute(
+        text(
+            "insert into conversations (owner_id, title) values (:owner, 'Generated') returning id"
+        ),
+        {"owner": owner},
+    ).scalar_one()
+    statement = text(
+        "insert into messages (conversation_id, seq, role, content) "
+        "values (:conversation, :seq, :role, '{}'::jsonb) returning id"
+    )
+    ordinary = connection.execute(
+        statement, {"conversation": conversation, "seq": 1, "role": "assistant"}
+    ).scalar_one()
+    command.upgrade(config, "head")
+    reasoning = connection.execute(
+        statement, {"conversation": conversation, "seq": 2, "role": "reasoning"}
+    ).scalar_one()
+    with pytest.raises(IntegrityError), connection.begin_nested():
+        command.downgrade(config, "0013")
+    assert set(
+        connection.execute(
+            text("select id from messages where conversation_id = :conversation"),
+            {"conversation": conversation},
+        ).scalars()
+    ) == {ordinary, reasoning}
+    assert (
+        connection.execute(text("select version_num from alembic_version")).scalar_one() == "0014"
+    )

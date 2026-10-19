@@ -284,6 +284,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                 for key in ["messageId", "parentMessageId"]:
                     if value.get(key):
                         value[key] = mapped(value[key])
+                if kind == "REASONING_ENCRYPTED_VALUE" and value["subtype"] == "message":
+                    value["entityId"] = mapped(value["entityId"])
                 if kind == "TEXT_MESSAGE_START":
                     text = ""
                 if kind == "TEXT_MESSAGE_CONTENT":

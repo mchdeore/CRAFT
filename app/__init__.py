@@ -6,6 +6,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import Engine
 from starlette.exceptions import HTTPException
+from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
@@ -127,5 +128,14 @@ def create_app(settings: Settings) -> FastAPI:
         app.mount("/dev", DevPage(directory=ROOT / "app/dev"))
     app.mount("/summarize", SummaryPage(directory=ROOT / "app/summarize"))
     app.add_middleware(MountPathMiddleware)
+    if settings.cross_origin_browser:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",")],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Content-Type", "Accept", "X-Request-ID", "X-File-Name", "X-Simulated"],
+            expose_headers=["Content-Disposition", "X-Request-ID"],
+        )
     app.add_middleware(RequestIdMiddleware)
     return app

@@ -18,13 +18,15 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 |---|---|
 | Prefix | `/api`. Health checks are outside it. There is no generic run-any-operation route. |
 | Format | JSON, `camelCase` field names, UUID identifiers, ISO 8601 UTC times |
-| Sign-in | Cookie `__Host-craft_session` (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), set by `POST /api/session`. Send requests with `credentials: "include"`. No tokens in browser storage |
+| Sign-in | Cookie `__Host-craft_session` (`Secure`, `HttpOnly`, `SameSite=Lax` by default, `Path=/`), set by `POST /api/session`. Send requests with `credentials: "include"`. No tokens in browser storage |
 | Writes | Ordinary `/api` requests using `POST`, `PUT`, `PATCH` and `DELETE` must carry an `Origin` header from the allowed list |
 | Request ID | Every response has `X-Request-Id`. The same value appears in error bodies and server logs |
 | Unreadable records | `404`, the same as a missing record |
 | Caching | Operation responses under `/api` use `Cache-Control: no-store`, including authentication, errors, files and SSE streams |
 | Lists | Operation-specific limits; no paging. The conversation list agreement is newest first, at most 100 items |
 | Files | Sent with their media type and `X-Content-Type-Options: nosniff`. Preview is inline only for PDF, images and plain text, under `Content-Security-Policy: sandbox`; other types download. Upload: raw bytes, the name in `X-File-Name` |
+
+Cross-origin browser access is opt-in. Set `CRAFT_CROSS_ORIGIN_BROWSER=true` and list exact HTTPS origins in `CRAFT_ALLOWED_ORIGINS`. This enables credentialed CORS and `SameSite=None` cookies while retaining the write Origin check and session protections. Preflights support the existing API methods and upload headers and receive a request ID. Some browsers block cross-site cookies; use a frontend served from the API origin when required. These settings alone do not deploy a public application.
 
 ## 3. Errors
 

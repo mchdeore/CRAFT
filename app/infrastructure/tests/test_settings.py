@@ -85,3 +85,43 @@ def test_compose_mcp_account_is_not_an_application_setting() -> None:
     settings = Settings.from_env({**VALID, "CRAFT_MCP_ACCOUNT": "synthetic-account"})
     assert settings.database_name == "craft_dev"
     assert not hasattr(settings, "mcp_account")
+
+
+def test_cross_origin_browser_mode_is_opt_in() -> None:
+    assert Settings.from_env(VALID).cross_origin_browser is False
+
+
+def test_cross_origin_browser_mode_accepts_explicit_https_origins() -> None:
+    configured = Settings.from_env(
+        {
+            **VALID,
+            "CRAFT_CROSS_ORIGIN_BROWSER": "true",
+            "CRAFT_ALLOWED_ORIGINS": "https://pages.craft.test,https://api.craft.test",
+        }
+    )
+    assert configured.cross_origin_browser is True
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [
+        "http://localhost:8000",
+        "https://pages.craft.test,http://api.craft.test",
+        "https://pages.craft.test/path",
+        "https://invalid-origin-marker@192.0.2.1",
+    ],
+)
+def test_cross_origin_browser_mode_rejects_non_https_or_malformed_origins(origins: str) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        Settings.from_env(
+            {**VALID, "CRAFT_CROSS_ORIGIN_BROWSER": "true", "CRAFT_ALLOWED_ORIGINS": origins}
+        )
+    diagnostic = str(stopped.value)
+    assert "allowed_origins" in diagnostic
+    assert origins not in diagnostic and SECRET not in diagnostic
+
+
+def test_disabled_cross_origin_browser_mode_retains_local_origin() -> None:
+    configured = Settings.from_env({**VALID, "CRAFT_CROSS_ORIGIN_BROWSER": "false"})
+    assert configured.cross_origin_browser is False
+    assert configured.allowed_origins == "http://localhost:8000"

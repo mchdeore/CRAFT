@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import msgspec
 import pytest
+from agent_framework import ChatResponse, Content, Message
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -125,6 +126,38 @@ def test_chat_stream_valid_events_in_order(chat):
         ]
         assert response.status_code == 200 and valid_events(streamed)
         assert client.get("/api/tools").status_code == 200
+
+
+def test_encrypted_reasoning_stream_keeps_opaque_value_and_message_reference(chat, monkeypatch):
+    class ReasoningClient(FakeChatClient):
+        def reply(self, messages):
+            return ChatResponse(
+                messages=[
+                    Message(
+                        role="assistant",
+                        contents=[
+                            Content.from_text_reasoning(
+                                id="generated-reasoning", protected_data="opaque-generated-fixture"
+                            ),
+                            Content.from_text("Generated answer"),
+                        ],
+                        message_id="generated-response",
+                    )
+                ],
+                model="fake",
+            )
+
+    monkeypatch.setattr(runtime.model, "client", lambda _: ReasoningClient())
+    data = request(chat, "Give a generated answer")
+    events = collect(chat["caller"], data)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    encrypted = next(event for event in events if event["type"] == "REASONING_ENCRYPTED_VALUE")
+    reasoning = next(event for event in events if event["type"] == "REASONING_MESSAGE_START")
+    assert encrypted["subtype"] == "message"
+    assert encrypted["entityId"] == reasoning["messageId"]
+    assert encrypted["encryptedValue"] == "opaque-generated-fixture"
+    assert all("opaque-generated-fixture" not in event.get("delta", "") for event in events)
+    assert valid_events(events) and row(chat, data.run_id)["status"] == "finished"
 
 
 def test_browser_cannot_inject_history(chat, monkeypatch):

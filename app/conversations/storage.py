@@ -49,7 +49,7 @@ messages = Table(
         ForeignKey("agent_runs.id", use_alter=True, name="fk_messages_run_id_agent_runs"),
     ),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
-    CheckConstraint("role in ('user','assistant','tool','activity')", name="role"),
+    CheckConstraint("role in ('user','assistant','tool','activity','reasoning')", name="role"),
     UniqueConstraint("conversation_id", "seq"),
 )
 

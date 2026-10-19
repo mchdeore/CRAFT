@@ -112,7 +112,11 @@ def sign_in(caller: Caller, request):
         context.caller = replace(
             caller, user_id=user["id"], roles=frozenset(assigned), auth_session_id=identifier
         )
-    session_cookie(cookie, caller.settings.session_absolute_hours * 3600)
+    session_cookie(
+        cookie,
+        caller.settings.session_absolute_hours * 3600,
+        cross_origin_browser=caller.settings.cross_origin_browser,
+    )
     return Me(
         id=user["id"], username=user["username"], display_name=user["display_name"], roles=assigned
     )
@@ -125,7 +129,11 @@ def sign_out(caller: Caller) -> None:
         storage.revoke_sessions(
             session, caller.user_id, access.now(), "sign_out", caller.auth_session_id
         )
-    session_cookie("", 0)
+    session_cookie(
+        "",
+        0,
+        cross_origin_browser=caller.settings.cross_origin_browser if caller.settings else False,
+    )
 
 
 def add(caller: Caller, request) -> None:

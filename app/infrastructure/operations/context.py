@@ -46,7 +46,7 @@ response_actions: ContextVar[list[dict[str, Any]] | None] = ContextVar(
 )
 
 
-def session_cookie(value: str, max_age: int) -> None:
+def session_cookie(value: str, max_age: int, *, cross_origin_browser: bool = False) -> None:
     actions = response_actions.get()
     if actions is not None:
         actions.append(
@@ -56,7 +56,7 @@ def session_cookie(value: str, max_age: int) -> None:
                 "max_age": max_age,
                 "secure": True,
                 "httponly": True,
-                "samesite": "lax",
+                "samesite": "none" if cross_origin_browser else "lax",
                 "path": "/",
             }
         )
