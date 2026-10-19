@@ -39,13 +39,16 @@ def append_for_run(caller: Caller, request: AppendMessages) -> None:
     service.append(caller, request)
 
 
+ConversationTitle = Annotated[str, msgspec.Meta(min_length=1, max_length=200, pattern=r"\S")]
+
+
 class NewConversation(Shape):
-    title: Annotated[str, msgspec.Meta(min_length=1, max_length=200)] = "New conversation"
+    title: ConversationTitle = "New conversation"
 
 
 class ConversationUpdate(Shape):
     id: UUID
-    title: Annotated[str, msgspec.Meta(min_length=1, max_length=200)] | None = None
+    title: ConversationTitle | None = None
     archived: bool | None = None
 
 

@@ -238,7 +238,7 @@ Conversation and file routes use owned PostgreSQL records. Saved history include
 3. A file is labelled by what went into it: `simulated` only if all of it is, and the highest `classification` among it.
 4. Archive refuses an active or paused run and deletes its workspace. History remains readable. Sign-out deletes nothing. Export needs approval. `POST …/export` creates an approval request and sets `export-pending`; approved execution sets `exported`.
 
-The enforced limits are 25 MiB per file and 50 files per conversation. Conversation and draft titles contain 1 to 200 characters; draft bodies contain at most 100,000 characters.
+The enforced limits are 25 MiB per file and 50 files per conversation. Conversation and draft titles contain 1 to 200 characters. Conversation titles must include a non-whitespace character; draft bodies contain at most 100,000 characters.
 
 Uploads carry `X-Simulated`; their sole source classification is a validated query value, defaulting to unclassified. Bytes stay in PostgreSQL, and filenames never select a filesystem path. Upload records pass through uploading, processing and ready. Downloads return exact bytes as an attachment with nosniff.
 
