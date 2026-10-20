@@ -8,7 +8,7 @@ Each owner has dedicated workspace storage, a Jupyter service and a private MCP 
 
 ## Files and skills
 
-Configured workspace tools let the agent read, create, edit and execute the owner's files. In Skills, write instructions in the document editor and choose **Save to workspace** to create a Markdown file under `/workspace/skills`. Load a file to edit its current contents, or choose New for another document. The sidebar shows actual registered tool metadata and inserts tool names or personal file paths into the document. These files are not registered as app skills or immutable revisions.
+Configured workspace tools let the agent list and read the owner's files. The agent runs Python with `run_code` and changes files with `write_file` or `edit_notebook`; each call waits for the requester's approval, which shows the exact code or change, and runs once in the owner's own kernel with the owner's access. Code the owner runs in Jupyter needs no approval. In Skills, write instructions in the document editor and choose **Save to workspace** to create a Markdown file under `/workspace/skills`. Load a file to edit its current contents, or choose New for another document. The sidebar shows actual registered tool metadata and inserts tool names or personal file paths into the document. These files are not registered as app skills or immutable revisions.
 
 In chat, type `/` to select a personal `skills/*.md` file or `@` to select another personal file. The picker inserts the exact `/workspace` path into message text; it refers to current file contents. Personal skills can tell the agent to read or run owned paths such as `/workspace/scripts/analysis.py`. Import source originals first.
 
@@ -24,22 +24,47 @@ Word and Excel copies open in the personal file preview after a fully successful
 
 ## Python analysis
 
-The workspace image includes Pandas for tables, DuckDB for local SQL, NumPy and SciPy for numerical analysis, Matplotlib for charts, OpenPyXL for Excel files, and python-docx for editing personal Word copies and writing Word outputs. Import them in scripts or notebooks and save exported tables, charts and documents beneath `USER_ROOT/outputs`. Personal inputs, scripts, notebooks and results remain outside the source database.
+The workspace image includes Pandas and DuckDB for tables and SQL, NumPy, SciPy and statsmodels for numerical and statistical analysis, scikit-learn for models, SymPy for symbolic mathematics, Pint for units, Matplotlib for charts, PyArrow for Parquet, OpenPyXL for Excel, python-docx and python-pptx for Word and PowerPoint, and pypdf for PDF text. There is no internet access or package installation inside the workspace.
+
+The `craft` package names files relative to `USER_ROOT`; the path chooses the folder:
+
+```python
+import craft
+
+sales = craft.read("data/sales.xlsx")
+totals = craft.sql("select region, sum(amount) as total from sales group by region", sales=sales)
+craft.save(totals, "results/totals.csv")
+craft.docs.report("results/summary.docx", "Sales", "# Totals", totals)
+```
+
+`read` and `save` choose the format from the extension: CSV, TSV, Excel, Parquet, JSON, Markdown, Word, PowerPoint, PDF text, Matplotlib figures and plain text. `craft.docs` reads, edits and builds Word, PowerPoint, PDF and Excel files. Starter skills `documents.md`, `analysis.md` and `cube.md` are copied into `USER_ROOT/skills` on first start; an existing file with the same name is kept.
+
+## CRAFT access points
+
+The access points call the same `/api` routes as the browser, with the account's workspace token (section 9.7 of the specification):
+
+```python
+hits = craft.search("radiator margin", missions=["msn-sim-01"])
+light = craft.cube.find(("mass_dry", "le", 150, "kg"), stage="current")
+table = craft.cube.compare(["msn-sim-01", "msn-sim-02"], ["mass_dry", "power_peak"]).df
+evidence = craft.cube.evidence(light.data["missions"][0]["matched"][0]["id"])
+```
+
+Each result has `.data`, a `.df` table and `.citations`. Document access points are `search`, `documents`, `document`, `chunks`, `explore`, `check_citation` and `compare_versions`; cube access points are `craft.cube.parameters`, `missions`, `find`, `mission`, `compare`, `evidence`, `similar`, `explain` and `candidates`. They are read-only. `craft.whoami()` shows the signed-in account and `craft.login()` sets a token for the current kernel.
+
+Kernels and terminal shells start with an outbound guard. Python connections, name lookups and program launches are refused except to the CRAFT server named by `CRAFT_API_URL` and, during a bound agent run, its bridge. The workspace network policy remains the boundary; the guard is a second layer.
 
 ## Native tools from Python
 
-The `craft` package exposes native CRAFT read tools in the notebook kernel selected for an active chat run:
+During an active chat run, the selected notebook kernel also has run-bound native access:
 
 ```python
 from craft import native
 
 async with native() as sdk:
     sources = await sdk.search("project requirements")
-    skills = await sdk.skills()
 ```
 
-SDK calls use that run's authenticated identity, tool-call budget, deadline, retrieval trace and audit records. The controller injects the binding into kernel memory without storing it in notebook history. Access ends on completion, pause, error or cancellation. Other kernels, standalone Python processes and notebooks outside an active run have no native binding.
-
-The SDK refuses operations that require CRAFT approval before dispatch. Chat retains the existing approval and resume workflow for those operations.
+These calls use that run's identity, tool-call budget, deadline, retrieval trace and audit records. Access ends on completion, pause, error or cancellation. The SDK refuses operations that require CRAFT approval before dispatch.
 
 See [agent runtime](runtime.md) and the separate [Python workspace prototype](python.md).

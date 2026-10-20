@@ -13,6 +13,12 @@ from urllib.parse import urlsplit
 from app.infrastructure.access import Caller
 from app.infrastructure.mcp.client import LocalHTTPTool
 
+# Direct workspace tools only read. Running code and changing files go through the
+# approval-gated workspace operations (run_code, write_file, edit_notebook).
+READ_ONLY_TOOLS = frozenset(
+    {"list_files", "list_notebooks", "list_kernels", "read_notebook", "read_cell"}
+)
+
 
 @dataclass(frozen=True)
 class WorkspaceEndpoint:
@@ -21,6 +27,10 @@ class WorkspaceEndpoint:
     tools: tuple[str, ...]
 
     def __post_init__(self):
+        configured = bool(self.tools)
+        object.__setattr__(
+            self, "tools", tuple(name for name in self.tools if name in READ_ONLY_TOOLS)
+        )
         target = urlsplit(self.url)
         if (
             target.scheme not in {"http", "https"}
@@ -29,7 +39,7 @@ class WorkspaceEndpoint:
             or target.password is not None
             or target.query
             or target.fragment
-            or not self.tools
+            or not configured
         ):
             raise ValueError("Expected a private configured endpoint and explicit tool allowlist")
         object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))

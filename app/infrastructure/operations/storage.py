@@ -40,8 +40,9 @@ call_log = Table(
     Column("conversation_id", UUID),
     Column("run_id", UUID),
     Column("tool_call_id", Text),
+    Column("workspace_token_id", UUID),
     CheckConstraint("kind in ('operation','step')", name="kind"),
-    CheckConstraint("origin in ('http','mcp','python')", name="origin"),
+    CheckConstraint("origin in ('http','mcp','python','workspace')", name="origin"),
     CheckConstraint("outcome in ('ok','error')", name="outcome"),
 )
 Index("ix_call_log_at", call_log.c.at)

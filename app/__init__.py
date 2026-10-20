@@ -28,6 +28,7 @@ from app.notes import handlers as note_handlers
 from app.skills import handlers as skill_handlers
 from app.summarize import handlers as summarize_handlers
 from app.tools import handlers as tool_handlers
+from app.workspace import handlers as workspace_handlers
 
 
 class DevPage(StaticFiles):
@@ -103,6 +104,7 @@ def create_app(settings: Settings) -> FastAPI:
         note_handlers,
         skill_handlers,
         tool_handlers,
+        workspace_handlers,
     )
     configure_logging(settings.log_level)
     engine = make_engine(settings)

@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+import craft_guard
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -28,8 +29,17 @@ class Session(Protocol):
     async def list_tools(self) -> ListToolsResult: ...
 
 
+def _args(**values: Any) -> dict[str, Any]:
+    """Omit unset optional fields so server defaults apply."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
 class Craft:
-    """Use an injected authenticated session; server authorization remains authoritative."""
+    """The named read-only access points; server authorization remains authoritative.
+
+    Only these methods reach CRAFT. There is deliberately no public generic
+    dispatcher, so user code cannot name an arbitrary or effectful tool.
+    """
 
     def __init__(self, session: Session):
         self._session = session
@@ -37,20 +47,94 @@ class Craft:
     async def tools(self) -> ListToolsResult:
         return await self._session.list_tools()
 
-    async def call(self, name: str, arguments: dict[str, Any] | None = None) -> CallToolResult:
+    async def _call(self, name: str, arguments: dict[str, Any] | None = None) -> CallToolResult:
         """Dispatch exactly once and preserve native errors/results and call provenance."""
         return await self._session.call_tool(
             name, arguments, meta={"craft/toolCallId": str(uuid4())}
         )
 
+    # Documents
     async def search(self, query: str, **filters: Any) -> CallToolResult:
-        return await self.call("search", {"query": query, **filters})
+        return await self._call("search", {"query": query, **filters})
+
+    async def documents(self, limit: int | None = None) -> CallToolResult:
+        return await self._call("list_documents", _args(limit=limit))
 
     async def document(self, item: str, version: int | None = None) -> CallToolResult:
-        return await self.call("get_document", {"item": item, "version": version})
+        return await self._call("get_document", {"item": item, "version": version})
+
+    async def chunks(
+        self, item: str, version: int, from_block: int, to_block: int
+    ) -> CallToolResult:
+        return await self._call(
+            "read_chunks",
+            {"item": item, "version": version, "fromBlock": from_block, "toBlock": to_block},
+        )
+
+    async def explore(
+        self,
+        handle: dict[str, Any],
+        before: int | None = None,
+        after: int | None = None,
+        query: str | None = None,
+    ) -> CallToolResult:
+        return await self._call(
+            "explore", _args(handle=handle, before=before, after=after, query=query)
+        )
+
+    async def check_citation(self, handle: dict[str, Any]) -> CallToolResult:
+        return await self._call("check_citation", {"handle": handle})
+
+    async def compare_versions(
+        self, item: str, from_version: int, to_version: int
+    ) -> CallToolResult:
+        return await self._call(
+            "compare_versions", {"item": item, "fromVersion": from_version, "toVersion": to_version}
+        )
+
+    # Cube
+    async def parameters(self) -> CallToolResult:
+        return await self._call("list_parameters", {})
+
+    async def missions(self, query: str | None = None, limit: int | None = None) -> CallToolResult:
+        return await self._call("list_missions", _args(query=query, limit=limit))
+
+    async def find_missions(self, conditions: list[dict[str, Any]], **scope: Any) -> CallToolResult:
+        return await self._call("find_missions", _args(conditions=conditions, **scope))
+
+    async def mission(self, key: str, **scope: Any) -> CallToolResult:
+        return await self._call("get_mission", _args(key=key, **scope))
+
+    async def compare_missions(
+        self, keys: list[str], parameters: list[str], **scope: Any
+    ) -> CallToolResult:
+        return await self._call(
+            "compare_missions", _args(keys=keys, parameters=parameters, **scope)
+        )
+
+    async def evidence(self, value_id: str) -> CallToolResult:
+        return await self._call("get_value_evidence", {"id": value_id})
+
+    async def similar_missions(
+        self, key: str, facets: list[str] | None = None, limit: int | None = None
+    ) -> CallToolResult:
+        return await self._call("similar_missions", _args(key=key, facets=facets, limit=limit))
+
+    async def explain_similarity(
+        self, key: str, other: str, facets: list[str] | None = None
+    ) -> CallToolResult:
+        return await self._call("explain_similarity", _args(key=key, other=other, facets=facets))
+
+    async def prepare_values(self, handle: dict[str, Any], **context: Any) -> CallToolResult:
+        """Read candidate values from one table chunk; nothing is written."""
+        return await self._call("prepare_values", _args(handle=handle, **context))
+
+    # Catalogs
+    async def capabilities(self) -> CallToolResult:
+        return await self._call("list_capabilities", {})
 
     async def skills(self, **paging: Any) -> CallToolResult:
-        return await self.call("list_skills", paging)
+        return await self._call("list_skills", paging)
 
 
 @dataclass(slots=True)
@@ -75,6 +159,7 @@ def _unbind_run(binding_id: str) -> bool:
         return False
     bound, _binding = _binding, None
     bound.run_token = ""
+    craft_guard.revoke_bridge()
     if bound.expiry is not None:
         bound.expiry.cancel()
     return True
@@ -109,6 +194,7 @@ def _bind_run(
     if _binding is not None:
         raise RuntimeError("This kernel is already bound to an active CRAFT run")
     bound = _RunBinding(url, run_token, run_id, binding_id, loop.time() + seconds)
+    craft_guard.allow_bridge(str(target.hostname), target.port or 80)
     _binding = bound
     bound.expiry = loop.call_later(seconds, _unbind_run, binding_id)
 

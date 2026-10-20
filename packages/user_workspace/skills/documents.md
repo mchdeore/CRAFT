@@ -1,0 +1,44 @@
+# Documents
+
+Use this skill to read, edit or build Word, PowerPoint, PDF and Excel files in the workspace.
+
+## Read
+
+```python
+import craft
+
+text = craft.read("inputs/plan.docx")          # Markdown: headings, lists, tables
+tables = craft.docs.word_tables("inputs/plan.docx")
+slides = craft.read("inputs/review.pptx")       # list of {slide, title, text, notes}
+pages = craft.read("inputs/report.pdf")         # list of page texts
+book = craft.docs.sheets("inputs/budget.xlsx")  # {sheet name: DataFrame}
+```
+
+A PDF page without a text layer comes back empty; say so instead of guessing its content.
+
+## Edit
+
+1. Work on a personal copy. Library sources are read-only; import one before editing.
+2. Save under a new name unless the person asks to replace the file.
+
+```python
+count = craft.docs.replace_in_word("inputs/plan.docx", "Draft", "Final", save_as="outputs/plan-final.docx")
+doc = craft.docs.open_word("outputs/plan-final.docx")
+doc.add_paragraph("Reviewed on 20 October 2026.")
+craft.save(doc, "outputs/plan-final.docx")
+```
+
+`replace_in_word` does not match text split across differently formatted runs. Report the count it returns.
+
+## Build
+
+```python
+craft.docs.report(
+    "outputs/summary.docx", "Mass summary",
+    "# Findings", "- Mission 01 is lightest.", table, figure,
+)
+craft.docs.slides("outputs/summary.pptx", "Mass summary", ("Findings", "Mission 01 is lightest"), ("Table", table))
+craft.excel("outputs/summary.xlsx", Summary=table, Detail=detail)
+```
+
+After saving, tell the person each file name and what it holds.

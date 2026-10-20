@@ -123,6 +123,7 @@ def finish(
         "conversation_id": caller.conversation_id,
         "run_id": caller.run_id,
         "tool_call_id": caller.tool_call_id,
+        "workspace_token_id": caller.workspace_token_id,
     }
     # Log persistence is not included in domain statement counts or the parent call.
     local_token = current_call.set(None)
@@ -150,6 +151,12 @@ def checked_access(operation: Operation, caller: Caller) -> Caller:
         if context is not None:
             context.caller = caller
     require(caller, operation.access)
+    # The token gates the route it calls; that operation's own nested reads are not routes.
+    top_level = call is None or call.parent_call_id is None
+    if caller.origin == "workspace" and top_level and not workspace_allowed(operation):
+        from app.infrastructure.errors import Forbidden
+
+        raise Forbidden()
     if (
         caller.origin == "http"
         and http is not None
@@ -162,6 +169,13 @@ def checked_access(operation: Operation, caller: Caller) -> Caller:
 
             raise Forbidden()
     return caller
+
+
+def workspace_allowed(operation: Operation) -> bool:
+    """Workspace tokens reach the agent's read-tool catalog and the account check only."""
+    return operation.name == "accounts.me" or (
+        operation.tool and operation.effects == "NONE" and operation.tool_name != "ask_agent"
+    )
 
 
 def checked_input(operation: Operation, caller: Caller, value: Any) -> Any:
@@ -303,7 +317,12 @@ def wrap(operation: Operation) -> Any:
                     resolved, value = checked_input(operation, resolved, await request.read())
                 else:
                     resolved, value = checked(operation, caller, request)
-                if resolved.origin == "mcp" and operation.effects != "NONE":
+                if resolved.origin == "mcp" and operation.effects == "EXTERNAL":
+                    from app.approvals.service import claim_external_approved
+
+                    await run_in_threadpool(claim_external_approved, resolved, operation, value)
+                    output = await fn(resolved, value) if operation.input else await fn(resolved)
+                elif resolved.origin == "mcp" and operation.effects != "NONE":
                     from app.approvals.service import execute_approved
 
                     output = await run_in_threadpool(

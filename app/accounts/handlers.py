@@ -125,3 +125,43 @@ def reset(caller: Caller, request: ResetPassword) -> None:
 @operation("accounts.manage")
 def disable(caller: Caller, request: UserRef) -> None:
     service.manage(caller, request, "disable")
+
+
+class NewWorkspaceToken(Shape):
+    label: Annotated[str, msgspec.Meta(min_length=1, max_length=80)]
+    hours: Annotated[int, msgspec.Meta(ge=1, le=168)] = 12
+
+
+class WorkspaceTokenRef(Shape):
+    id: UUID
+
+
+class WorkspaceToken(Shape):
+    id: UUID
+    label: str
+    created_at: str
+    expires_at: str
+    last_used_at: str | None
+    revoked_at: str | None
+
+
+class IssuedWorkspaceToken(WorkspaceToken):
+    token: str
+
+
+@operation(SIGNED_IN, post="/me/workspace-tokens")
+def create_workspace_token(caller: Caller, request: NewWorkspaceToken) -> IssuedWorkspaceToken:
+    """Issue a read-only token for owned Python; the token is shown once."""
+    return IssuedWorkspaceToken(**service.create_workspace_token(caller, request))
+
+
+@operation(SIGNED_IN, get="/me/workspace-tokens")
+def list_workspace_tokens(caller: Caller) -> list[WorkspaceToken]:
+    """List the account's workspace tokens without their secrets."""
+    return [WorkspaceToken(**row) for row in service.list_workspace_tokens(caller)]
+
+
+@operation(SIGNED_IN, delete="/me/workspace-tokens/{id}")
+def revoke_workspace_token(caller: Caller, request: WorkspaceTokenRef) -> None:
+    """Revoke one of the account's workspace tokens."""
+    service.revoke_workspace_token(caller, request.id)

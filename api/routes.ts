@@ -23,6 +23,12 @@ export interface Routes {
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
+  "POST /api/me/workspace-tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
+  "GET /api/me/workspace-tokens": { response: T.WorkspaceToken[] };
+  "DELETE /api/me/workspace-tokens/:id": { response: void };
+  "POST /api/workspace/run": { body: T.RunCode; response: T.CodeResult };
+  "PUT /api/workspace/files": { body: T.WriteFile; response: T.SavedFile };
+  "POST /api/workspace/notebooks/edit": { body: T.EditNotebook; response: T.EditedNotebook };
   "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
   "GET /api/cube/parameters": { response: T.Parameter[] };
   "POST /api/cube/find": { body: T.FindMissions; response: T.FoundMissions };
