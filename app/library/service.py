@@ -12,6 +12,8 @@ from starlette.responses import Response
 from app.infrastructure.access import Caller
 from app.infrastructure.database.unit_of_work import has_ambient_transaction, unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
+from app.infrastructure.operations import observe
+from app.infrastructure.operations.context import current_call
 from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.embed import embed, model_name
@@ -64,11 +66,27 @@ class PreparedSource:
         )
 
 
+@observe("library.convert")
+def _convert_observed(content: bytes, filename: str):
+    """Timed convert step when an operation is already open."""
+    from app.library.convert import convert
+
+    return convert(content, filename)
+
+
+def convert_request(content: bytes, filename: str):
+    """Convert request bytes; emit a step only under an active operation."""
+    from app.library.convert import convert
+
+    if current_call.get() is None:
+        return convert(content, filename)
+    return _convert_observed(content, filename)
+
+
 def inspect_file(request):
     import hashlib
     from pathlib import Path
 
-    from app.library.convert import convert
     from app.library.handlers import InspectedBlock, InspectedFile
 
     suffix = Path(request.file_name).suffix.lower()
@@ -91,7 +109,7 @@ def inspect_file(request):
     ):
         raise InvalidInput()
     try:
-        blocks = convert(request.content, request.file_name)
+        blocks = convert_request(request.content, request.file_name)
     except (ValueError, UnicodeDecodeError):
         raise InvalidInput() from None
     if not blocks:
@@ -288,13 +306,27 @@ def source_items(provider):
         raise NotFound() from None
 
 
-def source_content(provider, key: str, version: int):
+def _read_provider(provider, key: str, version: int):
+    """Read provider bytes; refuse when a database transaction is open."""
     if has_ambient_transaction():
         raise NotFound()
     try:
         return provider.read_content(key, version)
     except (KeyError, FileNotFoundError):
         raise NotFound() from None
+
+
+@observe("library.provider_read")
+def _source_content_observed(provider, key: str, version: int):
+    """Timed provider read when an operation is already open."""
+    return _read_provider(provider, key, version)
+
+
+def source_content(provider, key: str, version: int):
+    """Read provider bytes; emit a step only under an active operation."""
+    if current_call.get() is None:
+        return _read_provider(provider, key, version)
+    return _source_content_observed(provider, key, version)
 
 
 def readable_source_version(session, caller: Caller, key: str, version: int | None, source):
@@ -534,7 +566,6 @@ def checked_citation(caller: Caller, handle):
     import hashlib
 
     from app.library.citation import quote
-    from app.library.convert import convert
     from app.library.handlers import CitationStatus
 
     if handle.version < 1 or handle.block < 1:
@@ -561,7 +592,7 @@ def checked_citation(caller: Caller, handle):
     source_sha256 = hashlib.sha256(source).digest()
     filename = original_version.get("file_name", item["path"])
     try:
-        blocks = convert(source, filename)
+        blocks = convert_request(source, filename)
     except (ValueError, UnicodeDecodeError):
         return CitationStatus(status="changed", latest_version=latest), live, source_sha256
     selected = next((block for block in blocks if block.block == handle.block), None)
