@@ -326,11 +326,7 @@ async def test_summarize_logging_chain_without_content(cube_source):
     assert safe
     roots = [row for row in rows if row["name"] == "summarize.selected"]
     assert len(roots) == 1
-    model = [
-        row
-        for row in rows
-        if row["kind"] == "step" and row["name"] == "summarize.model"
-    ]
+    model = [row for row in rows if row["kind"] == "step" and row["name"] == "summarize.model"]
     assert len(model) == 1 and model[0]["parent_call_id"] == roots[0]["call_id"]
 
 
