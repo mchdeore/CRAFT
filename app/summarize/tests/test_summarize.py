@@ -326,7 +326,12 @@ async def test_summarize_logging_chain_without_content(cube_source):
     assert safe
     roots = [row for row in rows if row["name"] == "summarize.selected"]
     assert len(roots) == 1
-    assert any(row["kind"] == "step" and row["parent_call_id"] is not None for row in rows)
+    model = [
+        row
+        for row in rows
+        if row["kind"] == "step" and row["name"] == "summarize.model"
+    ]
+    assert len(model) == 1 and model[0]["parent_call_id"] == roots[0]["call_id"]
 
 
 def test_summarize_foreign_admin_and_disabled(cube_source, monkeypatch):

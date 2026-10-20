@@ -12,6 +12,7 @@ from starlette.responses import Response
 from app.infrastructure.access import Caller
 from app.infrastructure.database.unit_of_work import has_ambient_transaction, unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
+from app.infrastructure.operations import observe
 from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.embed import embed, model_name
@@ -64,11 +65,18 @@ class PreparedSource:
         )
 
 
+@observe("library.convert")
+def convert_request(content: bytes, filename: str):
+    """Convert owned request bytes under an operation; indexing keeps the raw convert."""
+    from app.library.convert import convert
+
+    return convert(content, filename)
+
+
 def inspect_file(request):
     import hashlib
     from pathlib import Path
 
-    from app.library.convert import convert
     from app.library.handlers import InspectedBlock, InspectedFile
 
     suffix = Path(request.file_name).suffix.lower()
@@ -91,7 +99,7 @@ def inspect_file(request):
     ):
         raise InvalidInput()
     try:
-        blocks = convert(request.content, request.file_name)
+        blocks = convert_request(request.content, request.file_name)
     except (ValueError, UnicodeDecodeError):
         raise InvalidInput() from None
     if not blocks:
@@ -288,7 +296,9 @@ def source_items(provider):
         raise NotFound() from None
 
 
+@observe("library.provider_read")
 def source_content(provider, key: str, version: int):
+    """Read provider bytes under an operation; craft index uses provider.read_content directly."""
     if has_ambient_transaction():
         raise NotFound()
     try:
@@ -534,7 +544,6 @@ def checked_citation(caller: Caller, handle):
     import hashlib
 
     from app.library.citation import quote
-    from app.library.convert import convert
     from app.library.handlers import CitationStatus
 
     if handle.version < 1 or handle.block < 1:
@@ -561,7 +570,7 @@ def checked_citation(caller: Caller, handle):
     source_sha256 = hashlib.sha256(source).digest()
     filename = original_version.get("file_name", item["path"])
     try:
-        blocks = convert(source, filename)
+        blocks = convert_request(source, filename)
     except (ValueError, UnicodeDecodeError):
         return CitationStatus(status="changed", latest_version=latest), live, source_sha256
     selected = next((block for block in blocks if block.block == handle.block), None)
