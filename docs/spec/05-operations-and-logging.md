@@ -48,7 +48,7 @@ What the decorator does on every call:
 
 `@observe(name)`: times an internal step (a model call, an embedding, a search, any outside HTTP call) as a `step` row under the current call. It is never exposed, never grants access and never sits on an `@operation`.
 
-Use `@observe` for slow or external hops under an operation (provider I/O, file conversion, outbound HTTP, model calls). Do not observe every database query; statement counts already attach to the current call. The public decorator surface stays `{@operation, @observe}` until a third cross-cutting concern hurts in three places. Owner indexing (`craft index`) is outside operations today, so it does not emit step rows and keeps the raw provider and convert paths.
+Use `@observe` for slow or external hops under an operation (provider I/O, file conversion, outbound HTTP, model calls). Do not observe every database query; statement counts already attach to the current call. The public decorator surface stays `{@operation, @observe}` until a third cross-cutting concern hurts in three places. Owner indexing (`craft index`) is outside operations today, so it does not emit step rows and keeps the raw provider and convert paths. Shared library helpers that also run outside operations emit observe steps only when a call is already open.
 
 ## 5.1 On FastAPI
 
