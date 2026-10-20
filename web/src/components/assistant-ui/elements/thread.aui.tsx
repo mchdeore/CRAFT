@@ -8,6 +8,7 @@ import {
 import { File } from "@/components/assistant-ui/elements/file";
 import { CitationList } from "@/components/citations/citation-list";
 import { ChatTool } from "@/components/chat-tool";
+import { ChatSourceCards } from "@/components/chat-source-cards";
 import { PersonalReferenceControl, PersonalReferencePickers } from "@/components/personal-reference-pickers";
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/elements/follow-up-suggestions.aui";
@@ -562,6 +563,7 @@ const AssistantMessage: FC = () => {
           }}
         </MessagePrimitive.GroupedParts>
         {/* Structured answer evidence is checked against current originals. */}
+        <ChatSourceCards />
         <CitationList />
         <MessageError />
       </div>
