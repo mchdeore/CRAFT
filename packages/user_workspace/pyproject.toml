@@ -13,6 +13,7 @@ analysis = [
   "matplotlib==3.11.2",
   "duckdb==1.5.6",
   "openpyxl==3.1.5",
+  "python-docx==1.2.0",
 ]
 lab = [
   "jupyterlab==4.6.4",

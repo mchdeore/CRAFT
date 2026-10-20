@@ -2,7 +2,7 @@
 
 CRAFT combines authenticated chat and a personal workspace for files and Markdown skills. The user and agent work with the same `.py` scripts, `.ipynb` notebooks, inputs and outputs beneath `USER_ROOT`, which is `/workspace`. JupyterLab provides Python editing, execution, terminals, uploads and downloads.
 
-Use the top navigation to open **Chat** or **Workspace**. Workspace contains **Files** and **Skills**. Switching views retains the conversation, unsent message, visited skill editor and Jupyter workspace. Jupyter first loads when Files opens.
+Use the top navigation to open **Chat** or **Workspace**. Workspace contains **Files** and **Skills**. Switching views retains the conversation, unsent message, visited skill editor and personal file navigation. In Files, choose **Open JupyterLab** to launch the owner's configured workspace in a separate tab. Files and running kernels remain in JupyterLab while browsing CRAFT; agent file access continues through the existing backend workspace connection.
 
 Each owner has dedicated workspace storage, a Jupyter service and a private MCP control connection. Jupyter uses its own password, separate from CRAFT sign-in. The workspace runs as an unprivileged account and receives no source corpus mount or CRAFT model and database credentials.
 
@@ -16,15 +16,15 @@ Select a `/workspace` file link in a chat response to open the current personal 
 
 ## Source copies
 
-In **Workspace**, sign in to JupyterLab, search sources and select **Import**. Import copies the selected original version into `USER_ROOT/imports` with a readable name, such as `report.xlsx`. If that name is taken, it tries numeric alternatives such as `report-2.xlsx`, up to 20 names, without overwriting existing files. The import limit is 16 MB.
+In **Workspace → Files**, open JupyterLab and sign in there if needed, then choose **Search sources** in CRAFT and select **Import copy**. This saves the selected original version into `USER_ROOT/imports` with a readable name, such as `report.xlsx`, and reveals its containing folder in Personal files. If that name is taken, it tries numeric alternatives such as `report-2.xlsx`, up to 20 names, without overwriting existing files. The import limit is 16 MB.
 
-Source identity and the initial SHA-256 hash are recorded separately in `USER_ROOT/imports/source-metadata/<UUID>.json`. If metadata cannot be confirmed after the copy saves, the copy remains and Import prompts inspection before importing again.
+Source identity and the initial SHA-256 hash are recorded separately in `USER_ROOT/imports/source-metadata/<UUID>.json`. If metadata cannot be confirmed after the copy saves, search stays open with the warning, saved path and **Open copy** action. The personal browser still refreshes and reveals the saved copy.
 
-Word and Excel copies open in the personal file preview after Import. Open copy reopens that preview; Download returns the personal bytes. The personal browser also previews supported files up to 10 MB. Use JupyterLab for Python and notebook editing, and for files beyond the preview limit. Source originals remain immutable. Personal copies and generated outputs stay outside ingestion and the engineering datacube.
+Word and Excel copies open in the personal file preview after a fully successful import. **Open copy** opens that preview manually; Download returns the personal bytes. The personal browser also previews supported files up to 10 MB. Use JupyterLab for Python and notebook editing, and for files beyond the preview limit. Source originals remain immutable. Personal copies and generated outputs stay outside ingestion and the engineering datacube.
 
 ## Python analysis
 
-The workspace image includes Pandas for tables, DuckDB for local SQL, NumPy and SciPy for numerical analysis, Matplotlib for charts, and OpenPyXL for Excel files. Import them in scripts or notebooks and save exported tables and charts beneath `USER_ROOT/outputs`. Personal inputs, scripts, notebooks and results remain outside the source database.
+The workspace image includes Pandas for tables, DuckDB for local SQL, NumPy and SciPy for numerical analysis, Matplotlib for charts, OpenPyXL for Excel files, and python-docx for editing personal Word copies and writing Word outputs. Import them in scripts or notebooks and save exported tables, charts and documents beneath `USER_ROOT/outputs`. Personal inputs, scripts, notebooks and results remain outside the source database.
 
 ## Native tools from Python
 

@@ -73,16 +73,18 @@ test("authenticated app routes two owners and leaves missing or malformed mappin
       for (const [owner, expected] of [[ownerA, "http://127.0.0.1:58101/lab"], [ownerB, "http://127.0.0.1:58102/lab"], [ownerC, undefined]]) {
         currentOwner = owner;
         await React.act(async () => root.render(React.createElement(App, { key: `${index}:${owner.id}` })));
-        assert.equal(host.elements("iframe").length, 0, "The initial Chat view does not mount an owner workspace");
+        assert.equal(host.elements("a").some(element => element.textContent.includes("Open JupyterLab")), false, "The initial Chat view does not mount an owner workspace");
         const open = host.elements("button").find(element => element.textContent === "Workspace");
         assert.ok(open);
         await React.act(async () => open.dispatchEvent({ type: "click", button: 0, bubbles: true }));
-        const frames = host.elements("iframe");
+        const launches = host.elements("a").filter(element => element.textContent.includes("Open JupyterLab"));
+        assert.equal(host.elements("iframe").length, 0, "JupyterLab is launch-only");
         if (index === 0 && expected) {
-          assert.equal(frames.length, 1);
-          assert.equal(frames[0].getAttribute("src"), expected);
+          assert.equal(launches.length, 1);
+          assert.equal(launches[0].getAttribute("href"), expected);
+          assert.equal(launches[0].getAttribute("target"), "_blank");
         } else {
-          assert.equal(frames.length, 0);
+          assert.equal(launches.length, 0);
           assert.match(host.container.textContent, /Workspace service is not connected/);
         }
       }
@@ -117,13 +119,13 @@ test("missing workspace renders an honest service state with no frame or run sub
   assert.doesNotMatch(html, /<iframe|>Run</);
 });
 
-test("configured workspace keeps an independent open link and does not claim iframe connectivity", () => {
+test("configured workspace launches JupyterLab separately with honest sign-in guidance", () => {
   assert.equal(typeof workspace.JupyterWorkspace, "function");
   const html = renderToStaticMarkup(React.createElement(workspace.JupyterWorkspace, { configuration: { status: "configured", url: "http://127.0.0.1:53522/lab" } }));
-  assert.match(html, /<iframe[^>]+title="JupyterLab workspace"/);
-  assert.match(html, /src="http:\/\/127\.0\.0\.1:53522\/lab"/);
+  assert.doesNotMatch(html, /<iframe/);
   assert.match(html, /href="http:\/\/127\.0\.0\.1:53522\/lab"[^>]+target="_blank"[^>]+rel="noopener noreferrer"/);
-  assert.doesNotMatch(html, /Workspace connected|Agent can access/);
+  assert.match(html, /sign in/i);
+  assert.doesNotMatch(html, /Workspace connected/);
 });
 
 test("navigation exposes only Chat and Workspace, with Files and Skills inside Workspace", async () => {
@@ -150,17 +152,17 @@ test("navigation exposes only Chat and Workspace, with Files and Skills inside W
   } finally { try { await React.act(async () => root.unmount()); } finally { host.restore(); } }
 });
 
-test("first Workspace visit mounts a visible iframe once and later navigation retains it", async () => {
+test("first Workspace visit mounts the launch panel once and later navigation retains it", async () => {
   const host = mountedHost(); const { createRoot } = await import("react-dom/client"); const root = createRoot(host.container);
   let mounts = 0, releases = 0, mountedVisible = false;
-  function Files() { React.useLayoutEffect(() => { mounts++; mountedVisible = visible(host.elements("iframe")[0]); return () => { releases++; }; }, []); return React.createElement("iframe", { title: "Generated workspace", src: "http://127.0.0.1:53522/lab" }); }
+  function Files() { React.useLayoutEffect(() => { mounts++; mountedVisible = visible(host.elements("a")[0]); return () => { releases++; }; }, []); return React.createElement("a", { href: "http://127.0.0.1:53522/lab", target: "_blank", rel: "noopener noreferrer" }, "Open JupyterLab"); }
   const click = async label => { const button = host.elements("button").find(element => element.textContent === label); assert.ok(button); await React.act(async () => button.dispatchEvent({ type: "click", button: 0, bubbles: true })); };
   try {
     await React.act(async () => root.render(React.createElement(shell.WorkspaceShell, { chat: React.createElement("p", null, "Current conversation"), files: React.createElement(Files), skills: React.createElement("p", null, "Personal skills") })));
-    assert.equal(host.elements("iframe").length, 0); assert.equal(mounts, 0);
-    await click("Workspace"); const frame = host.elements("iframe")[0];
-    assert.ok(frame); assert.equal(mounts, 1); assert.equal(mountedVisible, true); assert.equal(visible(frame), true);
-    for (const label of ["Skills", "Chat", "Workspace", "Files", "Chat", "Workspace"]) { await click(label); assert.equal(host.elements("iframe")[0], frame); assert.equal(mounts, 1); assert.equal(releases, 0); }
+    assert.equal(host.elements("a").length, 0); assert.equal(mounts, 0);
+    await click("Workspace"); const launch = host.elements("a")[0];
+    assert.ok(launch); assert.equal(mounts, 1); assert.equal(mountedVisible, true); assert.equal(visible(launch), true);
+    for (const label of ["Skills", "Chat", "Workspace", "Files", "Chat", "Workspace"]) { await click(label); assert.equal(host.elements("a")[0], launch); assert.equal(mounts, 1); assert.equal(releases, 0); }
   } finally { try { await React.act(async () => root.unmount()); } finally { host.restore(); } }
   assert.equal(releases, 1);
 });
@@ -172,14 +174,14 @@ test("Chat and Workspace retain the active stream, composer text and unsaved ski
   function SkillDocument() { const [text, setText] = React.useState("Unsaved instructions"); React.useEffect(() => { skillMounts++; return () => { skillReleases++; }; }, []); return React.createElement(React.Fragment, null, React.createElement("button", { onClick: () => setText("Changed instructions") }, "Edit generated skill"), React.createElement("textarea", { value: text, readOnly: true })); }
   const click = async label => { const button = host.elements("button").find(element => element.textContent === label); assert.ok(button); await React.act(async () => button.dispatchEvent({ type: "click", button: 0, bubbles: true })); };
   try {
-    await React.act(async () => root.render(React.createElement(shell.WorkspaceShell, { chat: React.createElement(LiveChat), files: React.createElement("iframe", { title: "Retained Jupyter frame", src: "http://127.0.0.1:53522/lab" }), skills: React.createElement(SkillDocument) })));
+    await React.act(async () => root.render(React.createElement(shell.WorkspaceShell, { chat: React.createElement(LiveChat), files: React.createElement("a", { href: "http://127.0.0.1:53522/lab", target: "_blank", rel: "noopener noreferrer" }, "Open JupyterLab"), skills: React.createElement(SkillDocument) })));
     await click("Unsent message"); const chat = host.elements("button").find(element => element.textContent === "Retained message"); const stream = host.elements("output")[0];
-    await click("Workspace"); const frame = host.elements("iframe")[0];
+    await click("Workspace"); const launch = host.elements("a")[0];
     await click("Skills"); const skill = host.elements("textarea")[0]; await click("Edit generated skill");
     await React.act(async () => deliver("Stream continued while hidden"));
     for (const label of ["Chat", "Workspace", "Files", "Skills", "Chat", "Workspace"]) await click(label);
     assert.equal(host.elements("button").find(element => element.textContent === "Retained message"), chat); assert.equal(host.elements("output")[0], stream); assert.equal(stream.textContent, "Stream continued while hidden");
-    assert.equal(host.elements("iframe")[0], frame); assert.equal(host.elements("textarea")[0], skill); assert.equal(skill.value, "Changed instructions");
+    assert.equal(host.elements("a")[0], launch); assert.equal(host.elements("textarea")[0], skill); assert.equal(skill.value, "Changed instructions");
     assert.equal(mounts, 1); assert.equal(skillMounts, 1); assert.equal(releases, 0); assert.equal(skillReleases, 0);
   } finally { try { await React.act(async () => root.unmount()); } finally { host.restore(); } }
   assert.equal(releases, 1); assert.equal(skillReleases, 1);

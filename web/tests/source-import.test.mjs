@@ -11,12 +11,21 @@ import { mountedHost } from "./source-import-host.mjs";
 const clientURL = new URL("../src/lib/source-import.ts", import.meta.url);
 const client = existsSync(clientURL) ? await import(clientURL) : {};
 const workspace = await import("../src/components/jupyter-workspace.tsx");
+const panel = await import("../src/components/source-import.tsx");
 const requireFunction = name => { assert.equal(typeof client[name], "function", `Missing source import helper ${name}`); return client[name]; };
 const configured = { status: "configured", url: "http://127.0.0.1:58101/lab" };
 const source = { item: "generated-source-1", version: 3, title: "Generated Report", snippet: "<b>Generated source snippet</b>", classification: "unclassified" };
 const hit = { kind: "document", handle: { item: source.item, version: 3, block: 1, locator: "p1", quoteSha256: "0".repeat(64), simulated: true }, title: source.title, text: source.snippet, classification: "unclassified", headingPath: "", score: 0.9, tags: { mission: null, silo: null, stage: null }, before: null, after: null };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const freshSignal = () => new AbortController().signal;
+const sourceInput = host => host.elements("input").find(element => element.getAttribute("name") === "source-query");
+const sourceForm = host => host.elements("form").find(element => element.getAttribute("aria-label") === "Search sources");
+const jupyterLaunch = host => host.elements("a").find(element => element.getAttribute("href") === configured.url && element.getAttribute("target") === "_blank");
+function focusCapableHost() {
+  const host = mountedHost();
+  Object.getPrototypeOf(host.container).focus = function () { this.ownerDocument.activeElement = this; };
+  return host;
+}
 const openOriginal = (bytes = Uint8Array.of(120), options = {}) => {
   let cancellations = 0;
   const response = new Response(new ReadableStream({
@@ -35,8 +44,8 @@ const transport = override => {
     if (url === "/api/library/documents/generated-source-1/download?version=3") return new Response("Generated original bytes", { headers: { "content-type": "text/plain", "content-disposition": 'attachment; filename="report.txt"' } });
     if (url.startsWith("http://127.0.0.1:58101/api/contents/")) {
       const path = new URL(url).pathname.slice("/api/contents/".length);
-      const directory = path === "imports" || path === "imports/source-metadata";
-      if (directory && (!options.method || options.method === "GET")) return json({ type: "directory", path });
+      const directory = path === "" || path === "imports" || path === "imports/source-metadata";
+      if (directory && (!options.method || options.method === "GET")) return json({ type: "directory", path, content: [] });
       if (directory && options.method === "PUT") return json({ type: "directory", path }, 201);
       if (directory && options.method === "POST") {
         const { ext } = JSON.parse(options.body); let index = 0, fresh;
@@ -67,10 +76,238 @@ async function environment(run, cookie = "_xsrf=generated-xsrf-cookie") {
 }
 async function settleImport(host) {
   const deadline = Date.now() + 1000;
-  while (host.elements("button").some(button => button.textContent === "Importing...") && Date.now() < deadline) {
+  while (host.container.textContent.includes("Importing...") && Date.now() < deadline) {
     await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
   }
 }
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(finish => { resolve = finish; });
+  return { promise, resolve };
+};
+async function withSourcePanel(run, props = {}) {
+  const host = mountedHost(), oldFetch = globalThis.fetch;
+  const { createRoot } = await import("react-dom/client"), root = createRoot(host.container);
+  try {
+    await React.act(async () => root.render(React.createElement(panel.SourceImport, { configuration: configured, ...props })));
+    return await run(host, root);
+  } finally { try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = oldFetch; host.restore(); } }
+}
+async function submitPanel(host, value) {
+  sourceInput(host).value = value;
+  await React.act(async () => sourceForm(host).dispatchEvent({ type: "submit", bubbles: true }));
+}
+async function changePanelQuery(host, value) {
+  const input = sourceInput(host); input.value = value;
+  await React.act(async () => input.dispatchEvent({ type: "input", bubbles: true }));
+}
+const resultArticle = (host, title, version) => host.elements("article").find(article => article.textContent.includes(title) && article.textContent.includes(`Version ${version}`));
+const importButton = (host, article) => host.elements("button").find(button => article?.contains(button) && /^(?:Import(?: copy)?|Retry Import)$/.test(button.textContent));
+async function clickPanel(button) {
+  assert.ok(button, "Result has an import action");
+  await React.act(async () => button.dispatchEvent({ type: "click", bubbles: true, button: 0 }));
+}
+async function waitFor(condition, message) {
+  const deadline = Date.now() + 1000;
+  while (!condition() && Date.now() < deadline) await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+  assert.ok(condition(), message);
+}
+
+test("source results identify the exact reference and offer an explicit personal copy action", async () => withSourcePanel(async host => {
+  const mock = transport(); globalThis.fetch = mock.fetcher;
+  await submitPanel(host, "radiator margin");
+  const article = resultArticle(host, "Generated Report", 3);
+  assert.ok(article);
+  assert.match(article.textContent, /generated-source-1/);
+  assert.match(article.textContent, /Generated source snippet/);
+  assert.equal(importButton(host, article).textContent, "Import copy");
+  assert.equal(host.elements("b").length, 0);
+}));
+
+test("typing and submitting another search does not cancel a personal save or hide its outcome", async () => {
+  const imported = [];
+  await withSourcePanel(async host => {
+    const saved = deferred(); let upload;
+    const newer = { ...hit, title: "Another source", handle: { ...hit.handle, item: "generated-other-2", version: 1 } };
+    const mock = transport(request => {
+      if (request.url === "/api/library/search" && JSON.parse(request.body).query === "other") return json({ hits: [newer], truncated: false });
+      if (request.url.endsWith("/imports/report.txt") && request.method === "PUT") { upload = request; return saved.promise; }
+    }); globalThis.fetch = mock.fetcher;
+    await submitPanel(host, "margin");
+    await clickPanel(importButton(host, resultArticle(host, "Generated Report", 3)));
+    await waitFor(() => upload, "Personal save is in flight");
+    await changePanelQuery(host, "other");
+    await submitPanel(host, "other");
+    assert.equal(upload.signal.aborted, false, "A new query only cancels its search");
+    assert.match(host.container.textContent, /Another source/);
+    await React.act(async () => saved.resolve(json({ type: "file", path: "imports/report.txt" })));
+    await settleImport(host);
+    assert.deepEqual(imported, ["imports/report.txt"]);
+    assert.match(host.container.textContent, /Imported to imports\/report\.txt/);
+    assert.equal(host.elements("a").find(link => link.textContent === "Open copy").getAttribute("href"), "http://127.0.0.1:58101/lab/tree/imports/report.txt");
+    await submitPanel(host, "margin");
+    const article = resultArticle(host, "Generated Report", 3);
+    assert.match(article.textContent, /Imported to imports\/report\.txt/);
+    const button = host.elements("button").find(row => article.contains(row));
+    assert.equal(button.hasAttribute("disabled"), true, "The saved result does not offer a duplicate import");
+  }, { onImported: path => imported.push(path) });
+});
+
+test("copy state belongs to an item and version and survives imports of other results", async () => withSourcePanel(async host => {
+  const newer = { ...hit, title: "Generated newer report", handle: { ...hit.handle, version: 4 } };
+  const mock = transport(request => {
+    if (request.url === "/api/library/search") return json({ hits: [hit, newer], truncated: false });
+    if (request.url.endsWith("/download?version=4")) return new Response("New version bytes", { headers: { "content-type": "text/plain", "content-disposition": 'attachment; filename="newer-report.txt"' } });
+  }); globalThis.fetch = mock.fetcher;
+  await submitPanel(host, "margin");
+  await clickPanel(importButton(host, resultArticle(host, "Generated Report", 3)));
+  await settleImport(host);
+  const versionFour = resultArticle(host, "Generated newer report", 4);
+  assert.doesNotMatch(versionFour.textContent, /Imported to/, "Another version has not been imported");
+  assert.equal(importButton(host, versionFour).hasAttribute("disabled"), false);
+  await clickPanel(importButton(host, versionFour));
+  await settleImport(host);
+  assert.match(resultArticle(host, "Generated Report", 3).textContent, /Imported to imports\/report\.txt/);
+  assert.match(resultArticle(host, "Generated newer report", 4).textContent, /Imported to imports\/newer-report\.txt/);
+  await changePanelQuery(host, "repeated search");
+  await submitPanel(host, "repeated search");
+  assert.match(resultArticle(host, "Generated Report", 3).textContent, /Imported to imports\/report\.txt/);
+  assert.equal(mock.requests.filter(request => request.url.includes("/download?")).length, 2);
+}));
+
+test("a saved copy with incomplete metadata refreshes the tree and cannot be imported twice", async () => {
+  const imported = [];
+  await withSourcePanel(async host => {
+    const mock = transport(request => request.url.includes("source-metadata") ? new Response("Generated private body", { status: 503 }) : undefined);
+    globalThis.fetch = mock.fetcher;
+    await submitPanel(host, "margin");
+    await clickPanel(importButton(host, resultArticle(host, "Generated Report", 3)));
+    await settleImport(host);
+    assert.deepEqual(imported, ["imports/report.txt"], "Confirmed personal bytes refresh the tree even without confirmed metadata");
+    assert.match(host.container.textContent, /copy saved at imports\/report\.txt/i);
+    assert.doesNotMatch(host.container.textContent, /Imported to|Generated private body/);
+    const article = resultArticle(host, "Generated Report", 3);
+    const button = host.elements("button").find(row => article.contains(row));
+    assert.equal(button.hasAttribute("disabled"), true);
+    await clickPanel(button);
+    await changePanelQuery(host, "margin again");
+    await submitPanel(host, "margin again");
+    assert.match(resultArticle(host, "Generated Report", 3).textContent, /copy saved at imports\/report\.txt/i);
+    assert.equal(mock.requests.filter(request => request.url.includes("/download?")).length, 1);
+  }, { onImported: path => imported.push(path) });
+});
+
+test("late search responses cannot replace the newest submitted selection", async () => withSourcePanel(async host => {
+  const old = deferred(); let oldSignal;
+  const oldHit = { ...hit, title: "Older search result" };
+  const newHit = { ...hit, title: "Newer search result", handle: { ...hit.handle, version: 4 } };
+  const mock = transport(request => {
+    if (request.url === "/api/library/search") {
+      if (JSON.parse(request.body).query === "older") { oldSignal = request.signal; return old.promise; }
+      return json({ hits: [newHit], truncated: false });
+    }
+  }); globalThis.fetch = mock.fetcher;
+  await submitPanel(host, "older");
+  await changePanelQuery(host, "newer");
+  await submitPanel(host, "newer");
+  assert.equal(oldSignal.aborted, true);
+  await React.act(async () => old.resolve(json({ hits: [oldHit], truncated: false })));
+  assert.match(host.container.textContent, /Newer search result/);
+  assert.doesNotMatch(host.container.textContent, /Older search result/);
+}));
+
+test("changing the SourceImport owner cancels a delayed save and clears previous source state", async () => {
+  const imported = [];
+  await withSourcePanel(async (host, root) => {
+    const saved = deferred(); let upload;
+    const mock = transport(request => {
+      if (request.url.endsWith("/imports/report.txt") && request.method === "PUT") { upload = request; return saved.promise; }
+    }); globalThis.fetch = mock.fetcher;
+    await submitPanel(host, "margin");
+    await clickPanel(importButton(host, resultArticle(host, "Generated Report", 3)));
+    await waitFor(() => upload, "Personal save is in flight");
+    await React.act(async () => root.render(React.createElement(panel.SourceImport, {
+      configuration: { status: "configured", url: "http://127.0.0.1:58102/lab" }, onImported: path => imported.push(path),
+    })));
+    assert.equal(upload.signal.aborted, true);
+    await React.act(async () => saved.resolve(json({ type: "file", path: "imports/report.txt" })));
+    assert.deepEqual(imported, []);
+    assert.doesNotMatch(host.container.textContent, /Generated Report|Generated source snippet|Imported to/);
+  }, { onImported: path => imported.push(path) });
+});
+
+test("lost personal mutation responses are uncertain outcomes rather than retryable imports", async t => {
+  const cases = [
+    { name: "create response lost", method: "POST", endpoint: "/imports", possiblePath: undefined },
+    { name: "rename response lost", method: "PATCH", endpoint: "/imports/untitled.txt", possiblePath: "imports/report.txt" },
+    { name: "save response lost", method: "PUT", endpoint: "/imports/report.txt", possiblePath: "imports/report.txt" },
+  ];
+  for (const fixture of cases) await t.test(fixture.name, async () => environment(async () => {
+    let mock;
+    mock = transport(request => {
+      if (request.method !== fixture.method || !request.url.endsWith(fixture.endpoint)) return;
+      if (fixture.method === "POST") mock.files.set("imports/untitled.txt", { type: "file", format: "text", content: "" });
+      if (fixture.method === "PATCH") { mock.files.set("imports/report.txt", mock.files.get("imports/untitled.txt")); mock.files.delete("imports/untitled.txt"); }
+      if (fixture.method === "PUT") mock.files.set("imports/report.txt", JSON.parse(request.body));
+      throw new Error("Generated private transport failure");
+    }); globalThis.fetch = mock.fetcher;
+    await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => {
+      assert.equal(error.code, "outcome_unknown");
+      assert.equal(error.copiedPath, undefined, "No unconfirmed success claim");
+      assert.equal(error.possiblePath, fixture.possiblePath);
+      assert.doesNotMatch(error.message, /retry|private/i);
+      return true;
+    });
+    assert.equal(mock.requests.filter(request => request.method === fixture.method && request.url.endsWith(fixture.endpoint)).length, 1);
+    assert.equal(mock.requests.some(request => request.url.includes("source-metadata")), false);
+    if (fixture.method === "PUT") assert.equal(Buffer.from(mock.files.get("imports/report.txt").content, "base64").toString(), "Generated original bytes");
+  }));
+});
+
+test("an untrusted personal save model never confirms a copy or exposes an unsafe path", async () => environment(async () => {
+  const mock = transport(request => request.method === "PUT" && request.url.endsWith("/imports/report.txt")
+    ? json({ type: "file", path: "imports/../../another-owner.txt" }) : undefined);
+  globalThis.fetch = mock.fetcher;
+  await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => {
+    assert.equal(error.code, "outcome_unknown");
+    assert.equal(error.copiedPath, undefined);
+    assert.equal(error.possiblePath, "imports/report.txt");
+    assert.doesNotMatch(error.message, /another-owner/);
+    return true;
+  });
+  assert.equal(mock.requests.some(request => request.url.includes("source-metadata")), false);
+}));
+
+test("a mismatched imports directory creation is rejected before any personal file mutation", async () => environment(async () => {
+  const mock = transport(request => {
+    if (request.url.endsWith("/imports?content=0")) return new Response(null, { status: 404 });
+    if (request.url.endsWith("/imports") && request.method === "PUT") return json({ type: "directory", path: "other-owner" }, 201);
+  }); globalThis.fetch = mock.fetcher;
+  await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => error.code === "invalid_response");
+  assert.equal(mock.requests.some(request => request.method === "POST" || request.method === "PATCH"), false);
+}));
+
+test("an uncertain save offers a workspace check and preserves duplicate protection across searches", async () => {
+  const imported = [];
+  await withSourcePanel(async host => {
+    const mock = transport(request => {
+      if (request.method === "PUT" && request.url.endsWith("/imports/report.txt")) throw new Error("Generated private transport failure");
+    }); globalThis.fetch = mock.fetcher;
+    await submitPanel(host, "margin");
+    await clickPanel(importButton(host, resultArticle(host, "Generated Report", 3)));
+    await settleImport(host);
+    assert.match(host.container.textContent, /not.*confirmed|may.*saved/i);
+    assert.match(host.container.textContent, /imports\/report\.txt/);
+    assert.doesNotMatch(host.container.textContent, /Imported to|Personal copy saved|Generated private/);
+    assert.deepEqual(imported, [], "Unknown bytes are not reported as saved");
+    const check = host.elements("a").find(link => link.getAttribute("href") === "http://127.0.0.1:58101/lab/tree/imports/report.txt");
+    assert.ok(check, "The safe candidate can be checked in JupyterLab");
+    await submitPanel(host, "margin again");
+    const article = resultArticle(host, "Generated Report", 3);
+    assert.equal(host.elements("button").find(row => article.contains(row)).hasAttribute("disabled"), true);
+    assert.equal(mock.requests.filter(request => request.url.includes("/download?")).length, 1);
+  }, { onImported: path => imported.push(path) });
+});
 
 test("source search sends the existing typed document-only query and returns bounded snippets", async () => environment(async () => {
   const mock = transport(); globalThis.fetch = mock.fetcher;
@@ -156,7 +393,7 @@ test("Import selects a readable available name without replacing previous copies
 
 test("Import does not retry a failed rename that is not a name conflict", async () => environment(async () => {
   const mock = transport(request => request.method === "PATCH" ? new Response("Generated private failure", { status: 500 }) : undefined); globalThis.fetch = mock.fetcher;
-  await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => error.code === "import_unavailable" && error.copiedPath === undefined);
+  await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => error.code === "outcome_unknown" && error.copiedPath === undefined && error.possiblePath === "imports/report.txt");
   assert.equal(mock.requests.filter(request => request.method === "PATCH").length, 1);
   assert.equal(mock.requests.some(request => request.method === "PUT"), false);
 }));
@@ -280,7 +517,7 @@ test("Import rejects filename and returned path hazards and preserves safe provi
   const fallback = requireFunction("personalFilename")(new Headers({ "content-type": "application/pdf" }), "Generated / Report"); assert.equal(fallback, "Generated-Report.pdf");
   assert.equal(requireFunction("personalFilename")(new Headers({ "content-disposition": 'attachment; filename="report.XLSX"' }), "Generated fallback"), "report.xlsx");
   const mock = transport(request => request.method === "POST" ? json({ type: "file", path: "imports/../../private.txt" }, 201) : undefined); globalThis.fetch = mock.fetcher;
-  await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => error.code === "invalid_response"); assert.equal(mock.requests.some(request => request.method === "PUT"), false);
+  await assert.rejects(() => requireFunction("importSource")(source, configured, freshSignal()), error => error.code === "outcome_unknown" && error.possiblePath === undefined); assert.equal(mock.requests.some(request => request.method === "PUT"), false);
 }));
 
 test("aborted downloads and delayed search JSON cannot publish or upload stale results", async () => environment(async () => {
@@ -304,24 +541,25 @@ test("Files workspace wires source snippets and Import to real download and Cont
   try {
     await React.act(async () => root.render(React.createElement(workspace.JupyterWorkspace, { configuration: configured })));
     const input = host.elements("input").find(element => element.getAttribute("name") === "source-query"); assert.ok(input, "Files pane contains source search"); input.value = "radiator margin";
-    const form = host.elements("form")[0]; await React.act(async () => form.dispatchEvent({ type: "submit", bubbles: true }));
+    const form = sourceForm(host); await React.act(async () => form.dispatchEvent({ type: "submit", bubbles: true }));
     assert.match(host.container.textContent, /Generated source snippet/);
     assert.equal(host.elements("b").length, 0, "Snippet text is escaped rather than rendered as markup");
-    const button = host.elements("button").find(element => element.textContent === "Import"); assert.ok(button);
+    const button = host.elements("button").find(element => element.textContent === "Import copy"); assert.ok(button);
     await React.act(async () => button.dispatchEvent({ type: "click", bubbles: true, button: 0 }));
     await settleImport(host);
     assert.match(host.container.textContent, /Imported to imports\/report\.txt/);
     assert.ok(mock.requests.some(request => request.method === "PUT"));
     const link = host.elements("a").find(element => element.textContent === "Open copy"); assert.equal(link.getAttribute("href"), "http://127.0.0.1:58101/lab/tree/imports/report.txt");
-    assert.equal(host.elements("iframe")[0].getAttribute("src"), configured.url);
+    assert.equal(jupyterLaunch(host).getAttribute("href"), configured.url);
+    assert.match(jupyterLaunch(host).getAttribute("rel"), /noopener/);
   } finally { try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = oldFetch; host.restore(); } }
 });
 
-test("Import opens exact saved Office bytes in the personal preview and preserves the Jupyter frame", async () => {
+test("Import opens exact saved Office bytes in the personal preview and preserves the Jupyter launch", async () => {
   const workbook = new ExcelJS.Workbook();
   workbook.addWorksheet("Imported budget").addRows([["Item", "Cost"], ["Generated telescope", 27]]);
   const bytes = new Uint8Array(await workbook.xlsx.writeBuffer());
-  const host = mountedHost(), oldFetch = globalThis.fetch, createURL = URL.createObjectURL;
+  const host = focusCapableHost(), oldFetch = globalThis.fetch, createURL = URL.createObjectURL;
   const blobs = []; URL.createObjectURL = blob => { blobs.push(blob); return createURL(blob); };
   let mock;
   mock = transport(request => {
@@ -337,19 +575,19 @@ test("Import opens exact saved Office bytes in the personal preview and preserve
   };
   try {
     await React.act(async () => root.render(React.createElement(workspace.JupyterWorkspace, { configuration: configured })));
-    const frame = host.elements("iframe")[0];
+    const launch = jupyterLaunch(host); assert.ok(launch, "Configured workspace opens in its own tab");
     host.elements("input").find(row => row.getAttribute("name") === "source-query").value = "budget";
-    await React.act(async () => host.elements("form")[0].dispatchEvent({ type: "submit", bubbles: true }));
-    await click("Import"); await settleImport(host);
+    await React.act(async () => sourceForm(host).dispatchEvent({ type: "submit", bubbles: true }));
+    await click("Import copy"); await settleImport(host);
     for (let count = 0; count < 80 && !host.container.textContent.includes("Generated telescope"); count++) await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
     assert.match(host.container.textContent, /Generated telescope/, "Import should open our Office renderer instead of a Jupyter binary editor");
     assert.match(host.container.textContent, /Imported budget/);
-    assert.equal(host.elements("iframe")[0], frame);
+    assert.equal(jupyterLaunch(host), launch);
     assert.deepEqual(new Uint8Array(await blobs[0].arrayBuffer()), bytes);
     assert.equal(host.elements("a").find(row => row.getAttribute("download") === "report.xlsx").getAttribute("href").startsWith("blob:"), true);
     await click("Close personal preview"); await click("Open copy");
     assert.ok(host.elements("div").some(row => row.getAttribute("role") === "dialog"));
-    assert.equal(host.elements("iframe")[0], frame);
+    assert.equal(jupyterLaunch(host), launch);
     const reads = mock.requests.filter(request => request.url.endsWith("imports/report.xlsx?content=1&format=base64"));
     assert.ok(reads.length >= 1); assert.ok(reads.every(request => request.credentials === "include" && request.redirect === "error"));
     assert.equal(mock.requests.filter(request => request.url.includes("/download?")).length, 1);
@@ -362,9 +600,9 @@ test("Files workspace exposes the saved copy and incomplete provenance without a
   const { createRoot } = await import("react-dom/client"); const root = createRoot(host.container);
   try {
     await React.act(async () => root.render(React.createElement(workspace.JupyterWorkspace, { configuration: configured })));
-    host.elements("input")[0].value = "margin";
-    await React.act(async () => host.elements("form")[0].dispatchEvent({ type: "submit", bubbles: true }));
-    await React.act(async () => host.elements("button").find(element => element.textContent === "Import").dispatchEvent({ type: "click", bubbles: true, button: 0 }));
+    sourceInput(host).value = "margin";
+    await React.act(async () => sourceForm(host).dispatchEvent({ type: "submit", bubbles: true }));
+    await React.act(async () => host.elements("button").find(element => element.textContent === "Import copy").dispatchEvent({ type: "click", bubbles: true, button: 0 }));
     await settleImport(host);
     assert.match(host.container.textContent, /copy saved at imports\/report\.txt/i);
     assert.match(host.container.textContent, /source metadata.*not.*confirmed/i);
@@ -385,10 +623,10 @@ test("Files workspace shows sign-in and retry and aborts pending work on owner U
   };
   try {
     await React.act(async () => root.render(React.createElement(workspace.JupyterWorkspace, { configuration: configured })));
-    assert.ok(host.elements("input")[0], "Files pane contains source search");
-    host.elements("input")[0].value = "margin"; await React.act(async () => host.elements("form")[0].dispatchEvent({ type: "submit", bubbles: true }));
+    assert.ok(sourceInput(host), "Files pane contains source search");
+    sourceInput(host).value = "margin"; await React.act(async () => sourceForm(host).dispatchEvent({ type: "submit", bubbles: true }));
     host.container.ownerDocument.cookie = "";
-    await React.act(async () => host.elements("button").find(element => element.textContent === "Import").dispatchEvent({ type: "click", bubbles: true, button: 0 }));
+    await React.act(async () => host.elements("button").find(element => element.textContent === "Import copy").dispatchEvent({ type: "click", bubbles: true, button: 0 }));
     assert.match(host.container.textContent, /sign in/i); assert.ok(host.elements("button").some(element => element.textContent === "Retry Import"));
     const signIn = host.elements("a").find(element => element.textContent === "Sign in to JupyterLab"); assert.equal(signIn.getAttribute("href"), configured.url);
     host.container.ownerDocument.cookie = "_xsrf=generated-xsrf-cookie";
@@ -398,6 +636,6 @@ test("Files workspace shows sign-in and retry and aborts pending work on owner U
     assert.equal(waiting.aborted, true);
     await React.act(async () => finish(json({ type: "directory", path: "imports" })));
     assert.doesNotMatch(host.container.textContent, /Generated source snippet|Imported to/);
-    const html = renderToStaticMarkup(React.createElement(workspace.JupyterWorkspace, { configuration: { status: "missing" } })); assert.doesNotMatch(html, /<form|<iframe/);
+    const html = renderToStaticMarkup(React.createElement(workspace.JupyterWorkspace, { configuration: { status: "missing" } })); assert.doesNotMatch(html, /<form|Open JupyterLab/);
   } finally { try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = oldFetch; host.restore(); } }
 });

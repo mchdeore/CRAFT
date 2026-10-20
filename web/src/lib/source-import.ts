@@ -6,7 +6,7 @@ export type SourceResult = Pick<LibraryHit, "title" | "classification"> & {
   item: string; version: number; snippet: string;
 };
 type FailureCode = "invalid_query" | "invalid_source" | "invalid_workspace" | "invalid_response" | "invalid_name"
-  | "craft_auth" | "workspace_auth" | "search_unavailable" | "import_unavailable" | "metadata_unavailable" | "too_large" | "conflict";
+  | "craft_auth" | "workspace_auth" | "search_unavailable" | "import_unavailable" | "metadata_unavailable" | "outcome_unknown" | "too_large" | "conflict";
 const messages: Record<FailureCode, string> = {
   invalid_query: "Enter a source search of up to 500 characters.",
   invalid_source: "This source reference is unavailable. Search again.",
@@ -18,15 +18,18 @@ const messages: Record<FailureCode, string> = {
   search_unavailable: "Source search is unavailable. Try again.",
   import_unavailable: "Import could not finish. Open JupyterLab to check your sign-in, then retry.",
   metadata_unavailable: "Source metadata could not be confirmed. Open the copy in JupyterLab before importing again.",
+  outcome_unknown: "The import result could not be confirmed. A personal file may have been created or saved. Check JupyterLab before importing again.",
   too_large: "This source exceeds the 16 MB import limit.",
   conflict: "A personal filename could not be reserved. Open JupyterLab before trying again.",
 };
 export class SourceImportFailure extends Error {
   code: FailureCode;
   readonly copiedPath?: string;
-  constructor(code: FailureCode, copiedPath?: string) {
+  readonly possiblePath?: string;
+  constructor(code: FailureCode, copiedPath?: string, possiblePath?: string) {
     super(messages[code]); this.code = code;
     if (safePersonalPath(copiedPath)) this.copiedPath = copiedPath;
+    if (safePersonalPath(possiblePath)) this.possiblePath = possiblePath;
   }
 }
 export const MAX_IMPORT_BYTES = 16 * 1024 * 1024;
@@ -154,6 +157,8 @@ export async function importSource(source: SourceResult, configuration: Workspac
   const origin = workspaceOrigin(configuration);
   const xsrf = xsrfCookie();
   let copiedPath: string | undefined;
+  let possiblePath: string | undefined;
+  let personalMutationStarted = false;
   cancelled(signal);
   const contents = async (path: string, method: "GET" | "POST" | "PATCH" | "PUT", body?: object) => {
     cancelled(signal);
@@ -191,16 +196,21 @@ export async function importSource(source: SourceResult, configuration: Workspac
     if (directory.status === 404) {
       const created = await contents("imports", "PUT", { type: "directory" });
       if (!created.ok) throw new SourceImportFailure("import_unavailable");
+      const model: unknown = await created.json(); cancelled(signal);
+      if (!record(model) || model.type !== "directory" || model.path !== "imports") throw new SourceImportFailure("invalid_response");
     }
     // POST creates a fresh server-selected file; PATCH refuses an existing destination.
+    personalMutationStarted = true;
     const created = await contents("imports", "POST", { type: "file", ext: name.slice(name.lastIndexOf(".")) });
     if (created.status !== 201) throw new SourceImportFailure("import_unavailable");
     const fresh = await fileModel(created, signal);
+    possiblePath = fresh;
     let target: string | undefined;
     const extensionAt = name.lastIndexOf(".");
     for (let attempt = 0; attempt < 20; attempt++) {
       const candidate = `imports/${attempt === 0 ? name : `${name.slice(0, extensionAt)}-${attempt + 1}${name.slice(extensionAt)}`}`;
       try {
+        possiblePath = candidate;
         const renamed = await contents(fresh, "PATCH", { path: candidate });
         if (!renamed.ok) throw new SourceImportFailure("import_unavailable");
         if (await fileModel(renamed, signal) !== candidate) throw new SourceImportFailure("invalid_response");
@@ -246,6 +256,8 @@ export async function importSource(source: SourceResult, configuration: Workspac
   } catch (error) {
     if (copiedPath) throw new SourceImportFailure("metadata_unavailable", copiedPath);
     cancelled(signal);
+    // A lost or untrusted mutation response cannot prove whether the server wrote.
+    if (personalMutationStarted && !(error instanceof SourceImportFailure && (error.code === "workspace_auth" || error.code === "conflict"))) throw new SourceImportFailure("outcome_unknown", undefined, possiblePath);
     throw error instanceof SourceImportFailure ? error : new SourceImportFailure("import_unavailable");
   }
 }
