@@ -2,10 +2,13 @@
 
 import asyncio
 import hashlib
+import json
+import os
 from collections.abc import AsyncGenerator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, replace
+from pathlib import Path
 from typing import Any
 from uuid import uuid4, uuid5
 
@@ -21,14 +24,23 @@ from starlette.concurrency import run_in_threadpool
 from app.agent import model, service
 from app.agent.approval_adapter import DurableApprovalAgent
 from app.agent.handlers import AGUIEvent, RunRef, issue_run_token, revoke_run_token
+from app.agent.workspace import WorkspaceEndpoint, WorkspaceToolsets
+from app.agent.workspace_run import (
+    JupyterTarget,
+    WorkspaceRunController,
+    WorkspaceToolCallMiddleware,
+)
+from app.agent.workspace_session import RunBoundSession
 from app.approvals.handlers import ApprovalRequest, request_approval
 from app.conversations import handlers as conversations
+from app.cube.handlers import ValueEvidence
 from app.infrastructure.errors import ApiError, Conflict, InvalidInput
 from app.infrastructure.mcp.client import ToolCallMiddleware
 from app.infrastructure.mcp.client import client as mcp_client
 from app.infrastructure.operations.context import current_call
 from app.infrastructure.operations.registry import registry, tool_named, tool_operations
 from app.infrastructure.paths import ROOT
+from app.library.handlers import ChunkText, LibraryDocument, LibraryHit
 from app.skills import native as saved_skills
 
 RUN_SECONDS = 120
@@ -44,6 +56,59 @@ def read_only_query():
         yield
     finally:
         _read_only_query.reset(token)
+
+
+def _workspace_for_caller(caller):
+    """Only a private server file and trusted owner can select an external endpoint."""
+    path = os.environ.get("USER_WORKSPACES_FILE")
+    if not path or _read_only_query.get():
+        return None, "", None
+    endpoints = json.loads(Path(path).read_text())
+    if not isinstance(endpoints, dict):
+        raise ValueError("Invalid private workspace configuration")
+    entry = endpoints.get(str(caller.user_id)) if caller.user_id is not None else None
+    if entry is None:
+        return (
+            None,
+            "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
+            None,
+        )
+    if (
+        not isinstance(entry, dict)
+        or not isinstance(entry.get("url"), str)
+        or not isinstance(entry.get("headers"), dict)
+        or any(
+            not isinstance(k, str) or not isinstance(v, str) for k, v in entry["headers"].items()
+        )
+        or not isinstance(entry.get("tools"), list)
+        or any(not isinstance(name, str) or not name for name in entry["tools"])
+    ):
+        raise ValueError("Invalid private workspace configuration")
+    jupyter = None
+    if "jupyter" in entry:
+        config = entry["jupyter"]
+        if (
+            not isinstance(config, dict)
+            or any(not isinstance(config.get(key), str) for key in ("url", "token", "kernel_id"))
+            or not isinstance(config.get("bridge_host", "127.0.0.1"), str)
+        ):
+            raise ValueError("Invalid private Jupyter configuration")
+        jupyter = JupyterTarget(
+            config["url"],
+            config["token"],
+            config["kernel_id"],
+            config.get("bridge_host", "127.0.0.1"),
+            bridge_port=config.get("bridge_port", 0),
+        )
+    endpoint = WorkspaceEndpoint(entry["url"], entry["headers"], tuple(entry["tools"]))
+    selected = WorkspaceToolsets({str(caller.user_id): endpoint}).for_caller(caller)
+    return (
+        selected,
+        "\nUSER_ROOT=/workspace. Modify only this owner's files beneath USER_ROOT. "
+        "Source originals are read-only until imported into the workspace. "
+        "Read owned Markdown skill files using the workspace tools and follow their instructions.",
+        jupyter,
+    )
 
 
 def fault(code):
@@ -99,9 +164,37 @@ class RunSnapshots:
 
 def citations(results, text):
     found = []
+    chunks = []
+    neighbors = []
 
     def scan(value):
         if isinstance(value, dict):
+            if value.get("kind") == "chunk":
+                try:
+                    hit = msgspec.convert(value, LibraryHit)
+                except msgspec.ValidationError:
+                    hit = None
+                if hit is not None and hit.title.strip():
+                    for neighbor in (hit.before, hit.after):
+                        if (
+                            neighbor is not None
+                            and neighbor.text
+                            and (
+                                neighbor.handle.item,
+                                neighbor.handle.version,
+                                neighbor.handle.simulated,
+                            )
+                            == (hit.handle.item, hit.handle.version, hit.handle.simulated)
+                        ):
+                            neighbors.append(
+                                {
+                                    "text": neighbor.text,
+                                    "handle": msgspec.to_builtins(neighbor.handle),
+                                    "title": hit.title,
+                                    "headingPath": neighbor.heading_path,
+                                    "classification": hit.classification,
+                                }
+                            )
             if (
                 isinstance(value.get("text"), str)
                 and isinstance(value.get("handle"), dict)
@@ -110,11 +203,13 @@ def citations(results, text):
                 == value["handle"].get("quoteSha256")
             ):
                 handle = value["handle"]
-                if all(handle != row["handle"] for row in found):
+                if "title" not in value:
+                    chunks.append(value)
+                elif all(handle != row["handle"] for row in found):
                     found.append(
                         {
                             "handle": handle,
-                            "title": value.get("title", "Simulated evidence"),
+                            "title": value["title"],
                             "headingPath": value.get("headingPath", ""),
                             "classification": value.get("classification", "unclassified"),
                             "quote": value["text"],
@@ -128,6 +223,74 @@ def citations(results, text):
 
     for result in results:
         scan(result)
+
+    for neighbor in neighbors:
+        if not any(
+            other["handle"] == neighbor["handle"] and other != neighbor for other in neighbors
+        ):
+            scan(neighbor)
+
+    def retrieved(shape):
+        for result in results:
+            if isinstance(result, dict):
+                try:
+                    yield msgspec.convert(result, shape)
+                except msgspec.ValidationError:
+                    continue
+
+    documents = list(retrieved(LibraryDocument))
+
+    def document_metadata(handle):
+        matches = [
+            document
+            for document in documents
+            if (document.item, document.version) == (handle.item, handle.version)
+        ]
+        if not matches or any(document != matches[0] for document in matches):
+            return None
+        document = matches[0]
+        headings = {row.heading_path for row in document.outline if row.block == handle.block}
+        if (
+            document.deleted
+            or not document.title.strip()
+            or document.simulated != handle.simulated
+            or len(headings) != 1
+        ):
+            return None
+        return {
+            "title": document.title,
+            "headingPath": headings.pop(),
+            "classification": document.classification,
+        }
+
+    for value in chunks:
+        try:
+            chunk = msgspec.convert(value, ChunkText)
+        except msgspec.ValidationError:
+            continue
+        metadata = document_metadata(chunk.handle)
+        if metadata is not None and chunk.text and chunk.heading_path == metadata["headingPath"]:
+            scan({"text": chunk.text, "handle": msgspec.to_builtins(chunk.handle), **metadata})
+
+    for evidence in retrieved(ValueEvidence):
+        value = evidence.value
+        handle = value.citation
+        metadata = document_metadata(handle)
+        if (
+            metadata is None
+            or not evidence.quote
+            or value.withdrawn
+            or evidence.citation_status == "withdrawn"
+            or value.simulated != handle.simulated
+        ):
+            continue
+        scan(
+            {
+                "text": evidence.quote,
+                "handle": msgspec.to_builtins(handle),
+                **metadata,
+            }
+        )
     return found
 
 
@@ -174,6 +337,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     status = "failed"
     selected = None
     transport = None
+    workspace_transport = None
+    workspace_controller = None
     agent = None
     saved = AgentSession()
     history = []
@@ -233,15 +398,48 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         )
         async with asyncio.timeout_at(deadline):
             await transport.connect()
+            workspace_transport, workspace_instructions, jupyter = await run_in_threadpool(
+                _workspace_for_caller, trusted
+            )
+            if workspace_transport is not None:
+                await workspace_transport.connect()
+        external_tools = (
+            frozenset(function.name for function in workspace_transport.functions)
+            if workspace_transport is not None
+            else frozenset()
+        )
+        if any(tool_named(registry, name) is not None for name in external_tools):
+            raise ApiError()
+        middleware = (
+            WorkspaceToolCallMiddleware(
+                trace,
+                budget,
+                TOOL_LIMIT,
+                skills.completed,
+                external_tools=external_tools,
+                kernel_id=jupyter.kernel_id,
+            )
+            if jupyter is not None
+            else ToolCallMiddleware(
+                trace, budget, TOOL_LIMIT, skills.completed, external_tools=external_tools
+            )
+        )
+        if jupyter is not None:
+            if parent is None:
+                raise ApiError()
+            workspace_controller = WorkspaceRunController(
+                RunBoundSession(transport, middleware, context=parent, deadline=deadline), jupyter
+            )
+            workspace_instructions += await workspace_controller.start()
         selected = model.client(caller.settings)
         agent = StatefulAgent(
             selected,
-            instructions=instructions,
+            instructions=instructions + workspace_instructions,
             name="craft",
             saved=saved,
             context_providers=[skills],
-            tools=[transport],
-            middleware=[ToolCallMiddleware(trace, budget, TOOL_LIMIT, skills.completed)],
+            tools=[transport] + ([workspace_transport] if workspace_transport is not None else []),
+            middleware=[middleware],
             default_options={
                 "max_tokens": caller.settings.model_max_output_tokens,
                 "allow_multiple_tool_calls": False,
@@ -421,6 +619,12 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     finally:
         try:
             with anyio.CancelScope(shield=True):
+                if workspace_controller is not None:
+                    try:
+                        await workspace_controller.close()
+                    except Exception:
+                        status = "failed"
+                        fault("internal_error")
                 if agent is not None:
                     saved = agent.saved
                 saved.state["craft"] = {
@@ -482,11 +686,21 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         )
         finally:
             try:
-                if transport is not None:
-                    await transport.close()
+                if workspace_transport is not None:
+                    with anyio.CancelScope(shield=True):
+                        try:
+                            async with asyncio.timeout_at(deadline):
+                                await workspace_transport.close()
+                        except TimeoutError:
+                            # LocalHTTPTool.close also releases HTTP when session close times out.
+                            pass
             finally:
-                if selected is not None:
-                    await selected.close()
+                try:
+                    if transport is not None:
+                        await transport.close()
+                finally:
+                    if selected is not None:
+                        await selected.close()
     if status in {"finished", "paused"}:
         yield AGUIEvent(
             type="RUN_FINISHED",

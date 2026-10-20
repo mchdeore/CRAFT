@@ -16,7 +16,7 @@ The datacube runs on labelled simulated data. Every mission, document and value 
 | Library | Text chunks, summaries, facet texts, vectors and version differences | Nothing; it mirrors the provider | Yes, from the provider |
 | Cube | Missions, silos, stages, elements, the parameter dictionary and approved values | What CRAFT has accepted as a mission's parameters | No; approvals are records |
 
-CRAFT never stores an original file. It reads an original from the provider when it indexes, checks a citation or opens a preview. Documents are edited only in the provider; CRAFT indexes the new version and shows what changed.
+The library and cube never store provider original bytes. The local provider folder stores generated originals and immutable versions; application operations read them when indexing, checking a citation or opening a preview. Document content changes enter through the provider command line, and indexing records the new version and differences.
 
 ## 8.3 Document provider
 
@@ -399,9 +399,6 @@ Every operation below is declared with `@operation` (section 5) and serves HTTP,
 | `cube.explain_similarity` | `POST /api/cube/similar/explain` | `explain_similarity` | `NONE` |
 | `cube.prepare_values` | `POST /api/cube/candidates` | `prepare_values` | `NONE` |
 | `cube.submit_values` | `POST /api/cube/values` | `submit_values` | `DATA` |
-| `cube.save_view` | `POST /api/cube/views` | `save_view` | `DOCUMENT` |
-
-`save_view` saves the result of `find_missions`, `get_mission`, `compare_missions` or `similar_missions` as a JSON file in the conversation workspace (section 7), with at most 200 rows and the citations of every value in it.
 
 The API contract defines the request and response forms. Logs record handles, scores and counts only, never query or chunk text.
 
@@ -411,6 +408,8 @@ The API contract defines the request and response forms. Logs record handles, sc
 |---|---|
 | `craft seed base` | Demo accounts and their mission grants, and a small provider folder of Markdown documents in two missions and the reference folder |
 | `craft seed demo` | The demo set: 12 simulated missions in four families of three, about 120 documents in every allowed format across silos and stages, the cube records, header synonyms and seeded values, and a ground-truth file |
+
+`seed base` leaves indexing to `craft index` and provisions no account password. `seed demo --seed 1` performs indexing and seeded-value loading itself, then refreshes the index after its source withdrawals. These host commands use owner database access and preserve existing versions and values.
 
 The demo set is generated, not stored: the same seed number gives the same bytes. It includes version pairs, renamed copies, moved and deleted documents, mixed units, English and French headers, unknown values and a value whose source is withdrawn. Every mission, document and value is labelled simulated. No name, value or document number comes from a real source.
 

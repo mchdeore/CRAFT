@@ -15,6 +15,7 @@ dependencies = [
   "agent-framework-foundry==1.14.1",
   "agent-framework-ag-ui==1.5.1",
   "mcp==1.30.0",
+  "jupyter-client==8.6.3",
   "argon2-cffi==25.1.0",
   "python-docx==1.2.0",
   "pypdf==6.19.0",
@@ -74,12 +75,12 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pyright]
 pythonVersion = "3.12"
 include = ["app", "migrations", "packages"]
-extraPaths = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/process_manager/src"]
+extraPaths = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/process_manager/src", "packages/user_workspace/src"]
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["app", "tests", "packages"]
-pythonpath = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/process_manager/src", "packages/runtime/tests"]
+pythonpath = ["packages/runtime/src", "packages/python_workspace/src", "packages/data_provider/src", "packages/provider_fleet/src", "packages/process_manager/src", "packages/runtime/tests", "packages/user_workspace/src"]
 addopts = "-q --import-mode=importlib"
 markers = ["live: requires configured external service credentials", "docker: requires the restricted Python workspace image and Docker daemon"]

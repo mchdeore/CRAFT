@@ -13,7 +13,7 @@ from app import create_app
 from app.agent import model
 from app.agent.fake import FakeChatClient
 from app.approvals.tests.test_decisions import context as context
-from app.approvals.tests.test_decisions import login
+from app.approvals.tests.test_decisions import decision_call, latest_auth_session, login
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.mcp.tests.http_fixture import live_server
 
@@ -123,14 +123,26 @@ def test_http_paused_write_restores_decision_once_after_reload(
             assert http.post("/api/agent/runs", json=resume).status_code == 409
             forged = resume | {"resume": {"approvalId": approval["id"], "approved": True}}
             assert http.post("/api/agent/runs", json=forged).status_code == 409
-        with runtime_client(context) as http:
-            assert (
-                http.post(
-                    "/api/approvals/" + approval["id"] + "/decision",
-                    json={"approve": approve},
-                ).status_code
-                == 200
+            login(http, context, 1)
+            foreign_session = latest_auth_session(context, 1)
+            foreign = http.post(
+                "/api/approvals/" + approval["id"] + "/decision", json={"approve": True}
             )
+            assert foreign.status_code == 404
+            recorded = decision_call(context, foreign)
+            assert recorded["user_id"] == context["users"][1][0]
+            assert recorded["auth_session_id"] == foreign_session
+            assert recorded["outcome"] == "error" and recorded["error_code"] == "not_found"
+            assert recorded["conversation_id"] is None
+            assert recorded["run_id"] is None
+            assert recorded["tool_call_id"] is None
+        with runtime_client(context) as http:
+            auth_session = latest_auth_session(context)
+            decision = http.post(
+                "/api/approvals/" + approval["id"] + "/decision",
+                json={"approve": approve},
+            )
+            assert decision.status_code == 200
             second = events(http.post("/api/agent/runs", json=resume))
             assert second[-1]["type"] == ("RUN_ERROR" if exhausted else "RUN_FINISHED")
             assert "outcome" not in second[-1]
@@ -149,6 +161,32 @@ def test_http_paused_write_restores_decision_once_after_reload(
             assert len(notes) == int(approve and not exhausted)
             status = http.get("/api/approvals/" + approval["id"]).json()["status"]
             assert status == ("approved" if exhausted else "executed" if approve else "rejected")
+            logs = metadata.tables["call_log"]
+            with context["owner"].connect() as connection:
+                effects = (
+                    connection.execute(
+                        select(logs).where(
+                            logs.c.name == "notes.write_note", logs.c.run_id == identifier
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+            assert len(effects) == int(approve and not exhausted)
+            recorded = decision_call(context, decision)
+            assert recorded["origin"] == "http" and recorded["outcome"] == "ok"
+            assert recorded["user_id"] == context["users"][0][0]
+            assert recorded["auth_session_id"] == auth_session
+            assert recorded["conversation_id"] == context["conversation"]
+            assert recorded["run_id"] == identifier
+            assert recorded["tool_call_id"] == "generated-note-call"
+            for effect in effects:
+                assert effect["origin"] == "mcp" and effect["outcome"] == "ok"
+                assert effect["user_id"] == recorded["user_id"]
+                assert effect["auth_session_id"] == recorded["auth_session_id"]
+                assert effect["conversation_id"] == recorded["conversation_id"]
+                assert effect["run_id"] == recorded["run_id"]
+                assert effect["tool_call_id"] == recorded["tool_call_id"]
     finally:
         clear_run_approvals(context, identifier)
 

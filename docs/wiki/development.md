@@ -11,7 +11,9 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-The application image installs production dependencies. The Python workspace image builds separately from its own lock. The [dependency reference](../Dependencies-and-Integration.md) owns exact pins and environment requirements.
+The application image installs production dependencies, including the lifecycle package. The runtime, Python workspace, document and fleet prototypes are development dependencies. The Python workspace prototype image builds separately from its own lock.
+
+The shared [workspace](workspace.md) uses `packages/user_workspace/` and its separate JupyterLab image. Each owner has private storage and MCP controls, with Jupyter sign-in separate from CRAFT. The control service uses a separate environment for MCP SDK 2; the workspace package uses MCP SDK 1. Native SDK reads require an existing notebook kernel selected by the chat run's controller. The [dependency reference](../Dependencies-and-Integration.md) owns exact pins and environment requirements.
 
 ## 2. Checks
 

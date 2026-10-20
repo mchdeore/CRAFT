@@ -84,18 +84,11 @@ Settings validate at startup. `CRAFT_DEV_PAGE=1` mounts the single temporary `/d
 
 Every access checks the owner; a conversation identifier grants no permission. History comes only from `messages`. CRAFT stores conversation history and agent state under section 7. Model response storage follows section 4.1; run tokens follow section 3.3. Workspace labels and export approval follow section 7.3.
 
-Conversation routes list at most 100 owned records in descending update order. Create and rename accept titles of 1 to 200 characters. Missing or foreign identifiers return 404. Archived history remains readable; runs and file operations require an active conversation. Sign-out preserves all records. Upload state and classification follow section 7.3. Downloads record linked metadata without names or bytes.
+Conversation routes list at most 100 owned records, including archived records, in descending update order with ID as the tie-breaker. This is a listing limit, not a limit on stored chats. Create and rename accept nonblank titles of 1 to 200 characters and preserve the supplied title. Missing or foreign identifiers return 404. Archive retains history, deletes conversation files and refuses a running or paused run. Clearing the archive flag restores the conversation without restoring its deleted files. Runs and file operations require an active conversation. Sign-out preserves all records. Upload state and classification follow section 7.3. Downloads record linked metadata without names or bytes.
 
-## 9.6 Deferred access
+`GET /api/conversations/:id/run` returns the owned latest run and approval status. A paused run can resume after its recorded approval is approved or rejected. Resume binds the same conversation, run and approval, restores saved state and reads the decision from the database.
 
-| Later | What changes | What stays |
-|---|---|---|
-| Microsoft Entra ID sign-in | The sign-in route redirects to Entra ID; its tokens stay on the server | Cookie, session table, every operation |
-| Local accounts retired | Local passwords disabled | User identifiers, linked by tenant and object identifier, never by email |
-| Eight roles | Permission map entries and role rows | The single access check |
-| A separate front-end origin | A cross-origin allowlist with credentials | Cookie, `Origin` check |
-
-Entra sign-in uses OpenID Connect with tokens on the server. Accounts link by tenant and object identifier, never email. Local credentials are disabled after migration.
+## 9.6 Browser and MCP access
 
 The single `/summarize` shell is available with the development page disabled. It contains no source content before sign-in. Summary selection and uploads require the real session and allowed Origin. Source permissions apply before a model call. Browser controls retain only the selected source or owned File object and clear results on failure or sign-out.
 

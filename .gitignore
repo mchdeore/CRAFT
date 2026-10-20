@@ -28,3 +28,9 @@ instance/
 /var/
 
 /api/node_modules/
+
+# Frontend dependencies and test output
+/web/node_modules/
+/web/coverage/
+/web/test-results/
+/web/playwright-report/

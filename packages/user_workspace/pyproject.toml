@@ -1,0 +1,41 @@
+[project]
+name = "craft-user-workspace"
+version = "0.1.0"
+description = "Private Jupyter workspace with an injectable CRAFT MCP client"
+requires-python = "==3.12.*"
+dependencies = ["mcp==1.30.0", "httpx==0.28.1"]
+
+[project.optional-dependencies]
+analysis = [
+  "numpy==2.5.4",
+  "pandas==3.0.6",
+  "scipy==1.18.1",
+  "matplotlib==3.11.2",
+  "duckdb==1.5.6",
+  "openpyxl==3.1.5",
+]
+lab = [
+  "jupyterlab==4.6.4",
+  "jupyter-server==2.21.1",
+  "ipykernel==6.29.5",
+  "jupyter-collaboration==5.0.4",
+  "jupyter-server-nbmodel==0.2.9",
+]
+
+[dependency-groups]
+build = ["setuptools==80.9.0"]
+
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.workspace]
+members = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../.."]
+addopts = "-q --import-mode=importlib"

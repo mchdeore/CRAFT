@@ -1,20 +1,22 @@
 # Agent runtime
 
-## Runs and tools
+## 1. Application runs and tools
 
-The application agent uses the registered operations and the [API contract](../API-Contract.md). The runtime library provides a local runner with a tool boundary, durable run state and memory decision support. A run retains its identity and state across a process restart.
+The application agent uses the framework agent, registered operations and the [API contract](../API-Contract.md). Conversation history, session state and approval interrupts live in PostgreSQL. An active run belongs to its chat request; disconnect cancels it. A saved approval pause can be recovered after a restart.
 
 Tools expose typed input and output. The controller supplies the allowed catalog and the decision boundary. Model output is validated before it changes run or stored state.
 
-Signed-in users own their conversations and runs. `GET /api/tools/capabilities` returns the current registered tool catalog. The skill catalog returns an empty list with `not_installed` while no callable skill implementation is installed. `GET /api/library/documents` lists the user's readable indexed documents; source access and versions are rechecked before use.
+Signed-in accounts own their conversations and runs. `GET /api/tools` describes registered tools and their channels. `GET /api/tools/capabilities` returns read tools, up to 100 owned skill names and `skillsStatus: "installed"`. The paged Skills API supplies complete definitions and immutable revisions. A selected skill supplies instructions and actual tool references; it grants no source access or write approval. `GET /api/library/documents` lists currently readable indexed documents.
 
-The registry bridge derives tool bindings and approval requirements from declared operations. Root runs can propose writes; the single-call query helper sees read tools only. The native transport sends each tool call once. A lost response fails the call; connection recovery does not replay it. Server permission checks apply independently of the offered catalog.
+The registry derives tool bindings and approval requirements from declared operations. Root runs can propose writes; the `ask_agent` helper sees read tools only and returns a combined answer with citations and confidence. The application's `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local writes consume their matching approval in the effect transaction; a repeated invocation cannot consume it again.
 
-## Approvals
+MCP is the tool protocol. The app serves HTTP MCP at `/mcp`; `craft mcp --as <username>` serves the same registry over standard input and output. Compose starts services and has an optional MCP profile using the application image. The native registry does not execute arbitrary code or schedule durable jobs.
+
+Configured owners also have [workspace](workspace.md) tools for shared Jupyter files and code execution. Native Python SDK reads borrow the active chat run's identity, call budget, deadline, retrieval trace and audit records. Access is confined to its selected notebook kernel and ends when the run finishes or pauses. The SDK refuses approval-gated operations before dispatch; chat keeps its approval and resume workflow.
+
+## 2. Approvals
 
 A decision identifies the proposed action and its current context. Accepted or rejected decisions retain their result, and replay is checked against the stored action. Artifacts preserve output separately from routine status and usage logging.
-
-The model job library maintains a local queue with pause, resume and cancellation. Provider routes refer to private credentials loaded at dispatch. Source quotes are checked against the supplied evidence; a quote match establishes a reference, while interpretation remains part of review.
 
 The approval routes list and read requester-owned frozen actions and append an HTTP requester decision once. The database preserves request arguments, evidence and event history. Concurrent decisions serialize on the owned run. Approval decisions are absent from the model tool catalog.
 
@@ -24,6 +26,10 @@ Source preparation and citation checks run before the approved write transaction
 
 Root runs review one effectful call at a time. Parallel proposals stop before any approval request or write is created. Execution binds the native tool-call identifier and frozen arguments to the specific approval. Native response streams close on completion, refusal and cancellation.
 
-## Related topics
+## 3. Standalone runtime
 
-See [agent](../spec/03-agent.md), [operations](../spec/05-operations-and-logging.md), [models and confidence](../spec/04-models-and-confidence.md), [workspace](python.md), [documents](documents.md) and [components](components.md).
+`packages/runtime/` is a separate runner with local run-state and memory interfaces. Its `SingleAttemptMCP` transport sends a tool call once and fails on a lost response. The application does not use that class. The [Python workspace prototype](python.md) and [model job queue](jobs.md) are also standalone prototypes.
+
+## 4. Related topics
+
+See [agent](../spec/03-agent.md), [operations](../spec/05-operations-and-logging.md), [models and confidence](../spec/04-models-and-confidence.md), [workspace](workspace.md), [documents](documents.md) and [components](components.md).

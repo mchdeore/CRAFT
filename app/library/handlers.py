@@ -218,19 +218,31 @@ def compare_versions(caller: Caller, request: CompareVersions) -> VersionDiff:
 
 @operation(SIGNED_IN, post="/library/search", tool=True)
 def search(caller: Caller, request: LibrarySearch) -> LibraryHits:
-    """Find readable source blocks. Use for document questions; for example radiator margin."""
+    """Find ranked readable passages and summaries, not whole-document content.
+
+    Group hits by item/version and show titles with a sentence preview for selection.
+    Refine the query when choices are rejected. Ranking scores are not confidence.
+    """
     return service.search(caller, request)
 
 
 @operation(SIGNED_IN, get="/library/documents/{item}", tool=True)
 def get_document(caller: Caller, request: DocumentRef) -> LibraryDocument:
-    """Read a document outline and versions. Use a known item, such as itm_000000000001."""
+    """Read exact document metadata, the full ordered outline and indexed versions.
+
+    Pin item/version before reading all blocks. The stored summary may be an extract.
+    Label the selected version's indexedAt as Last indexed, not provider sync time.
+    """
     return service.document(caller, request)
 
 
 @operation(SIGNED_IN, get="/library/documents/{item}/chunks", tool=True)
 def read_chunks(caller: Caller, request: ChunkRange) -> ChunkPage:
-    """Read up to twenty source blocks. Use after search; for example blocks 1 through 3."""
+    """Read an inclusive range of at most twenty blocks for one exact item/version.
+
+    For whole-document text, cover get_document's outline with successive ranges.
+    Check returned block identities for gaps; quote hashes belong to the returned text.
+    """
     return service.read_chunks(caller, request)
 
 

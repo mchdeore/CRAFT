@@ -29,6 +29,8 @@ uv run uvicorn app.main:app --reload
 
 The development server listens on port 8000. Check readiness with `curl -i localhost:8000/health/ready`. Stop the server with Ctrl-C and the database with `docker compose down`.
 
+The tracked React/TypeScript/Vite client in `web/` uses Node.js 24 and shared types from `api/types.ts`. Follow the [frontend setup and checks](web/README.md) to install both npm dependency trees and connect its local proxy to the authenticated backend. Serve the production client and backend from the same origin.
+
 ## Documents
 
 The [public wiki](https://mchdeore.github.io/CRAFT/) has topic guides, the specification and API reference. Every topic includes a Markdown download and a GitHub edit link. The public site also includes a simulated preview; the application runs separately with authentication.
@@ -39,5 +41,5 @@ Build the wiki and PDF downloads with `docs/tools/build.sh`.
 
 ## Contributing
 
-Fork the repository, create a branch, run the checks in `.github/workflows/ci.yml`, and open a pull request. Only the maintainer merges.
+Fork the repository, create a branch, run the checks in `.github/workflows/ci.yml` and `.github/workflows/frontend.yml`, and open a pull request. Only the maintainer merges.
 
