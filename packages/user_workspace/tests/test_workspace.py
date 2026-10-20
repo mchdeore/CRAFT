@@ -166,3 +166,57 @@ def test_official_mcp_connection_forwards_bearer_outside_arguments(monkeypatch):
     assert "cookie" not in request.headers
     assert body["params"]["arguments"] == {"query": "generated evidence", "limit": 1}
     assert "synthetic-owned-run" not in json.dumps(body)
+
+
+def test_word_edit_roundtrip_preserves_original(tmp_path):
+    from shutil import copyfile
+
+    from craft import owned_path
+    from docx import Document
+
+    workspace = tmp_path / "owner"
+    workspace.mkdir()
+    original = owned_path("imports/source.docx", root=workspace)
+    output = owned_path("outputs/edited.docx", root=workspace)
+    original.parent.mkdir(parents=True)
+    generated = Document()
+    generated.add_paragraph("Generated source paragraph.")
+    generated.add_paragraph("Keep this paragraph.")
+    table = generated.add_table(rows=3, cols=2)
+    for row, values in zip(
+        table.rows, [("Metric", "Value"), ("Revenue", "125"), ("Cost", "50")], strict=True
+    ):
+        for cell, text in zip(row.cells, values, strict=True):
+            cell.text = text
+    generated.save(str(original))
+    original_bytes = original.read_bytes()
+
+    output.parent.mkdir(parents=True)
+    copyfile(original, output)
+    edited = Document(str(output))
+    assert [paragraph.text for paragraph in edited.paragraphs] == [
+        "Generated source paragraph.",
+        "Keep this paragraph.",
+    ]
+    assert [[cell.text for cell in row.cells] for row in edited.tables[0].rows] == [
+        ["Metric", "Value"],
+        ["Revenue", "125"],
+        ["Cost", "50"],
+    ]
+    edited.paragraphs[0].text = "Edited paragraph in personal copy."
+    edited.tables[0].cell(1, 1).text = "150"
+    edited.add_paragraph("Summary: revenue increased by 25.")
+    edited.save(str(output))
+
+    saved = Document(str(output))
+    assert [paragraph.text for paragraph in saved.paragraphs] == [
+        "Edited paragraph in personal copy.",
+        "Keep this paragraph.",
+        "Summary: revenue increased by 25.",
+    ]
+    assert [[cell.text for cell in row.cells] for row in saved.tables[0].rows] == [
+        ["Metric", "Value"],
+        ["Revenue", "150"],
+        ["Cost", "50"],
+    ]
+    assert original.read_bytes() == original_bytes
