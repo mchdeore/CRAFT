@@ -32,7 +32,7 @@ async def discover(selected):
             return_value=ListToolsResult(
                 tools=[
                     Tool(
-                        name="read file",
+                        name="read_notebook",
                         inputSchema={"type": "object", "properties": {"path": {"type": "string"}}},
                     ),
                     Tool(name="execute code", inputSchema={"type": "object"}),
@@ -52,11 +52,15 @@ def test_external_allowlist_keeps_correlation_and_private_trace():
     async def execute():
         owner = Caller(user_id=uuid4())
         selected = WorkspaceToolsets(
-            {str(owner.user_id): WorkspaceEndpoint("http://127.0.0.1:1/mcp", {}, ("read file",))}
+            {
+                str(owner.user_id): WorkspaceEndpoint(
+                    "http://127.0.0.1:1/mcp", {}, ("read_notebook",)
+                )
+            }
         ).for_caller(owner)
         try:
             await discover(selected)
-            assert [function.name for function in selected.functions] == ["workspace_read-file"]
+            assert [function.name for function in selected.functions] == ["workspace_read_notebook"]
             trace, budget, completed, dispatched = [], {"calls": 0}, [], []
             middleware = ToolCallMiddleware(
                 trace,
@@ -86,7 +90,7 @@ def test_external_allowlist_keeps_correlation_and_private_trace():
                 current_call.reset(token)
             assert dispatched == [replace(owner, tool_call_id="owned-file-read")]
             assert invocation.kwargs == {"_meta": {"craft/toolCallId": "owned-file-read"}}
-            assert trace == [{"tool": "workspace_read-file", "toolCallId": "owned-file-read"}]
+            assert trace == [{"tool": "workspace_read_notebook", "toolCallId": "owned-file-read"}]
             assert not completed and budget["calls"] == 1
         finally:
             await selected.close()
@@ -99,9 +103,9 @@ def test_external_allowlist_keeps_correlation_and_private_trace():
     [
         ("unknown_tool", ()),
         ("workspace_execute-code", ()),
-        ("workspace_read-file", ()),
-        ("workspace_execute-code", ("workspace_read-file",)),
-        ("other_read-file", ("workspace_read-file",)),
+        ("workspace_read_notebook", ()),
+        ("workspace_execute-code", ("workspace_read_notebook",)),
+        ("other_read-file", ("workspace_read_notebook",)),
     ],
 )
 def test_unknown_or_unconfigured_prefix_never_dispatches(name, external_tools):
@@ -129,7 +133,7 @@ def test_native_and_external_calls_share_limit_and_native_completion():
     def native(query: str) -> str:
         return query
 
-    @tool(name="workspace_read-file")
+    @tool(name="workspace_read_notebook")
     def external(path: str) -> str:
         return path
 
@@ -165,7 +169,10 @@ def test_native_and_external_calls_share_limit_and_native_completion():
         assert declaration is not None
         assert trace[0]["operation"] == declaration.name
         assert trace[0]["arguments"] == {"query": "generated"}
-        assert trace[1] == {"tool": "workspace_read-file", "toolCallId": "workspace_read-file"}
+        assert trace[1] == {
+            "tool": "workspace_read_notebook",
+            "toolCallId": "workspace_read_notebook",
+        }
 
     asyncio.run(execute())
 
@@ -201,7 +208,7 @@ def prepared_run(monkeypatch, tmp_path, *, configured="owned", failure=None):
                     str(owner): {
                         "url": "http://127.0.0.1:1/mcp",
                         "headers": {},
-                        "tools": ["read file"],
+                        "tools": ["read_notebook"],
                     }
                 }
             )
@@ -297,7 +304,7 @@ def test_owned_workspace_lifecycle_is_closed_on_all_run_paths(monkeypatch, tmp_p
     if failure is None:
         options = recorded["agents"][0].options
         assert [selected.name for selected in options["tools"]] == ["craft", "user_workspace"]
-        assert options["middleware"][0].external_tools == frozenset({"workspace_read-file"})
+        assert options["middleware"][0].external_tools == frozenset({"workspace_read_notebook"})
         assert "USER_ROOT=/workspace" in options["instructions"]
         assert events[-1].type == "RUN_FINISHED"
     if failure == "timeout":

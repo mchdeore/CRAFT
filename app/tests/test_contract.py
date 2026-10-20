@@ -6,7 +6,13 @@ from pathlib import Path
 
 import msgspec
 
-from app.accounts.handlers import Me, SignIn
+from app.accounts.handlers import (
+    IssuedWorkspaceToken,
+    Me,
+    NewWorkspaceToken,
+    SignIn,
+    WorkspaceToken,
+)
 from app.agent.handlers import RunRecovery, RunRecoveryRef
 from app.cube.handlers import MissionRef, ValueRef
 from app.infrastructure.paths import ROOT
@@ -74,6 +80,9 @@ def test_python_shapes_match_compiled_typescript() -> None:
     for shape in [
         Me,
         SignIn,
+        NewWorkspaceToken,
+        WorkspaceToken,
+        IssuedWorkspaceToken,
         MissionRef,
         ValueRef,
         Capability,

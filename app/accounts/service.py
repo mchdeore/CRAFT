@@ -10,7 +10,7 @@ from threading import Lock
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.accounts import storage
 from app.infrastructure import access
@@ -216,3 +216,82 @@ def manage(caller: Caller, request, action: str) -> None:
                 .values(disabled_at=at)
             )
             storage.revoke_sessions(session, user["id"], at, "disabled")
+
+
+WORKSPACE_TOKEN_ORIGINS = frozenset({"http", "python"})
+
+
+def _token_row(row) -> dict:
+    return {
+        "id": row["id"],
+        "label": row["label"],
+        "created_at": row["created_at"].isoformat(),
+        "expires_at": row["expires_at"].isoformat(),
+        "last_used_at": row["last_used_at"].isoformat() if row["last_used_at"] else None,
+        "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
+    }
+
+
+def _token_owner(caller: Caller):
+    from app.infrastructure.errors import Forbidden
+
+    if caller.sessions is None or caller.user_id is None:
+        raise NotSignedIn()
+    # Only a signed-in browser session or the local command line manages tokens.
+    if caller.origin not in WORKSPACE_TOKEN_ORIGINS:
+        raise Forbidden()
+    return caller.sessions
+
+
+def create_workspace_token(caller: Caller, request) -> dict:
+    sessions = _token_owner(caller)
+    at = access.now()
+    raw = secrets.token_bytes(32)
+    with unit_of_work(sessions) as session:
+        row = (
+            session.execute(
+                storage.workspace_tokens.insert()
+                .values(
+                    user_id=caller.user_id,
+                    token_sha256=hashlib.sha256(raw).digest(),
+                    label=request.label,
+                    created_at=at,
+                    expires_at=at + timedelta(hours=request.hours),
+                )
+                .returning(storage.workspace_tokens)
+            )
+            .mappings()
+            .one()
+        )
+    return {**_token_row(row), "token": base64.urlsafe_b64encode(raw).decode().rstrip("=")}
+
+
+def list_workspace_tokens(caller: Caller) -> list[dict]:
+    sessions = _token_owner(caller)
+    tokens = storage.workspace_tokens
+    with unit_of_work(sessions, read_only=True) as session:
+        rows = (
+            session.execute(
+                select(tokens)
+                .where(tokens.c.user_id == caller.user_id)
+                .order_by(tokens.c.created_at.desc())
+                .limit(100)
+            )
+            .mappings()
+            .all()
+        )
+    return [_token_row(row) for row in rows]
+
+
+def revoke_workspace_token(caller: Caller, token_id) -> None:
+    sessions = _token_owner(caller)
+    tokens = storage.workspace_tokens
+    with unit_of_work(sessions) as session:
+        found = session.execute(
+            tokens.update()
+            .where(tokens.c.id == token_id, tokens.c.user_id == caller.user_id)
+            .values(revoked_at=func.coalesce(tokens.c.revoked_at, access.now()))
+            .returning(tokens.c.id)
+        ).first()
+    if found is None:
+        raise NotFound()

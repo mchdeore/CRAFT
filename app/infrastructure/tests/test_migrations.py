@@ -104,7 +104,7 @@ def test_reasoning_messages_survive_upgrade_and_incompatible_downgrade(
     ordinary = connection.execute(
         statement, {"conversation": conversation, "seq": 1, "role": "assistant"}
     ).scalar_one()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0014")
     reasoning = connection.execute(
         statement, {"conversation": conversation, "seq": 2, "role": "reasoning"}
     ).scalar_one()
@@ -118,4 +118,28 @@ def test_reasoning_messages_survive_upgrade_and_incompatible_downgrade(
     ) == {ordinary, reasoning}
     assert (
         connection.execute(text("select version_num from alembic_version")).scalar_one() == "0014"
+    )
+
+
+def test_workspace_call_rows_survive_an_incompatible_downgrade(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.upgrade(config, "head")
+    connection.execute(
+        text(
+            "insert into call_log (kind, name, origin, outcome, duration_ms, request_id, call_id) "
+            "values ('operation', 'accounts.me', 'workspace', 'ok', 1, uuidv7(), uuidv7())"
+        )
+    )
+    with pytest.raises(IntegrityError), connection.begin_nested():
+        command.downgrade(config, "0014")
+    assert (
+        connection.execute(
+            text("select count(*) from call_log where origin = 'workspace'")
+        ).scalar_one()
+        == 1
+    )
+    assert (
+        connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015"
     )

@@ -4,6 +4,15 @@ export type Id = string;
 export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
 export interface Me { id: Id; username: string; displayName: string; roles: Role[] }
+export interface NewWorkspaceToken { label: string; hours?: number }
+export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
+export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
+export interface RunCode { code: string }
+export interface CodeResult { status: "ok" | "error"; outputs: string[]; error: string | null; truncated: boolean }
+export interface WriteFile { path: string; content: string }
+export interface SavedFile { path: string; size: number }
+export interface EditNotebook { path: string; action: "insert" | "replace" | "delete"; index: number; source?: string; cellType?: "code" | "markdown" }
+export interface EditedNotebook { path: string; cells: number }
 export interface Mission { key: string; title: string; currentStage: string; aliases: string[]; simulated: boolean }
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }

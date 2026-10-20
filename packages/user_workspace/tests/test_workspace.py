@@ -48,7 +48,7 @@ def test_sdk_forwards_existing_names_and_arguments_once():
 
         lost = LostResponse()
         with pytest.raises(ConnectionError):
-            await Craft(lost).call("make_chart", {"spec": {}, "format": "png"})
+            await Craft(lost)._call("make_chart", {"spec": {}, "format": "png"})
         assert len(lost.requests) == 1
 
     asyncio.run(check())
@@ -110,7 +110,7 @@ def test_official_mcp_connection_forwards_bearer_outside_arguments(monkeypatch):
 
     import httpx
     from craft import client as sdk_module
-    from craft import connect
+    from craft.client import connect
 
     actual_client = httpx.AsyncClient
     requests = []

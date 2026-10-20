@@ -13,7 +13,14 @@ analysis = [
   "matplotlib==3.11.2",
   "duckdb==1.5.6",
   "openpyxl==3.1.5",
+  "statsmodels==0.15.0",
+  "scikit-learn==1.9.1",
   "python-docx==1.2.0",
+  "python-pptx==1.0.2",
+  "pypdf==6.21.1",
+  "pyarrow==26.0.0",
+  "sympy==1.14.0",
+  "pint==0.26.2",
 ]
 lab = [
   "jupyterlab==4.6.4",

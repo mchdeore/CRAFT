@@ -6,11 +6,10 @@ import logging
 import socket
 import time
 from contextlib import AsyncExitStack, contextmanager
-from dataclasses import dataclass, field
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from threading import Lock
 from urllib.parse import urlsplit
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import httpx
 import uvicorn
@@ -22,41 +21,11 @@ from websockets.asyncio.client import connect as open_channel
 from app.agent.workspace_bridge import WorkspaceRunBridge
 from app.agent.workspace_session import RunBoundSession
 from app.infrastructure.mcp.client import ToolCallMiddleware
+from app.infrastructure.workspaces import JupyterTarget
 
 _owners: set[str] = set()
 _owners_lock = Lock()
 _channel_logger = logging.Logger("craft.kernel-provision", level=logging.CRITICAL + 1)
-
-
-@dataclass(frozen=True)
-class JupyterTarget:
-    url: str = field(repr=False)
-    token: str = field(repr=False)
-    kernel_id: str
-    bridge_host: str = "127.0.0.1"
-    bridge_port: int = 0
-
-    def __post_init__(self):
-        target = urlsplit(self.url)
-        if (
-            target.scheme not in {"http", "https"}
-            or not target.hostname
-            or target.username is not None
-            or target.password is not None
-            or target.query
-            or target.fragment
-            or not self.token
-            or any(value.isspace() for value in self.token)
-            or str(UUID(self.kernel_id)) != self.kernel_id
-            or self.bridge_host not in {"127.0.0.1", "localhost", "host.docker.internal"}
-            or not isinstance(self.bridge_port, int)
-            or isinstance(self.bridge_port, bool)
-            or not 0 <= self.bridge_port <= 65535
-        ):
-            raise ValueError(
-                "Expected a private Jupyter root, token, selected kernel and bridge port"
-            )
-        object.__setattr__(self, "url", self.url.rstrip("/") + "/")
 
 
 class WorkspaceToolCallMiddleware(ToolCallMiddleware):
@@ -309,8 +278,10 @@ class WorkspaceRunController:
             return (
                 f"\nNative Python SDK access is active only in notebook {json.dumps(notebook)} "
                 f"and kernel {self._target.kernel_id} during this run. "
-                "Keep workspace_use_notebook on that path; execution is pinned to this kernel. "
-                "Use `from craft import native` and `async with native() as sdk:` for reads. "
+                "run_code executes in this kernel after approval. "
+                "Use `import craft` for files, documents and read access points such as "
+                "`craft.search` and `craft.cube.find`; `from craft import native` and "
+                "`async with native() as sdk:` remain available for run-bound reads. "
                 "Other kernels and standalone processes have no active binding. "
                 "Native mutations still require the CRAFT approval/resume path."
             )

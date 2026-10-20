@@ -22,6 +22,20 @@ if (
 ):
     raise ValueError("CRAFT_UI_ORIGIN must be a plain loopback origin")
 
+# Starter skills are copied once; an existing file with the same name is never replaced.
+starter = Path(__file__).with_name("skills")
+if starter.is_dir():
+    skills = root / "skills"
+    if not skills.is_symlink():
+        skills.mkdir(exist_ok=True)
+        for source in sorted(starter.glob("*.md")):
+            target = skills / source.name
+            if not target.exists() and not target.is_symlink():
+                target.write_bytes(source.read_bytes())
+
+# Terminal shells start guarded, like kernels; the server process itself is not.
+c_terminal_env = {"CRAFT_GUARD": "1"}
+
 # Jupyter's config loader injects this callable into the execution globals.
 c = globals()["get_config"]()
 c.ServerApp.root_dir = str(root)
@@ -47,3 +61,6 @@ if password_hash:
     c.PasswordIdentityProvider.hashed_password = password_hash
 c.FileContentsManager.allow_hidden = False
 c.Application.log_level = 30
+c.ServerApp.terminado_settings = {
+    "shell_command": ["/usr/bin/env", *(f"{k}={v}" for k, v in c_terminal_env.items()), "/bin/bash"]
+}

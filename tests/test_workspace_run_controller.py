@@ -17,6 +17,7 @@ from agent_framework import FunctionInvocationContext, tool
 from agent_framework.exceptions import ToolExecutionException
 from mcp.types import CallToolResult, ListToolsResult, Tool
 
+from app.infrastructure.access import Caller
 from app.infrastructure.operations.context import current_call
 from tests.test_workspace_agent import prepared_run
 from tests.test_workspace_session import bound
@@ -132,76 +133,46 @@ def test_workspace_kernel_selection_is_pinned_before_external_dispatch():
     asyncio.run(execute())
 
 
-def test_pinned_kernel_argument_reaches_the_real_external_mcp_invocation():
+def test_configured_direct_code_tool_is_withheld_from_the_agent():
+    """Code runs go through the approval-gated run_code operation, never directly."""
     from app.agent.workspace import WorkspaceEndpoint, WorkspaceToolsets
 
-    lifecycle = lifecycle_module()
     calls = []
 
     class Remote:
         async def list_tools(self, params=None):
             return ListToolsResult(
                 tools=[
-                    Tool(
-                        name="execute_code",
-                        inputSchema={
-                            "type": "object",
-                            "properties": {
-                                "code": {"type": "string"},
-                                "kernel_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                            },
-                            "required": ["code"],
-                        },
-                    )
+                    Tool(name="execute_code", inputSchema={"type": "object"}),
+                    Tool(name="read_notebook", inputSchema={"type": "object"}),
                 ]
             )
 
         async def call_tool(self, name, *, arguments, meta):
-            calls.append((name, arguments, meta))
-            return CallToolResult(content=[], structuredContent={"executed": True})
+            calls.append(name)
+            return CallToolResult(content=[], structuredContent={})
 
     async def execute():
-        async with bound() as run:
-            transport = WorkspaceToolsets(
-                {
-                    str(run.parent.caller.user_id): WorkspaceEndpoint(
-                        "http://127.0.0.1:1/mcp", {}, ("execute_code",)
-                    )
-                }
-            ).for_caller(run.parent.caller)
-            transport.session, transport._ping_available = Remote(), False
-            try:
-                await transport.load_tools()
-                function = transport.functions[0]
-                middleware = lifecycle.WorkspaceToolCallMiddleware(
-                    [], {"calls": 0}, 20, external_tools={function.name}, kernel_id=KERNEL
+        owner = uuid4()
+        transport = WorkspaceToolsets(
+            {
+                str(owner): WorkspaceEndpoint(
+                    "http://127.0.0.1:1/mcp", {}, ("execute_code", "read_notebook")
                 )
-                invocation = FunctionInvocationContext(
-                    function,
-                    function._prepare_arguments({"code": "print(1)"}),
-                    metadata={"call_id": "pinned-mcp-call"},
-                )
-
-                async def dispatch():
-                    await function.invoke(context=invocation, tool_call_id="pinned-mcp-call")
-
-                token = current_call.set(run.parent)
-                try:
-                    await middleware.process(invocation, dispatch)
-                finally:
-                    current_call.reset(token)
-                assert calls == [
-                    (
-                        "execute_code",
-                        {"code": "print(1)", "kernel_id": KERNEL},
-                        {"craft/toolCallId": "pinned-mcp-call"},
-                    )
-                ]
-            finally:
-                transport.session = None
-                await transport.close()
+            }
+        ).for_caller(Caller(user_id=owner))
+        transport.session, transport._ping_available = Remote(), False
+        try:
+            await transport.load_tools()
+            assert [function.name for function in transport.functions] == [
+                "workspace_read_notebook"
+            ]
+        finally:
+            transport.session = None
+            await transport.close()
 
     asyncio.run(execute())
+    assert calls == []
 
 
 def test_jupyter_target_rejects_credentials_in_urls_and_arbitrary_bridge_hosts():

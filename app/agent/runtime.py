@@ -104,7 +104,9 @@ def _workspace_for_caller(caller):
     selected = WorkspaceToolsets({str(caller.user_id): endpoint}).for_caller(caller)
     return (
         selected,
-        "\nUSER_ROOT=/workspace. Modify only this owner's files beneath USER_ROOT. "
+        "\nUSER_ROOT=/workspace. Workspace tools list and read this owner's files. "
+        "Run Python with run_code and change files with write_file or edit_notebook; "
+        "each call waits for the requester's approval, so propose one at a time. "
         "Source originals are read-only until imported into the workspace. "
         "Read owned Markdown skill files using the workspace tools and follow their instructions.",
         jupyter,

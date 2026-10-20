@@ -157,6 +157,8 @@ Answer retrieval records live in `messages.content` as typed `craft.retrieval` A
 
 Migration 0012 adds owner-scoped working notes. Migration 0013 adds owned skill heads and append-only `skill_revisions`. An owner/mutation identifier is unique, and saving checks the expected head revision. These records are separate from conversation files and the provider originals.
 
+Migration 0015 adds `workspace_tokens` (section 9.7) and records each call's workspace token in `call_log.workspace_token_id`, with the origin `workspace`. Only token digests are stored. Existing workspace call rows make the downgrade fail rather than remove audit rows.
+
 ## 7.4 Seed and health
 
 - Seed is a host command, separate from migrations. `uv run craft seed base` loads synthetic accounts, grants, two missions and a small provider folder; it does not set account passwords or build the index. `uv run craft index` builds the derived library. `uv run craft seed demo --seed 1` generates the larger set, indexes it, loads seeded values, records withdrawals and refreshes the index (section 8.17). Owner database access handles seed and index writes. An unchanged completed seed adds no source version or value. Account creation and grants through `craft users` use the application login.
