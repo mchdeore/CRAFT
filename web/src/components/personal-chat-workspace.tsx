@@ -4,6 +4,7 @@ import { DocumentRenderer } from "@/components/citations/preview/document-render
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
 import { personalChatPreview, personalWorkspaceLinkPath, type PersonalChatPreview } from "@/lib/chat-workspace-preview";
 import { personalAbsolutePath, PersonalWorkspaceError, readPersonalFile } from "@/lib/personal-workspace";
+import { personalJupyterURL } from "@/lib/personal-preview";
 import { cn } from "@/lib/utils";
 
 type Selection = { path: string };
@@ -14,6 +15,9 @@ interface WorkspacePreviewContext {
   close: () => void;
 }
 const PreviewContext = createContext<WorkspacePreviewContext | null>(null);
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function usePersonalChatWorkspace() { return useContext(PreviewContext); }
 
 export function PersonalChatWorkspaceProvider({ configuration, ownerKey, children }: PropsWithChildren<{ configuration?: WorkspaceConfiguration; ownerKey: string }>) {
   const url = configuration?.status === "configured" ? configuration.url : undefined;
@@ -77,6 +81,7 @@ function WorkspacePreviewContent({ configuration, selection, onClose }: { config
       <div className="min-w-0"><h2 className="break-words text-sm font-medium">{name}</h2><p className="break-words font-mono text-xs text-muted-foreground">{personalAbsolutePath(selection.path)}</p><p className="text-xs text-muted-foreground">Current workspace file · refresh to read saved changes</p></div>
       <div className="flex flex-wrap gap-2">
         {current?.url && <a href={current.url} download={name} className={buttonClass}>Download</a>}
+        {configuration.status === "configured" && <a href={personalJupyterURL(configuration, selection.path)} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open in JupyterLab</a>}
         {connected && <button type="button" aria-label={current?.error ? "Retry workspace preview" : "Refresh workspace preview"} className={buttonClass} disabled={!current} onClick={() => setRefresh(value => value + 1)}>{current?.error ? "Retry" : "Refresh"}</button>}
         <button type="button" aria-label="Close workspace preview" className={buttonClass} onClick={onClose}>Close</button>
       </div>
