@@ -1,6 +1,6 @@
 # CRAFT documents
 
-<p class="meta">Downloads | Updated 15 October 2026</p>
+<p class="meta">Downloads | Updated 19 October 2026</p>
 
 ## Documents
 
@@ -29,4 +29,4 @@ PDF downloads preserve the document layout. Each topic page also has a Markdown 
 
 ## Notes
 
-Each download shows the date of its source revision. Source links open the matching topic pages.
+The build inserts each source revision date. Source links open the matching topic pages; each page's Markdown download preserves the exact public source.

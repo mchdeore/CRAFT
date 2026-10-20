@@ -1,0 +1,33 @@
+# JupyterLab and the CRAFT package share one user workspace image.
+FROM python:3.12.13-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+COPY --from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 /uv /bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/notebook \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy
+
+RUN groupadd --gid 1000 workspace \
+    && useradd --uid 1000 --gid 1000 --create-home workspace \
+    && mkdir /workspace \
+    && chown workspace:workspace /workspace
+
+WORKDIR /opt/craft-user-workspace
+COPY pyproject.toml uv.lock ./
+COPY src ./src
+# The external MCP2 control service runs outside this user image.
+# Install locked wheels, including Setuptools, before building the local package.
+RUN uv sync --locked --extra lab --extra analysis --no-dev --group build --no-editable \
+        --no-install-project --no-build --no-cache \
+    && uv sync --locked --extra lab --extra analysis --no-dev --group build --no-editable \
+        --no-build-isolation-package craft-user-workspace --no-cache
+COPY jupyter_server_config.py ./jupyter_server_config.py
+
+ENV PATH=/opt/notebook/bin:$PATH \
+    USER_ROOT=/workspace \
+    PYTHONDONTWRITEBYTECODE=1 \
+    JUPYTER_RUNTIME_DIR=/tmp/jupyter-runtime \
+    JUPYTER_CONFIG_DIR=/tmp/jupyter-config \
+    IPYTHONDIR=/tmp/ipython
+USER workspace:workspace
+WORKDIR /workspace
+EXPOSE 8888
+CMD ["jupyter", "lab", "--config=/opt/craft-user-workspace/jupyter_server_config.py"]

@@ -4,7 +4,7 @@ import hashlib
 import inspect
 import json
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 import msgspec
@@ -18,6 +18,7 @@ from app.infrastructure.database.unit_of_work import (
     unit_of_work,
 )
 from app.infrastructure.errors import Conflict, Forbidden, InvalidInput, NotFound
+from app.infrastructure.operations.context import current_call
 from app.infrastructure.operations.pipeline import decode
 from app.infrastructure.operations.registry import registry
 
@@ -131,9 +132,19 @@ def decide(caller, data):
         storage.require_run(session, caller.user_id, row["run_id"], row["conversation_id"])
         if storage.status(session, data.id) != "pending":
             raise Conflict()
+        tool_call_id = storage.native_tool_call_id(session, row)
         kind = "approved" if data.approve else "rejected"
         storage.append_event(session, data.id, kind, caller.user_id, data.note)
-        return _summary(row, kind)
+        result = _summary(row, kind)
+    context = current_call.get()
+    if context is not None:
+        context.caller = replace(
+            caller,
+            conversation_id=row["conversation_id"],
+            run_id=row["run_id"],
+            tool_call_id=tool_call_id,
+        )
+    return result
 
 
 def _call_digest(value):

@@ -38,6 +38,7 @@ def test_mcp_container_lists_and_answers(container_provider):
         "CRAFT_DATABASE_NAME": "craft_test",
         "CRAFT_DATABASE_HOST": "localhost",
         "CRAFT_DATABASE_PORT": str(database_port),
+        "CRAFT_MCP_URL": "http://127.0.0.1:8000/mcp",
         "CRAFT_MODEL_MAIN": "fake",
         "CRAFT_MODEL_KEY": "",
         "CRAFT_MODEL_ENDPOINT": "",
@@ -129,7 +130,7 @@ def test_mcp_container_lists_and_answers(container_provider):
             asyncio.run(asyncio.wait_for(execute(), timeout=120))
         finally:
             subprocess.run(
-                compose + ["down", "--volumes", "--rmi", "local"],
+                compose + ["--profile", "mcp", "down", "--volumes", "--rmi", "local"],
                 cwd=ROOT,
                 env=environment,
                 capture_output=True,

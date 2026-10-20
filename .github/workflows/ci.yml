@@ -59,6 +59,13 @@ jobs:
         run: npm ci --prefix api --ignore-scripts --no-audit --no-fund
       - name: Worker test image
         run: docker build --tag craft-python-workspace:local-pilot packages/python_workspace
+      - name: User workspace image
+        run: |
+          docker build --tag craft-user-workspace:local-pilot packages/user_workspace
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp \
+            --entrypoint python craft-user-workspace:local-pilot \
+            -c 'import os, craft, jupyterlab, pandas, duckdb, numpy, scipy, matplotlib, openpyxl; assert os.getuid() == 1000; assert str(craft.USER_ROOT) == "/workspace"'
       - name: Tests
         run: uv run pytest
       - name: Contract tests

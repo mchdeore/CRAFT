@@ -1,7 +1,7 @@
 """Owned database requests and authenticated HTTP decision behavior."""
 
 from dataclasses import replace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import msgspec
 import pytest
@@ -154,6 +154,32 @@ def login(http, context, index=0):
     assert response.status_code == 200
 
 
+def decision_call(context, response):
+    logs = metadata.tables["call_log"]
+    with context["owner"].connect() as db:
+        return (
+            db.execute(
+                select(logs).where(
+                    logs.c.request_id == UUID(response.headers["x-request-id"]),
+                    logs.c.name == "approvals.decide_approval",
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+
+def latest_auth_session(context, index=0):
+    sessions = metadata.tables["auth_sessions"]
+    with context["owner"].connect() as db:
+        return db.execute(
+            select(sessions.c.id)
+            .where(sessions.c.user_id == context["users"][index][0])
+            .order_by(sessions.c.created_at.desc(), sessions.c.id.desc())
+            .limit(1)
+        ).scalar_one()
+
+
 def test_frozen_request_is_idempotent_and_changed_arguments_conflict(context):
     first = request_approval(context["caller"], context["proposal"]())
     second = request_approval(context["caller"], context["proposal"]())
@@ -174,6 +200,7 @@ def test_http_owner_decides_once_and_foreign_cannot_observe(context):
     app = create_app(context["settings"])
     with TestClient(app, base_url="https://testserver") as http:
         login(http, context)
+        auth_session = latest_auth_session(context)
         pending = http.get("/api/approvals?status=pending")
         assert pending.status_code == 200 and any(
             row["id"] == str(approval.id) for row in pending.json()
@@ -186,19 +213,47 @@ def test_http_owner_decides_once_and_foreign_cannot_observe(context):
             headers={"Origin": "https://testserver"},
         )
         assert decided.status_code == 200 and decided.json()["status"] == "approved"
+        recorded = decision_call(context, decided)
+        assert recorded["origin"] == "http" and recorded["outcome"] == "ok"
+        assert recorded["user_id"] == context["users"][0][0]
+        assert recorded["auth_session_id"] == auth_session
+        assert recorded["conversation_id"] == context["conversation"]
+        assert recorded["run_id"] == context["run"]
+        assert recorded["tool_call_id"] is None
         replay = http.post(
             "/api/approvals/" + str(approval.id) + "/decision",
             json={"approve": False},
             headers={"Origin": "https://testserver"},
         )
         assert replay.status_code == 409
+        recorded = decision_call(context, replay)
+        assert recorded["outcome"] == "error" and recorded["error_code"] == "conflict"
+        assert recorded["user_id"] == context["users"][0][0]
+        assert recorded["auth_session_id"] == auth_session
+        assert recorded["conversation_id"] is None
+        assert recorded["run_id"] is None
+        assert recorded["tool_call_id"] is None
         assert [
             event["kind"]
             for event in http.get("/api/approvals/" + str(approval.id)).json()["events"]
         ] == ["requested", "approved"]
         login(http, context, 1)
+        foreign_session = latest_auth_session(context, 1)
         assert http.get("/api/approvals/" + str(approval.id)).status_code == 404
         assert all(row["id"] != str(approval.id) for row in http.get("/api/approvals").json())
+        foreign = http.post(
+            "/api/approvals/" + str(approval.id) + "/decision",
+            json={"approve": True},
+            headers={"Origin": "https://testserver"},
+        )
+        assert foreign.status_code == 404
+        recorded = decision_call(context, foreign)
+        assert recorded["outcome"] == "error" and recorded["error_code"] == "not_found"
+        assert recorded["user_id"] == context["users"][1][0]
+        assert recorded["auth_session_id"] == foreign_session
+        assert recorded["conversation_id"] is None
+        assert recorded["run_id"] is None
+        assert recorded["tool_call_id"] is None
 
 
 def test_agent_and_private_python_cannot_make_human_decision(context):

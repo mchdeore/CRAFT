@@ -2,7 +2,7 @@
 
 Structured Query Language (SQL) defines the database tables. Identifiers are universally unique identifiers (UUIDs). Token and source digests use the 256-bit Secure Hash Algorithm (SHA-256). The application programming interface (API) uses Hypertext Transfer Protocol (HTTP). Agent-User Interaction (AG-UI) describes stored messages. The command-line interface (CLI) uses application operations.
 
-- All state in PostgreSQL:
+- Application records in PostgreSQL:
   - SQLAlchemy tables and queries, Psycopg driver, Alembic migrations, pgvector for vectors;
   - sync database code, with handlers in FastAPI's thread pool.
 - Services select short database transactions, read-only for reads. Storage receives an explicit Session and never commits independently.
@@ -155,8 +155,10 @@ create index on workspace_files (conversation_id, created_at desc);    -- delete
 
 Answer retrieval records live in `messages.content` as typed `craft.retrieval` AG-UI activities beside `craft.answer`. The activity holds messageId, runId, model, instructionsVersion and path. No new table is needed. File operations use the existing workspace table and declared application grants. Limits are 25 MiB per file and 50 files; conversation-row locks serialize counting and updates. Archive and run start share account serialization. Archive refuses active runs, removes workspace rows and retains history.
 
+Migration 0012 adds owner-scoped working notes. Migration 0013 adds owned skill heads and append-only `skill_revisions`. An owner/mutation identifier is unique, and saving checks the expected head revision. These records are separate from conversation files and the provider originals.
+
 ## 7.4 Seed and health
 
-- Seed (not a migration): `uv run craft seed base` loads demo users, their mission grants and a small provider folder; `uv run craft seed demo` adds the demo set (section 8.17). `uv run craft index` then builds the library (fake embeddings in fake-model mode). Seeding and indexing run as `craft_owner`, like a migration, and are idempotent. Account creation and grants through `craft users` use the application login.
+- Seed is a host command, separate from migrations. `uv run craft seed base` loads synthetic accounts, grants, two missions and a small provider folder; it does not set account passwords or build the index. `uv run craft index` builds the derived library. `uv run craft seed demo --seed 1` generates the larger set, indexes it, loads seeded values, records withdrawals and refreshes the index (section 8.17). Owner database access handles seed and index writes. An unchanged completed seed adds no source version or value. Account creation and grants through `craft users` use the application login.
 - Liveness returns HTTP 200 with an ok body while the process runs. Readiness returns HTTP 200 when the database reports the expected migration within three seconds; otherwise it returns HTTP 503 with an unavailable body. Its separate connection has a three-second deadline. Both routes are anonymous, outside `/api`, and reveal no protected information. Hosted probes use the same split.
 - Section 12 defines database deployment, permission, backup, retention and audit extensions. Section 1 defines the workspace and sandbox scope.

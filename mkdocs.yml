@@ -12,7 +12,8 @@ nav:
       - Components: wiki/components.md
       - Agent runtime: wiki/runtime.md
       - Process lifecycle: wiki/processes.md
-      - Python workspace: wiki/python.md
+      - Workspace: wiki/workspace.md
+      - Python workspace prototype: wiki/python.md
       - Documents and evidence: wiki/documents.md
       - Model jobs: wiki/jobs.md
   - Concepts:
@@ -34,6 +35,7 @@ nav:
       - Build order: spec/11-build-order.md
       - Deferred register: spec/12-deferred-register.md
       - Vision: spec/14-vision.md
+  - Roadmap: roadmap.md
   - Downloads: downloads.md
 plugins:
   - search

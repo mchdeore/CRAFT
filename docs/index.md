@@ -1,6 +1,6 @@
 # CRAFT
 
-CRAFT answers questions about project documents with cited sources and maintains an engineering datacube. The application provides authenticated conversations, document tools and a local Python workspace.
+CRAFT answers questions about project documents with cited sources and maintains an engineering datacube. Its authenticated interface provides chat beside a personal JupyterLab workspace, a tools reference and saved skills. Conversations retain answers, evidence, approvals and uploaded or generated files.
 
 This site contains CRAFT documentation. Run the application separately to use its authenticated APIs.
 
@@ -8,11 +8,12 @@ This site contains CRAFT documentation. Run the application separately to use it
 
 - [Development](wiki/development.md): install, configure and check the repository.
 - [Components](wiki/components.md): responsibilities and code locations.
-- [Agent runtime](wiki/runtime.md): local runs, tools and decisions.
+- [Agent runtime](wiki/runtime.md): application runs, saved skills and decisions.
 - [Process lifecycle](wiki/processes.md): owned services, readiness and shutdown.
-- [Python workspace](wiki/python.md): code, CSV data and returned artifacts.
+- [Workspace](wiki/workspace.md): shared files, notebooks, source copies and native Python tools.
+- [Python workspace prototype](wiki/python.md): standalone code, CSV data and artifacts.
 - [Documents and evidence](wiki/documents.md): identity, versions, extraction and relationships.
-- [Model jobs](wiki/jobs.md): queued model work and durable dispatch.
+- [Model jobs](wiki/jobs.md): a standalone prototype for queued model work.
 
 ## Concepts
 

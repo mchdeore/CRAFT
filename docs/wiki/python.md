@@ -1,8 +1,12 @@
 # Python workspace
 
+The Python workspace is a standalone prototype in `packages/python_workspace/`. It is not connected to application chat, saved skills or authenticated data access. Application conversation files and backend chart tools use their own checked operations.
+
 ## 1. Session
 
 `WorkspaceManager` opens the managed image, receives bounded CSV data and executes Python in a persistent kernel session. Variables remain available across cells in that session. `WorkspaceManager` lists or reads managed files and exports a bundle when it closes the session.
+
+Session IDs identify controller sessions held in memory. They do not bind an application account or persist saved code revisions.
 
 The transport owns container control. The image uses a non-root account, a read-only filesystem, a managed temporary workspace, bounded resources and no external network. Credentials and the application database are held by the controller.
 

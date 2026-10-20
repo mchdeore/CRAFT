@@ -1,63 +1,89 @@
 # CRAFT Dependencies and Integration
 
-<p class="meta">Version 1.0 | 14 October 2026</p>
+<p class="meta">Version 1.0 | 19 October 2026</p>
 
-The application implements database setup, health routes, checked operations, the document provider and library, local accounts, server sessions and the model adapter. Continuous integration (CI) runs code, contract and document checks.
+The application implements authenticated chat, a personal JupyterLab workspace, saved skills, approvals, document and cube tools, chart rendering, conversation files and PostgreSQL records. This reference owns dependency pins, setup and verification commands. Commands describe checks to run; a recorded result applies only to its tested source and environment.
 
-This document uses application programming interface (API), Hypertext Transfer Protocol (HTTP), JavaScript Object Notation (JSON), Asynchronous Server Gateway Interface (ASGI), Model Context Protocol (MCP), Agent-User Interaction (AG-UI), Transmission Control Protocol (TCP) Portable Document Format (PDF) and Hypertext Markup Language (HTML).
+Application programming interface (API), Hypertext Transfer Protocol (HTTP), JavaScript Object Notation (JSON), Model Context Protocol (MCP) and Agent-User Interaction (AG-UI) describe the application boundaries.
 
 ## 1. Dependencies
 
-`pyproject.toml` declares direct dependencies and their allowed versions. `uv.lock` records the resolved versions. `uv sync --locked` creates the project-local `.venv` and refuses an outdated lock. Install dependencies with uv; direct `pip install` is not permitted. Dependency changes use `uv add` in a separate pull request with the affected compatibility checks. The lock also contains transitive dependencies; it remains the complete dependency inventory.
+`pyproject.toml` declares dependencies; `uv.lock` records the complete resolved inventory. `uv sync --locked` refuses an outdated lock. Dependency changes use `uv add` and the affected compatibility checks.
 
-| Dependency | Current declaration or pin | Why this version is held |
+| Dependency | Declaration or pin | Use |
 |---|---|---|
-| Python | `==3.12.*` | The project and lock require the same runtime series. |
-| uv | `0.12.23` | CI uses one environment and lock tool version. |
-| uv_build | `>=0.12,<0.13` | The build backend remains within the declared compatible series. |
-| Database image | `pgvector/pgvector:0.8.7-pg18` | Compose and CI use the same PostgreSQL 18 image with the vector extension. |
-| FastAPI | `>=0.141,<0.142`; lock `0.141.1` | The selected AG-UI adapter requires the older compatible FastAPI series. |
-| uvicorn | `0.54.0` | The ASGI server remains fixed for local and container execution. |
-| msgspec | `0.22.0` | Strict shapes and the agent dependencies share this compatible version (the agent framework requires msgspec `>=0.20,<0.23`). |
-| SQLAlchemy | `2.0.54` | Tables, queries and transactions use the tested 2.0 interfaces. Results must be loaded before the session closes. |
-| psycopg[binary] | `3.3.6` | The PostgreSQL driver and binary package resolve together. Connections use `postgresql+psycopg`. |
-| Alembic | `1.20.0` | Schema changes and drift checks use one migration tool version. Generated revisions require review before upgrade. |
-| pgvector, Python | `0.5.1` | SQLAlchemy vector column support is separate from the database extension version. |
-| agent-framework-core | `1.21.0` | The compatibility probe checks the selected agent, session and MCP tool interfaces. The read-only runtime uses the actual Agent and server-owned AgentSession. |
-| agent-framework-foundry | `1.14.1` | The adapter uses `FoundryChatClient` for configured Responses calls. HTTP interception checks the endpoint, model roles, storage flag and budget. |
-| agent-framework-ag-ui | `1.5.1` | The compatibility probe imports the FastAPI adapter. The application emits adapter events and checks their browser schemas. |
-| mcp | `1.30.0` | The agent framework requires MCP `>=1.24,<2`. A compatibility probe mounts a stateless JSON transport in FastAPI. The application mounts the same registry server with stateless JSON HTTP and run authentication. |
-| anyio | `4.15.1` | Streaming finalization shields its short cleanup work from disconnect cancellation. The held transitive version is declared directly. |
-| argon2-cffi | `25.1.0` | The compatibility probe checks Argon2id hashing with library defaults. Account flows remain planned. |
-| python-docx | `1.2.0` | Reads Word paragraphs and tables in source order. |
-| pypdf | `6.19.0` | Reads PDF text layers and page locators. Input-derived parser diagnostics are suppressed. |
-| python-pptx | `1.0.2` | Reads slides, explicit tables and speaker notes. |
-| openpyxl | `3.1.5` | Reads literal and cached spreadsheet values with links disabled. |
-| fpdf2, test group | `2.8.9` | Builds synthetic text-layer and image-only PDF fixtures during tests. |
-| openai | `3.29.0` | The installed framework uses this Responses and embedding transport. The version is unchanged. |
-| azure-ai-projects | `2.7.0` | The project adapter supplies the documented local API key argument to the model transport. |
-| pytest | `9.1.1` | Collection and execution use one test runner version. |
-| Ruff | `0.16.10` | CI uses one lint and formatting rule set. |
-| Pyright | `1.1.414` | CI checks Python 3.12 types with one checker version. |
+| Python | `==3.12.*`; interpreter and images `3.12.13` | Application and workspace runtime |
+| uv | `0.12.23` | Environment and lock tool |
+| uv_build | `>=0.12,<0.13` | Application and local-package build backend |
+| Database image | `pgvector/pgvector:0.8.7-pg18` | PostgreSQL 18 with vectors |
+| FastAPI | `>=0.141,<0.142`; lock `0.141.1` | HTTP application and framework adapter |
+| uvicorn | `0.54.0` | ASGI server |
+| msgspec | `0.22.0` | Strict operation shapes |
+| SQLAlchemy | `2.0.54` | Tables, queries and short transactions |
+| psycopg[binary] | `3.3.6` | PostgreSQL driver |
+| Alembic | `1.20.0` | Schema revisions and drift checks |
+| pgvector, Python | `0.5.1` | Vector column support |
+| agent-framework-core | `1.21.0` | Agent, session and native MCP tools |
+| agent-framework-foundry | `1.14.1` | Configured Responses adapter |
+| agent-framework-ag-ui | `1.5.1` | Server stream adapter |
+| mcp | `1.30.0` | Registry server and native transports |
+| anyio | `4.15.1` | Bounded stream and cancellation cleanup |
+| argon2-cffi | `25.1.0` | Local account password hashing |
+| python-docx | `1.2.0` | Word conversion |
+| pypdf | `6.19.0` | PDF text and locators |
+| python-pptx | `1.0.2` | Slides, tables and notes |
+| openpyxl | `3.1.5` | Literal and cached spreadsheet values |
+| vl-convert-python | `1.9.0.post1` | Backend chart rendering |
+| openai | `3.29.0` | Responses and embedding transport |
+| azure-ai-projects | `2.7.0` | Foundry project adapter |
+| docker, Python SDK | `7.2.0` | Owned container lifecycle |
+| fpdf2, development group | `2.8.9` | Generated demo PDFs and test fixtures |
+| pytest | `9.1.1` | Component and contract checks |
+| Ruff | `0.16.10` | Lint and format |
+| Pyright | `1.1.414` | Python types |
+| MkDocs, documents group | `1.6.1` | Navigation site |
 
-The development interpreter selection and both Docker stages use Python `3.12.13`. The Dockerfile copies uv `0.12.23`. These are tracked in `.python-version` and `Dockerfile`; the Python series requirement remains in `pyproject.toml` and `uv.lock`.
+The production lifecycle package is version `0.1.0`; its process-control backend is pinned to `4.3.0`. Its declarations live in `packages/process_manager/pyproject.toml`.
 
-| Selected transitive dependency | Current lock | Consequence |
+The root development group also installs the standalone runtime, Python workspace, document and fleet packages. The application image installs production dependencies and copies the lifecycle package; it omits those four prototypes.
+
+The Python workspace prototype builds separately from `packages/python_workspace/Dockerfile` and its own lock. Its pins are ipykernel `6.29.5`, kernel transport `8.6.3`, NumPy `2.3.4`, pandas `2.3.3`, statsmodels `0.14.5` and vl-convert-python `1.9.0.post1`. The optional Wolfram transport uses httpx `0.28.1`; its build backend is setuptools `80.9.0`.
+
+The shared [user workspace](wiki/workspace.md) builds separately from `packages/user_workspace/Dockerfile`. Its package pins MCP `1.30.0` and httpx `0.28.1`; its Jupyter environment pins JupyterLab `4.6.4`, Jupyter Server `2.21.1`, ipykernel `6.29.5`, jupyter-collaboration `5.0.4` and jupyter-server-nbmodel `0.2.9`. Its analysis extra pins NumPy `2.5.4`, Pandas `3.0.6`, SciPy `1.18.1`, Matplotlib `3.11.2`, DuckDB `1.5.6` and OpenPyXL `3.1.5`. The private per-owner control service uses `jupyter-mcp-server==2.2.4` and MCP SDK 2 in a separate environment. Native kernel binding uses the application's production notebook transport pinned to `8.6.3`. The package README describes provisioning.
+
+| Selected transitive or contract dependency | Lock or pin | Use |
 |---|---|---|
-| ag-ui-protocol | `0.1.22` | The Python adapter uses the pre-0.2 event library. Actual emitted events and the recorded simulated stream pass the held browser event schemas. |
-| jsonschema | `4.26.0` | Validates compiled TypeScript response and answer metadata schemas. |
-| azure-identity | `1.26.0` | It is installed through the Foundry dependency. Managed identity integration remains deferred. |
-| httpx2 | `2.13.1` | The installed model transport uses this HTTP implementation; checks intercept its actual requests. |
+| ag-ui-protocol | `0.1.22` | Python stream events |
+| jsonschema | `4.26.0` | Compiled response and answer schemas |
+| azure-identity | `1.26.0` | Foundry dependency |
+| httpx2 | `2.13.1` | Model HTTP transport |
+| @ag-ui/core | `0.0.59` | Executable contract event schemas |
+| ts-json-schema-generator | `2.9.0` | TypeScript contract schemas |
 
-The proposed browser UI integration selects its event package and browser adapter at `1.0.2`. The current executable contract separately pins `@ag-ui/core` `0.0.59` for its actual `EventSchemas` export, and `ts-json-schema-generator` `2.9.0`. Their manifest, lock and CI commands are tracked in `api/`. Emitted events pass the held schema package with the Python adapter. The browser UI adapter is not implemented; its major-version gap must be resolved and verified before front-end integration. Deployment authentication requires a fixed version with compatibility checks.
+`api/package.json` and its lock own the contract JavaScript dependency tree. The tracked React/TypeScript/Vite frontend lives in `web/`; its package manifest and lock own the frontend dependency tree. It imports shared forms from `api/types.ts`, including authentication, conversations, skills and files, and uses the existing authenticated backend.
 
-## 2. Local development
+| Frontend dependency | Declaration or pin | Use |
+|---|---|---|
+| Node.js | `>=24 <25`; frontend CI selects `24` | Frontend tools and tests |
+| React and React DOM | `^19.2.8`; lock `19.3.0` | Browser interface |
+| TypeScript | `~6.0.2`; lock `6.0.3` | Frontend type checks |
+| Vite | `^8.3.0`; lock `8.3.4` | Development server and production bundle |
+| AG-UI JavaScript transport | `^0.0.59`; lock `0.0.59` | Agent stream transport |
+| @assistant-ui/react | `^0.15.28`; lock `0.15.28` | Chat interface |
+| @assistant-ui/react-ag-ui | `^0.0.69`; lock `0.0.69` | Chat stream adapter |
+| ExcelJS | `^4.4.0`; lock `4.4.0` | Spreadsheet preview |
+| fflate | `^0.8.3`; lock `0.8.3` | ZIP preflight and repacking |
+| saxes | `^6.0.0`; lock `6.0.0` | Streaming XML preflight |
 
-Prerequisites are Git, uv `0.12.23`, and a running Docker engine with the Compose and Buildx plugins. Run commands from the repository root. Keep the checkout and `.venv` outside folders that download file contents on demand. Use a new local database volume for the first setup. A previously initialized volume keeps its original database passwords.
+Spreadsheet preview limits archive and XML intake, worksheet dimensions, cells and merges, and rejects workbooks that exceed those limits.
 
-On Windows, run under the Windows Subsystem for Linux (WSL) with line feed (LF) line endings; this platform has not been tested.
+The backend also provides `/dev` and `/summarize` browser shells. The documentation workflow builds information and downloads; the frontend workflow checks the frontend separately.
 
-Copy the environment template once. Set `CRAFT_DB_ADMIN_PASSWORD`, `CRAFT_OWNER_DB_PASSWORD` and `CRAFT_APP_DB_PASSWORD` to separate local values before starting. Keep `.env` untracked. The template selects `localhost`, port `5432`, database `craft_dev` and log level `INFO`. If the host port is occupied, change `CRAFT_DATABASE_PORT` to a free port.
+## 2. Local setup
+
+Use Git, uv, a running Docker engine, Compose and Buildx; frontend development also needs Node.js 24 with npm. Run commands from the repository root unless shown otherwise. Keep the checkout and environment outside folders that download file contents on demand.
+
+Copy `.env.example` to an untracked `.env`. Set separate administrative, owner and application database passwords. A previously initialized database volume keeps its original passwords. Choose a free database host port and use a new disposable volume for isolated checks.
 
 ```bash
 cp .env.example .env
@@ -65,26 +91,42 @@ uv sync --locked
 docker compose up -d --wait db
 uv run alembic upgrade head
 uv run alembic check
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-uv run pytest
-uv run craft --version
-```
-
-Start the development server in a terminal. It stays running until interrupted.
-
-```bash
+uv run craft seed base
+uv run craft index
+uv run craft users reset demo --as admin
 uv run uvicorn app.main:app --reload
 ```
 
-Check readiness from another terminal.
+Base seeding creates synthetic accounts, grants, two missions and five provider documents. It sets no account password and does not index. Password reset uses a private prompt. The generated demo command performs its own indexing and seeded-value loading:
 
 ```bash
-curl -fsS localhost:8000/health/ready
+uv run craft seed demo --seed 1
 ```
 
-The successful response is `{"status":"ok"}`. Stop the development server before starting the full Compose application, since both use port 8000. The full stack builds and runs the deployment image locally.
+Seed and index writes use owner database access. These host commands need the development dependencies, including the generated-PDF library. The application reads the provider folder; it does not seed or migrate at startup.
+
+Enable `CRAFT_DEV_PAGE=1` for the optional `/dev` page. It supports sign-in, search, chat, approval recovery, rename, archive and conversation file operations. `/summarize` is available independently.
+
+For the tracked frontend, install both npm dependency trees, then start the Vite server with the backend already running:
+
+```bash
+npm ci --prefix api --ignore-scripts --no-audit --no-fund
+npm ci --prefix web --no-audit --no-fund
+cd web
+CRAFT_BACKEND_URL=http://127.0.0.1:8000 npm run dev
+```
+
+The development proxy forwards `/api`, `/health` and `/mcp` to the selected loopback backend. `CRAFT_BACKEND_URL` must be a single HTTP or HTTPS loopback origin without credentials, a path, query or fragment. The backend must allow the frontend Origin. Live mode is the default and uses authenticated sessions.
+
+Development mocks require explicit opt-in, from `web/`:
+
+```bash
+CRAFT_BACKEND_URL=http://127.0.0.1:8000 VITE_MOCK=true npm run dev:mock
+```
+
+Mocks are development-only. The production build disables mocks, ignores environment files and includes only curated public assets. Serve its `web/dist/` output with the authenticated backend from the same origin and its `/api/` routes; the development proxy does not configure production serving. Return to the repository root for the following backend commands.
+
+Stop the host server before starting the application container on port 8000:
 
 ```bash
 docker compose up --build --wait --wait-timeout 180
@@ -92,442 +134,103 @@ curl -fsS localhost:8000/health/ready
 docker compose down
 ```
 
-`docker compose down` preserves the development database volume. S0's command-line interface supports `craft --version`. The planned commands are `craft seed <set>` (first `base`), `craft users add <username> [--admin]`, `craft users promote <username>`, `craft operations` and `craft call <operation> --as <username> <json>`. Account creation prompts for a password. Operation listing shows name, route, tool, access and effects. Operation calls use the named account and are logged. These local commands are implemented. Model settings select fake or configured calls. The temporary development page is off by default; enable it with `CRAFT_DEV_PAGE=1`.
+`docker compose down` preserves the database volume. Windows development uses the Windows Subsystem for Linux and line-feed files. Browser and container compatibility must be checked in the selected environment.
 
-## 3. Architecture rules and their checks
+## 3. Services and state
 
-The following checks are defined in the S0 suite. The Scope column describes their assertions.
+Compose starts `db` and `app`. The optional `mcp` profile uses the same application image, database settings and read-only provider mount, and starts `craft mcp --as <account>` over standard input and output in the app's network namespace. HTTP MCP is already mounted inside the app at `/mcp`; neither transport is a code runner or durable queue.
 
-| Current rule or behavior | Collected test | Scope |
+Database initialization runs once on an empty volume. It creates owner/application logins, development/test databases and the vector extension. Migrations run as the owner; application requests use the application login and per-table grants. Applied revisions run from 0001 through 0013. Readiness checks database access and migration head; liveness checks the running process.
+
+The production image runs as numeric user `10001` and omits uv, development packages and build tools. Compose forwards application database, model, provider, Origin and MCP settings. The app receives no administrative or owner database password.
+
+The application agent uses PostgreSQL conversations and sessions with native HTTP MCP. Its `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local effects consume their matching approval in the write transaction. The separate runtime prototype's `SingleAttemptMCP` suppresses tool-call replay; the application does not import it.
+
+The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding. The runtime, Python workspace, document graph and fleet queue prototypes remain separate from application chat.
+
+## 4. Provider, retrieval and generated data
+
+`CRAFT_PROVIDER_ROOT` defaults to `var/provider` on the host. Compose mounts it read-only at `/provider`. It stores generated originals and immutable versions outside PostgreSQL. The database keeps derived chunks, summaries, vectors, differences and approved cube values.
+
+Indexing converts sources and makes model/embedding requests before short writes. Fake mode uses extract summaries and deterministic vectors. Configured mode records the selected model. `craft index --rebuild` rebuilds representations when that model changes. Source availability and mission/silo grants constrain search and evidence reads.
+
+Search combines keyword and vector candidates with normalized 0.7 semantic and 0.3 lexical weights. Ranking scores order hits; answer confidence stays zero and low. Exact citation handles and source checks are described in the specification.
+
+The generated demo set has 125 source items, twelve missions in four families and 48 planted questions. It includes changed versions, moves, copies, mixed units, bilingual headers, unknown cells and three withdrawn cited sources. Ground truth lives at `<provider root>/.provider/ground-truth.json`. An unchanged completed seed adds no version or value; a changed baseline preserves earlier generations.
+
+The separate document package supports local-originals and external-originals modes, extraction, navigation and graph views. Its OpenText adapter and relationship store are not application library routes.
+
+## 5. Component and contract checks
+
+Use only `craft_test` or a named disposable database for checks. Keep its records and provider folder separate from demonstration data. Each collected suite needs its declared database, Docker or service prerequisites.
+
+```bash
+uv sync --locked
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+CRAFT_DATABASE_NAME=craft_test uv run alembic upgrade head
+CRAFT_DATABASE_NAME=craft_test uv run alembic check
+npm ci --prefix api --ignore-scripts --no-audit --no-fund
+docker build --tag craft-python-workspace:local-pilot packages/python_workspace
+uv run pytest
+```
+
+| Area | Targeted command | Assertions |
 |---|---|---|
-| Selected libraries can be used together | `test_dependencies_work_together` | Strict probe shapes, a separate MCP probe app, agent adapter imports, vector type construction and password hashing. It does not prove the application agent is implemented. |
-| App construction makes no database request | `test_main_builds_the_app_without_a_database_call` | Imports the application entry point and checks its type. |
-| Migration filenames follow the revision rule | `test_migration_names_follow_rule` | Names use `NNNN_<verb>_<thing>.py` and matching revision strings. The revision directory is empty in S0. |
-| Migrations require the owner password | `test_migrations_refuse_to_run_without_the_owner_password` | Missing owner credentials stop migration setup. |
-| A unit of work commits, rolls back and rejects writes when read-only | `test_unit_of_work_commits_and_rolls_back` | Uses real PostgreSQL and a synthetic probe table. Operation-level enforcement is future work. |
-| Application credentials cannot create tables | `test_app_login_cannot_create_tables` | PostgreSQL denies a schema write from the application login. |
-| Checks use a separate database | `test_test_database_is_separate` | Verifies the configured name and PostgreSQL's current database are `craft_test`. |
-| Invalid settings name the failing field | `test_settings_fail_fast_names_field` | Covers an invalid port, missing application password, unknown field and invalid log level. |
-| Settings do not expose secret values | `test_settings_never_print_secrets` | Checks representation and validation errors. |
-| Administrative passwords are not application settings | `test_admin_and_owner_passwords_are_not_app_settings` | The parser excludes the two database setup credentials. |
-| Responses carry a request identifier | `test_request_id_on_every_response` | Covers success, missing routes, wrong methods and an internal failure. |
-| Request context reaches synchronous handlers | `test_request_id_reaches_thread_pool` | Checks propagation into FastAPI's thread pool. |
-| HTTP logs are JSON and exclude content | `test_log_line_is_json_without_content` | Verifies allowed HTTP fields and omission of query, body and exception secrets. It does not check future operation log rows. |
-| Errors use the intended status and code | `test_each_error_has_its_status_and_code` | Checks seven error classes and the request identifier. |
-| Invalid input includes field errors | `test_invalid_input_lists_fields` | Checks the field error representation. |
-| Liveness does not need the database | `test_health_live` | Returns HTTP 200 and an ok body with the database unavailable. |
-| Readiness checks the database and migration head | `test_health_ready_checks_db_and_head` | Checks the ready response on the initialized test database. |
-| Readiness fails with an unavailable database | `test_health_ready_503_when_db_down` | Returns HTTP 503 and an unavailable body. |
-| Readiness has a bounded database wait | `test_health_ready_503_within_3_s_when_db_hangs` | The current assertion allows less than 3.5 seconds for the simulated hung connection. |
-| Readiness fails behind the migration head | `test_health_ready_503_when_migrations_are_behind` | Supplies a synthetic expected revision missing from the target database. |
-| The command-line version command works | `test_craft_command_prints_version` | Checks successful exit and the version prefix. |
+| Registry and logging | `uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture.py` | Checked boundaries, short transactions and metadata-only logs |
+| Contract | `CRAFT_MODEL_MAIN=fake uv run pytest -q app/tests/test_contract.py` | Built routes/tools, Python/TypeScript shapes, examples and stream schemas |
+| Sessions | `uv run pytest -q app/accounts/tests` | Cookie, Origin, expiry, revocation and account ownership |
+| Sources and retrieval | `uv run pytest -q app/infrastructure/provider/tests app/library/tests` | Immutable versions, conversion, current access, ranking and citations |
+| Cube | `uv run pytest -q app/cube/tests` | Units, dated values, comparisons, candidate evidence and approved publication |
+| Generated data | `uv run pytest -q app/seed/tests/test_demo.py` | Reproducible bytes, ground truth, versions and withdrawals |
+| Chat and recovery | `CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests` | Events, owned history, limits, cancellation and persisted approval resume |
+| Native MCP | `uv run pytest -q app/infrastructure/mcp/tests` | Transport parity, run-token checks, tool links and effect refusal |
+| Conversations/files | `uv run pytest -q app/conversations/tests` | Nonblank titles, list order, archive behavior and bounded exact files |
+| Skills and notes | `uv run pytest -q app/skills/tests app/notes/tests` | Owner scope, immutable revisions, save conflicts and mutation replay |
+| Tools and summary | `uv run pytest -q app/tools/tests app/summarize/tests` | Chart/expression bounds, source extracts and confidence behavior |
 
-Each later feature adds the following invariant checks with its implementation.
+Fakes replace outside services; deterministic checks use real application handlers and isolated PostgreSQL. Database setup failures and missing live prerequisites are recorded separately from assertion failures. A source review or synthetic test does not establish live model quality or browser acceptance.
 
-| Planned invariant | Planned verification |
-|---|---|
-| Identity comes only from the server cookie or run token | Reject body-supplied identity and compare HTTP, MCP and Python access behavior. |
-| Every handler declares access and accepts trusted caller context | Reject incomplete declarations at import. Check resource permissions within the trusted context. |
-| Routes come only from the operation registry | Compare all exposed routes with the registry and verify undeclared functions expose neither a route nor a tool. |
-| Every tool also has a route and a model-safe unique name | Validate registry relationships and tool-name syntax at startup. |
-| Read-only operations cannot write | Invoke a read-only operation that attempts a PostgreSQL write and require rejection. |
-| Cross-feature calls enter through handlers | Check imports and access/logging behavior for nested calls. |
-| The requester decides an effectful action; the agent cannot approve | Allow the requester to approve or reject and refuse agent decisions. Expanded approver policy is deferred. |
-| Effectful agent calls need approved, unexecuted requests matching run, tool and argument hash | Refuse missing or mismatched approval and verify execution occurs once. |
-| Append-only approval records never change | Verify update/delete are denied across access roles, including administrative access; operational traces remain separate. |
-| Services select short transactions; storage receives a Session and never commits independently | Check transaction ownership, rollback and storage boundaries. Hold no transaction across a model call, search or approval wait. |
-| Operations include observation; observe is private and grants no access | Check exposure and privilege boundaries and observe outside calls beneath the current operation. |
-| Every call is logged and linked without content | Verify one operation row on success, one on failure, user/session/request fields, run/tool-call links, counted database work, observed outside calls and absence of payload. |
-| All declared input and output shapes use msgspec | Enumerate registered shapes and reject incompatible types. The S0 probe checks only its own shape. |
-| Back end and front end follow the executable API contract | Compare routes both ways, Python shapes with TypeScript types, responses and examples with generated JSON Schema, and stream events with the browser event library. |
-| Schema changes use reviewed migrations | Upgrade an empty database, reject drift, preserve applied revisions and check append-only grants. The current filename guard alone does not enforce these rules. |
-| The browser cannot supply history, tools or instructions | Attempt injection through the stream input and verify server-loaded state is used. |
-| Search reveals only readable passages | Verify the permission filter runs before ranking and unreadable content never reaches results or model input. |
-
-Future acceptance also checks all six confidence inputs (coverage, citation quality, traceability, source agreement, retrieval quality and unsupported claims), the normalized 0.7 semantic/0.3 lexical baseline, and conversation archive deletion of its workspace. Sign-out deletes nothing. These checks arrive with their features.
-
-## 4. Test levels and databases
-
-S0 collects 30 cases across eight files. The command below lists them without executing fixtures.
+After installing the API and frontend npm dependencies, run the frontend checks from `web/`:
 
 ```bash
-uv run pytest --collect-only -q -o addopts=
+npm test
+npm run lint
+npm run build
 ```
 
-Unit checks cover settings, errors and entry points. API checks use FastAPI's `TestClient` for health and middleware behavior. Database checks use real PostgreSQL and synthetic probe data. The architecture check covers migration names, with an empty revision directory in S0. The dependency probe exercises installed libraries in a separate test application.
+`npm test` selects every `tests/*.test.mjs` file with the TypeScript test loader and retains production artifact test output outside the frontend source tree. `npm run lint` runs `eslint .`. `npm run build` runs `tsc -b && vite build`, so it checks TypeScript before writing the production bundle to `dist/`. There is no separate frontend type-check script.
 
-The autouse migration fixture points to `craft_test` and upgrades it to the current head before suite execution. There are no application migrations in S0. An owner connection creates and removes synthetic probe tables; an application connection exercises grants and transactions. `craft_dev` is for development, never the test corpus. Disposable CI databases may use trust authentication. Persistent development volumes use the passwords from `.env`.
+## 6. Continuous integration
 
-Future component checks run handlers and storage against real `craft_test`, rather than a mocked database. Future contract checks validate generated schema, examples, responses and stream events. Future agent checks use a scripted fake model and deterministic embeddings with the real in-process MCP path. Real-model evaluation is deferred and runs after changes to models or instructions. The fake model needs no model key when that feature exists.
+`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. It installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the fake-model contract/stream suites.
 
-The scripted model uses the real agent, tools, middleware and stream. A search request invokes document search and cites a result; a draft request invokes the approval-gated save operation. Other scripted replies carry a citation. Fake embeddings derive from a hash. These behaviors arrive with the agent slice.
+The full-stack gate builds Compose, checks readiness and request IDs, verifies the non-root app and its password-variable boundary, then removes the disposable project volume. A local repeat needs free application/database ports and its own Compose project; never reset an existing corpus to reproduce that check.
 
-Fakes are reserved for outside services. Deterministic checks do not call external model services. Local PostgreSQL connections and a local synthetic hung socket are part of the present suite. No coverage percentage is specified. Each feature owns component and API checks under its `tests/` folder; fixtures use the real `craft_test` database. Each implemented rule needs a failing check for its breach; future invariants remain pending until their feature and verification exist.
+`.github/workflows/frontend.yml` runs on pull requests and main pushes using Ubuntu `24.04` and Node.js `24`. It installs API dependencies with `npm ci --prefix api --ignore-scripts --no-audit --no-fund` and frontend dependencies with `npm ci --prefix web --no-audit --no-fund`, then runs `npm test`, `npm run lint` and `npm run build` from `web/`. It grants only `contents: read`, disables persisted checkout credentials and does not deploy the application. These checks complement the backend, contract and package workflow.
 
-## 5. CI workflow
+## 7. Documentation build
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. The job uses Ubuntu `24.04`, a 20-minute limit and a disposable `pgvector/pgvector:0.8.7-pg18` service on port 5432. Checkout and uv setup actions are pinned to commit hashes. uv setup selects `0.12.23`. Owner and application passwords are generated for each job; database-service authentication is trust-based.
+Public Markdown lives under `docs/`. The build prepares document metadata, renders with Pandoc, prints PDFs with Chrome/Chromium, then stages tracked public sources and generated downloads into a strict MkDocs site.
 
-| Step | Command or action | Fails when |
-|---|---|---|
-| Checkout | Pinned checkout action with credentials persistence disabled | Source retrieval fails. |
-| Environment | Pinned uv setup action, version `0.12.23` | The selected tool cannot be installed. |
-| Disposable passwords | Generate owner and application passwords into the job environment | Random generation or environment-file writing fails. |
-| Lock | `uv sync --locked` | The lock differs from the declaration or installation fails. |
-| Lint and format | `uv run ruff check .` and `uv run ruff format --check .` | Code violates the configured checks or formatting. |
-| Types | `uv run pyright` | A type error is reported. |
-| Database initialization | `bash docker/initdb.sh`, with `PGHOST=localhost` | Role, database, extension or default-grant setup fails. This runs against the job's fresh service, not an initialized development database. |
-| Migrations | `uv run alembic upgrade head` and `uv run alembic check` | Upgrade fails or schema drift is found. |
-| Tests | `uv run pytest` | A collected check fails or fixture setup fails. |
-| Contract guard | The shell block below | `api/` exists before its contract checks are wired. An absent directory reports a skip. |
-| Full stack | The Compose block below | Build, startup, readiness, request header, user identity or password-variable assertions fail. |
-
-The contract guard currently performs no schema validation. Its successful absent-directory path is runnable in S0.
-
-```bash
-if [ -d api ]; then
-  echo "api/ exists: wire the contract tests into this step"
-  exit 1
-fi
-echo "Skipped: api/ does not exist yet."
-```
-
-For local repetition after section 2's environment setup, run the lock, lint, format, type, migration and test commands there. Do not rerun `docker/initdb.sh` directly against an existing Compose database: Compose already invokes it on first boot. The workflow invokes it directly only because its CI database service has not loaded the project's initialization script.
-
-The full-stack step reserves host port 5433 while CI's database service occupies 5432. These assertions can also run locally with the configured development port. The following complete block uses a separate disposable Compose project. It supplies temporary database passwords to both services and removes only that project's volume after the check.
-
-```bash
-(
-  set -eu
-  export COMPOSE_PROJECT_NAME=craft-ci-check
-  export CRAFT_DATABASE_PORT=5433
-  export CRAFT_DB_ADMIN_PASSWORD="$(openssl rand -hex 16)"
-  export CRAFT_OWNER_DB_PASSWORD="$(openssl rand -hex 16)"
-  export CRAFT_APP_DB_PASSWORD="$(openssl rand -hex 16)"
-  trap 'docker compose down -v' EXIT
-  docker compose up --build --wait --wait-timeout 180
-  curl -fsi localhost:8000/health/ready | tee ready.txt
-  grep -qi '^x-request-id:' ready.txt
-  curl -fsS localhost:8000/health/ready | python3 -c 'import json,sys; assert json.load(sys.stdin) == {"status":"ok"}'
-  test "$(docker compose exec -T app id -u)" = 10001
-  test "$(docker compose exec -T app env | grep -c PASSWORD)" = 1
-)
-```
-
-Stop any development server or application container occupying port 8000 before this block. Port 5433 must also be free. `ready.txt` contains a synthetic health response and may be removed after inspection. The shell trap stops the disposable project on success or failure. The tracked CI job currently performs cleanup at the end of its success path; the local wrapper adds cleanup for failed checks.
-
-A completed passing CI run is required before merge. Repository enforcement depends on its configured rules and plan. Secret and dependency scans remain deferred. Deployment automation remains deferred.
-
-## 6. Documents build and publishing
-
-Public documents are Markdown under `docs/`. The build tools prepare metadata, render HTML with Pandoc, print PDFs with Chrome or Chromium and use Poppler to count pages and build the download index. The frozen print style uses Charter and Menlo on macOS. Linux builds check generation with the available fallback fonts; macOS builds provide the publication PDFs.
-
-Build prerequisites are Git, Python 3, Pandoc `3.11`, Poppler and Chrome or Chromium. `CHROME` can select the browser executable. The documents workflow verifies downloaded tools with recorded SHA-256 values. On macOS it selects Chrome Headless Shell `155.0.8059.79`. Poppler and the Linux browser come from the runner environment rather than exact project version pins.
+Prerequisites are Git, Python 3, Pandoc `3.11`, Poppler and Chrome/Chromium. The documents group pins MkDocs in section 1. `CHROME` selects the browser executable. The macOS workflow uses Chrome Headless Shell `155.0.8059.79`; downloaded tools have recorded SHA-256 checks. macOS uses Charter and Menlo for publication PDFs; Linux verifies generation with fallback fonts.
 
 ```bash
 docs/tools/build.sh
+uv run pytest -q docs/tools/tests/test_public_site.py
 ```
 
-Diagrams are Mermaid sources in `docs/spec/images/*.mmd`, each committed with the Scalable Vector Graphics (SVG) file rendered from it. `docs/tools/diagrams.sh` renders them with Mermaid CLI `11.12.0` and Mermaid `11.12.0` through `npm exec`, using `docs/tools/mermaid.json` (Charter, no HTML labels) and the Chrome that `CHROME` selects. It needs Node.js and npm. The documents build embeds each SVG in the PDF; it never runs Mermaid.
+The default output is `docs/build`: rendered topics, named CRAFT PDFs, theme/search assets and `markdown/` downloads of the exact public source files. Each topic has a Markdown download and GitHub edit link. Source dates come from Git; changed local sources use the current date. The site check validates local links, source equality and the public artifact allowlist.
+
+Diagrams use committed Mermaid source and SVG pairs. Their separate renderer pins Mermaid CLI and Mermaid `11.12.0` and needs Node/npm plus the selected Chrome:
 
 ```bash
 docs/tools/diagrams.sh
 ```
 
-The output directory is `docs/build`. The build produces `CRAFT-Dependencies-and-Integration.pdf` alongside `CRAFT-Specification.pdf`, `CRAFT-API-Contract.pdf` and `index.html`. Dates come from each source's last Git change. Uncommitted sources use the current date and draft revision. The specification index receives page numbers in a second pass.
+## 8. Public documentation
 
-The documents workflow builds on every pull request, pushes to `main` and manual dispatch. Pull requests use Linux and verify only. Other events use macOS. The output check permits only the HTML index and named CRAFT PDFs. Private notes, source material and import packages stay outside publication.
+`.github/workflows/docs.yml` builds on pull requests, main pushes and manual dispatch. Pull requests verify on Linux; other events use macOS. Only a non-pull-request event in a public repository uploads an artifact, and deployment additionally requires main.
 
-Artifact upload requires a non-pull-request event in a public repository. Deployment additionally requires `main`. The private repository therefore builds documents without publishing them. Public document publishing requires repository settings and explicit approval. README document links are maintained by hand. A behavior change updates the specification in the same pull request.
-
-## 7. Integration
-
-Compose contains two services. `db` uses `pgvector/pgvector:0.8.7-pg18`. Its named volume mounts at `/var/lib/postgresql`, the PostgreSQL 18 image path. The host port defaults to 5432. Its health check uses TCP and becomes healthy after initialization, rather than during the image's first-boot setup.
-
-`docker/initdb.sh` runs once on an empty volume as the database superuser. It creates `craft_owner` and `craft_app`, databases `craft_dev` and `craft_test`, and the vector extension in both. Default grants give the application login schema usage, table reads and sequence usage. Later migrations grant writes per table. Migrations use the owner login; the application uses its own login.
-
-`app` builds from `Dockerfile`. The build stage installs locked runtime dependencies. The run stage omits uv, development dependencies and build tools, and runs as numeric user `10001`. Compose gives it only its application password and database/log settings. The database service receives the administrative, owner and application passwords. App liveness is the container health check. The separate readiness route checks database access and migration head.
-
-The current settings are `CRAFT_APP_DB_PASSWORD`, `CRAFT_DATABASE_HOST`, `CRAFT_DATABASE_PORT`, `CRAFT_DATABASE_NAME` and `CRAFT_LOG_LEVEL`. `.env` supplies local values, with process environment values taking precedence. Validation rejects unknown application fields. The two setup password variables are explicitly excluded from application settings.
-
-The model adapter uses the Responses API with `store=false`, an output-token limit on each call and CRAFT-owned conversation records. Settings select main, groundedness and embedding models through `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK` and `CRAFT_MODEL_EMBEDDING`. `CRAFT_MODEL_ENDPOINT` selects the Foundry project endpoint, `CRAFT_MODEL_KEY` supplies a local model API key, and `CRAFT_MODEL_MAX_OUTPUT_TOKENS` sets the 16 to 4,000 token budget. Fake mode is the default and needs no endpoint or key. Configured calls have been intercepted locally; no live model endpoint has been called. Managed identity, deployment and subagent selection remain deferred.
-
-The back end and front end are held to the API Contract. The executable `api/` TypeScript definitions, lock and examples cover the built routes. Their integration must compare routes in both directions, compare Python and TypeScript shapes, validate examples and responses, and validate AG-UI events despite the Python/browser version gap. FastAPI-generated OpenAPI is disabled in S0. HTTP JSON calls, the AG-UI server stream and the MCP tool path require their own contract checks when implemented.
-
-Future simulated seed sets supply labelled demonstration data. Demonstrations use a seed set. A separate demonstration repository or branch is not required. The temporary development page at `/dev`, enabled by `CRAFT_DEV_PAGE=1`, supports sign-in and search (S2); chat (S3) and approval (S4) arrive with their features. It exercises the real browser cookie, Origin checks, stream and approval path while keeping contract adherence. It is removed in S5 when the front end is integrated. Seeded accounts are synthetic and require explicit private credential provisioning before browser sign-in.
-
-Browser verification covers the Secure host cookie on localhost, particularly Safari. Use local Hypertext Transfer Protocol Secure (HTTPS) if the selected browser requires it.
-
-Use a suitable Docker Desktop licence or a compatible container engine. Colima needs Compose and Buildx plugins and a shared checkout location. Podman and Rancher Desktop remain alternatives whose compatibility must be verified on the selected platform.
-
-Deployment remains a consideration. The same application image and tools are intended for hosted operation, with environment-specific database and model configuration. Managed identity, data handling, transport protection, private networking, migrations, secret handling and database recovery require review before deployment. A worker and queue become relevant when runs must survive disconnects or scale. Registry, staging and production automation, telemetry export and retention remain deferred. Hosted verification runs against the deployment environment.
-
-A deadline for each application transaction is added with the transaction-using feature. Readiness already has its own three-second deadline.
-
-## 8. Datacube measures and component checks
-
-Each build step adds its checks. A step that changes behavior updates section 8 of the specification in the same pull request.
-
-| Step | Command | Expected result |
-|---|---|---|
-| B01 accounts and call log | `uv run pytest app/infrastructure/tests/test_migrations.py app/infrastructure/tests/test_grants.py` | Account constraints, explicit application grants and an isolated migration round trip pass |
-| B03 library tables | `uv run pytest app/infrastructure/tests/test_library_schema.py` | Migration 0006 creates the library tables; `craft_app` reads them and writes only `mission_grants` |
-| B05 MCP adapter | `uv run pytest app/infrastructure/mcp/tests/test_stdio.py` | Every tool operation is listed; calls run the operation pipeline and log `origin=mcp` |
-| B06 provider and library | `uv run pytest app/infrastructure/provider/tests app/library/tests` | Scan, change feed, indexing, search, neighbours and access pass |
-| B09 cube tables | `uv run pytest app/cube/tests/test_schema_access.py` | Migrations 0009 to 0011, append-only values and mission access pass |
-| B10 office formats | `uv run pytest app/library/tests/test_convert.py` | Each format gives ordered chunks with locators; formulas and scripts never run |
-| B11 demo seeder | `uv run pytest app/seed/tests/test_demo.py` | The same seed number gives the same bytes and ground truth |
-| B12 cube reads | `uv run pytest app/cube/tests/test_parametric.py app/cube/tests/test_compare.py` | Units, conditions, state on a date, comparison and evidence pass |
-| B15 version differences and citations | `uv run pytest app/library/tests/test_versions.py` | Edits, moves, deletes, block differences and citation status pass |
-| B16 candidate values | `uv run pytest app/cube/tests/test_intake.py` | Header synonyms, unit conversion and every problem case pass |
-| B17 facets and similarity | `uv run pytest app/library/tests/test_facets.py app/cube/tests/test_similarity.py` | Facet validator, facet vectors, ranking and not-comparable cases pass |
-| B19 built API contract | `uv run pytest -q app/tests/test_contract.py` | Built routes and tools equal the contract; every JSON route has a schema-valid example |
-| B21 conversations and files | `uv run pytest -q app/conversations/tests app/tests/test_contract.py` | Owned history, per-answer paths, file bytes, state, limits and metadata-only download logs pass |
-| B20 native HTTP MCP | `uv run pytest -q app/infrastructure/mcp/tests/test_mcp.py` | Native clients, run-token refusal and revocation, transport parity and tool-call linkage pass |
-| B23 values through the gate | `uv run pytest app/cube/tests/test_approval_gate.py` | Values are written once, only after the requester approves |
-| B24 saved views | `uv run pytest app/cube/tests/test_views.py` | A labelled, cited JSON view saves through approval |
-| B25 evaluation | `uv run craft eval` | Fused recall at 8 is at least keyword-only recall on the demo ground truth |
-
-Fixed synthetic queries record the median and 95th-percentile time and encoded bytes. Adversarial checks require zero permission leaks and zero unapproved writes.
-
-## 9. Migration verification
-
-Account and call-log migrations have immutable schema snapshots. Application grants are checked by table, including denied writes to the append-only call log. Migration round trips use a rollback-only connection on `craft_test`, preserving existing synthetic fixtures. Autogeneration compares the full table registry with the migrated database.
-
-```bash
-uv run pytest -q app/infrastructure/tests/test_migrations.py app/infrastructure/tests/test_grants.py
-CRAFT_DATABASE_NAME=craft_test uv run alembic upgrade head
-CRAFT_DATABASE_NAME=craft_test uv run alembic check
-```
-
-Conversation history and approval records use append-only application grants. Partial unique indexes enforce one approval decision and one execution outcome. The read-only status view selects the latest event. Run-token digests and runtime state remain separate from message content.
-
-```bash
-uv run pytest -q app/infrastructure/tests/test_append_only.py app/infrastructure/tests/test_migrations.py
-```
-
-## 10. Operation pipeline
-
-The operation registry generates HTTP routes and validates names, access, input and output shapes. Sync handlers run in the thread pool; context follows nested calls and resets after errors. Services choose domain transactions. The log service appends only metadata in a separate short transaction. Observation steps remain private, and SQL counters read no statements or parameters. Health probe logging follows section 5's availability exceptions.
-
-```bash
-uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture.py
-uv run pytest -q app/infrastructure/operations/tests/test_operation.py -k test_operation_curl_without_session
-uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py -k "one_row or payload or observe"
-```
-
-## 11. Local MCP transport
-
-The MCP adapter derives tool names, descriptions and input schemas from the operation registry. It performs no model call. Invalid arguments enter the same checked pipeline as HTTP and Python. Standard output carries protocol messages only; logs use standard error. Missing or disabled accounts exit with status 2. Effectful calls without a run return `approval_required`.
-
-```bash
-uv run craft mcp --as demo
-uv run pytest -q app/infrastructure/mcp/tests/test_stdio.py
-```
-
-Start the command in the repository folder. An MCP application configuration uses:
-
-```json
-{"mcpServers":{"craft":{"command":"uv","args":["run","craft","mcp","--as","demo"],"cwd":"."}}}
-```
-
-MCP structured content requires an object. List results use an object with an `items` field; their text content remains the original JSON list.
-
-## 12. Provider and library
-
-The provider keeps original bytes and immutable versions outside the database. Indexing runs as the owner, converts text before short writes, and creates extract summaries and deterministic token-hash vectors in fake mode. Configured mode stores the selected embedding model on each vector. Mission grants apply before candidates, scores and counts. Reading and exploration remain within one readable version. Preview follows the file contract: sandboxed, no MIME sniffing, inline only for PDF, images and plain text. Other originals download.
-
-Compose mounts the provider folder read-only at `/provider`. Host indexing uses `CRAFT_PROVIDER_ROOT` (default `var/provider`); the application only reads it. Seed and index orchestration use an explicit owner pool, separate from request credentials.
-
-```bash
-uv run craft seed base
-uv run craft index
-uv run craft operations
-uv run craft call library.search --as demo '{"query":"radiator margin"}'
-uv run pytest -q app/infrastructure/provider/tests app/library/tests app/tests/test_cli.py
-```
-
-Library read transactions use strict iterative HNSW scans so permission filters and dead index entries do not exhaust an initial candidate scan.
-
-## 13. Account sessions and contract checks
-
-Local sign-in verifies Argon2id hashes outside transactions and rechecks account state before creating a session. Tokens contain 32 random bytes; only digests enter PostgreSQL. Cookie flags, idle and absolute expiry, throttled keep-alive, revocation and current roles follow section 9. Authentication and permissions precede Origin rejection, preserving anonymous read denial. Credential and account changes serialize on the account row.
-
-Account administration uses `craft users add`, `list`, `promote`, `reset` and `disable`; password entry uses a private prompt. An administrator can be named with `--as`. Session tests use synthetic accounts and a controlled clock.
-
-The API package locks the adopted schema generator. Contract tests compile the actual TypeScript forms, validate examples and compare route keys with the running registry. CI installs the lock before testing.
-
-```bash
-npm ci --prefix api --ignore-scripts --no-audit --no-fund
-uv run pytest -q app/accounts/tests/test_sessions.py app/accounts/tests/test_users_cli.py
-uv run pytest -q app/tests/test_contract.py
-```
-
-## 14. Current account and browser demonstration
-
-`GET /api/me` returns the enabled account and the roles resolved for the current request. Browser identity hints are rejected as unknown input; headers cannot replace the trusted identity. The optional `/dev` mount serves one static page and exposes no neighboring source files. Results use text nodes, including titles containing markup.
-
-Use synthetic accounts and documents. Reset the demo credential through the local password prompt, or provision an environment-supplied test credential through the same account handler. Start the host server after stopping the application container; leave the database running.
-
-```bash
-uv run craft seed base
-uv run craft index
-uv run craft users reset demo --as admin
-docker compose stop app
-CRAFT_DEV_PAGE=1 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-In a browser, open `http://localhost:8000/dev`, sign in, search for `radiator margin`, then sign out. In the second terminal, an unsigned request gives 401:
-
-```bash
-curl -s -o /tmp/craft-me.json -w '%{http_code}' http://localhost:8000/api/me
-uv run pytest -q app/accounts/tests/test_me.py app/dev/tests/test_dev_page.py
-uv run pytest -q app/accounts/tests/test_sessions.py app/tests/test_contract.py
-```
-
-A Chromium-based in-app browser on macOS exercised sign-in, search, literal markup-title rendering and sign-out. Real HTTP checks verified cookie flags, foreign-Origin rejection and revoked-session read denial. The exact embedded browser version, native browser cookie inspection, Safari and Windows/WSL have not been verified. Stop the host server with Ctrl-C before restarting `docker compose up --build --wait`.
-
-## 15. Cube schema and mission access
-
-Revisions 0009 through 0011 create mission reference rows, the parameter dictionary, append-only values and derived facet texts. Value constraints require both numbers for exact/range and neither for unknown/not applicable. Kind and facet are required. The application reads reference and facet tables and inserts values; stage maintenance uses the owner pool. Mission grants filter lists before name matching, ordering and limits.
-
-```bash
-uv run alembic upgrade head
-uv run alembic check
-uv run craft seed base
-uv run craft missions stage msn-sim-01 st3-design
-uv run craft call cube.list_missions --as demo '{}'
-uv run pytest -q app/cube/tests/test_schema_access.py
-```
-
-## 16. Office conversion
-
-The reader versions were released at least two weeks before 16 October 2026 and support Python 3.12. Tests generate made-up files inside their temporary folders; no binary fixture is tracked. Office package roots and the PDF signature must match the extension. Word paragraphs and tables retain source order. Slides keep speaker notes; tables in every format repeat their header for each window of at most 30 data rows. PDF table extraction uses aligned text columns. Scanned documents return `no text layer`.
-
-Spreadsheet reads use `data_only=True` and `keep_links=False`. Formulas, macros and remote links never execute. Multiline cells render on one line; literal pipe and backslash characters are escaped so a cell cannot become an extra column. Conversion failures expose fixed reasons.
-
-```bash
-uv run python -c "import docx, pypdf, pptx, openpyxl; print('ok')"
-uv run pytest -q app/library/tests/test_convert.py
-```
-
-## 17. Synthetic demo set
-
-`craft seed demo --seed 1` writes a reproducible source set, indexes it, loads mission totals with row citations, then withdraws three cited source items and refreshes the index. A fresh set has 125 items, twelve missions in four families, 48 planted questions, twelve changed-version pairs, two moves and three copies with matching cells but different bytes. Spreadsheet headers alternate English and French; source units mix kg/g and W/kW. A TBD cell remains unknown, and unitless cells are not loaded as values. Component rows and three mission elements support later intake.
-
-The ground-truth file is `<provider root>/.provider/ground-truth.json`. It records mission families, questions with stable handles, version and move records, withdrawals, copies, dated values and a source fingerprint. Fixed package properties, sorted ZIP entries and PDF creation dates keep bytes reproducible. An unchanged completed seed adds no source version or value. A changed baseline creates a new generation while earlier versions and values remain.
-
-```bash
-uv run craft seed demo --seed 1
-uv run pytest -q app/seed/tests/test_demo.py
-```
-
-The tests use an owned disposable Compose database, compare two complete folders, verify source hashes and dated state, and run the optional local content check over every generated version. The optional audit path is supplied through `CONTENT_CHECK_SCRIPT`; it is configured for local validation and unavailable in CI. Runtime PDF writing uses the pinned PDF library; no test-only writer is needed by the seed command.
-
-## 18. Model adapter
-
-The adapter returns a fake or configured main and groundedness model compatible with the framework. The configured path uses the held Foundry and project packages, a local model API key and the documented project `get_openai_client(api_key=...)` interface. Project identity requests are unavailable in this slice. Responses storage, selected models, medium or low effort and output budgets are sealed before each request.
-
-Configured indexing makes one model call per document version for a generated summary of at most 150 words. Fake mode keeps an extract summary. Model requests and embeddings enter typed Python-only handlers and an observed network step. Standalone indexing gets an operation parent; search preserves its trusted caller. Source conversion and embedding finish before short writes. Changing models needs `craft index --rebuild`; semantic search filters vector model names. Fake library indexing keeps its existing token-hash recipe. The separate fake model embedding reports its actual fake recipe.
-
-SDK payload log namespaces are suppressed, and configured mode rejects the SDK console payload flag. Errors expose codes and metadata. Intercepted HTTP checks verify endpoint paths, selected role models, `store=false`, output budgets and 1,536-dimensional embeddings. Rebuild checks use an owned disposable database. No live model compatibility or quality result is implied.
-
-```bash
-uv run pytest -q app/agent/tests/test_model_adapter.py
-uv run pytest -q app/agent/tests/test_model_adapter.py -k embedding
-uv run pytest -q app/infrastructure/operations/tests/test_operation_logging.py
-CRAFT_MODEL_MAIN=fake uv run craft index --rebuild
-```
-
-## 19. Standalone source summary
-
-The `/summarize` shell is independent of the temporary development mount. Selected documents are read through library handlers in windows of at most 20 chunks. Uploads enter the bounded raw-file pipeline after cookie, permission and Origin checks, then the checked library inspection handler. Model work enters the private typed model handler; its observation links to that child operation and the summary call. No transaction spans the model wait.
-
-The fake returns complete extract sentences and literal filing labels. Validation preserves negation and requires every cited block to support its sentence. Field labels and bounded values must occur in the named source context. The earlier four-input numeric confidence example is unused: the current six-input calibration gate leaves every score at zero and stops drafting while preserving cited findings. No live confidence quality result is implied.
-
-```bash
-CRAFT_MODEL_MAIN=fake uv run pytest -q app/summarize/tests/test_summarize.py app/summarize/tests/test_summarize_page.py
-uv run pytest -q app/tests/test_contract.py
-uv run pytest -q app/summarize/tests/test_summarize.py -k "auth_origin or logging_chain or no_transaction"
-curl -s -o /tmp/craft-summary-page.html -w '%{http_code}' http://localhost:8000/summarize
-```
-
-The page uses text nodes for titles, quotes and suggestions. Selection and uploads clear one another; failures clear stale output and re-enable controls. The password field clears before submission, and requests include the cookie. Upload originals download from the owned File object; exact quoted blocks remain readable on the page. Browser checks are recorded separately from server checks.
-
-## 20. Version differences and citation checks
-
-`uv run pytest -q app/library/tests/test_versions.py` checks stored and arbitrary-pair differences, duplicate blocks, 500-row truncation, live provider versions and withdrawals, row-only hashes, access and compiled request/response forms. The demo check rebuilds all provider versions and verifies every planted version change. `uv run craft operations | grep -cE '^library\.(compare_versions|check_citation) '` returns 2. `uv run alembic upgrade head && uv run alembic check` verifies the existing difference table without a schema change.
-
-## 21. Table candidate preparation
-
-`uv run pytest -q app/cube/tests/test_intake.py` checks English and French headers, inline and header units, Decimal conversion, ranges, whole-number bounds, all seven problems, unknown and not-applicable cells, row citations, the planted budget values and unchanged cube tables. Access includes explicit mission and silo refusals and omitted-silo element filtering. Compiled API forms and real cookie/Origin transport are checked separately within the same suite. `uv run craft operations` includes cube.prepare_values with effect none. Preparation uses checked library reads, then one short dictionary/scope read transaction; conversion follows after that transaction ends.
-
-## 22. Facets and similar missions
-
-Indexing derives five mission facets from current source summaries, validates terminal item citations and stores one labeled vector per nonempty facet. Fake mode groups first sentences by the documented silo mapping. Configured mode makes one mission call for all five texts. Conversion, model calls and embeddings finish before short writes. Unknown missions have no facet row until their mission record exists.
-
-Private facet reads filter indexed and live source grants, withdrawals and mission changes. Similarity selects readable missions first, uses current-model vectors and averages the available cosine scores. All five facets are selected by default; one to five distinct selections and one to ten results are accepted. A pair needs at least half the selected facets, rounded up. Explanations show readable sides only. These read tools make no conversational model call.
-
-```bash
-uv run pytest -q app/library/tests/test_facets.py app/cube/tests/test_similarity.py
-uv run craft operations | grep -cE '^cube\.(similar_missions|explain_similarity) '
-```
-
-The targeted suite checks deterministic facets, generated summaries, vector recipes, changed-mission rebuilding, all twelve planted family matches, missing evidence, source access, mean scores, HTTP authentication and compiled forms. The response examples are `api/examples/similar-missions.json` and `api/examples/similarity-explanation.json`. External model quality is measured separately.
-
-## 23. Read-only chat stream
-
-`POST /api/agent/runs` and `GET /api/tools` use signed-in operation checks. The actual
-framework agent, function middleware and AG-UI adapter run over server-loaded
-messages, instructions and session state. Registry read tools enter checked Python
-handlers through the native HTTP MCP transport in section 24. Approval and durable
-conversation routes are absent.
-
-The browser contract pins `@ag-ui/core` to `0.0.59`, the stable pre-1 schema release.
-Python keeps `ag-ui-protocol` `0.1.22`; no server dependency was upgraded. The newer
-browser major lacks the required schema export. Every actual emitted event and the
-recorded simulated `chat-answer.sse` are validated with `EventSchemas`. Completed
-answer activities also validate against generated TypeScript `AnswerMeta` schemas.
-CI runs these checks from this stream slice.
-
-`CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests/test_chat_stream.py app/tests/test_contract.py`
-checks event order, citations, injected browser fields, ownership, duplicate and
-concurrent run limits, tool/time/output budgets, cancellation, saved session state
-and absence of model payloads in logs. Actual ASGI disconnects cover response start
-before any body chunk. The source finalizer is awaited and shielded; no active run
-or domain transaction remains after the disconnected request returns.
-
-`uv run pytest -q app/agent/tests/test_model_adapter.py` retains configured-call
-interception and fake adapter coverage. These are local synthetic tests; live model
-quality is measured separately. The native MCP checks are described in section 24.
-
-## 24. Native HTTP MCP
-
-The registry server serves standard input/output and stateless JSON HTTP. The runtime
-uses the held `MCPStreamableHTTPTool` with run-token headers. Pins are unchanged.
-`CRAFT_MCP_URL` defaults to `http://127.0.0.1:8000/mcp` and accepts only loopback.
-Compose forwards this setting. Credentials stay in the backend, outside browser
-state and model arguments.
-
-`uv run pytest -q app/infrastructure/mcp/tests/test_mcp.py` uses real TCP connections
-and the native framework wrapper. It checks registry tools, the runtime allowlist,
-schemas, invalid arguments, credential/run/account refusals, digest-only storage,
-replacement and pause revocation, cookie HTTP/MCP/Python permission and logging
-parity, run/tool-call/operation/observation links, and effectful refusal without writes.
-The fixture owns an already-bound socket and guarantees shutdown.
-
-`uv run pytest -q app/agent/tests/test_chat_stream.py app/infrastructure/operations/tests/test_operation_logging.py`
-checks native fake-model tools, event order, citations, server history, budgets,
-ASGI disconnects, saved state and safe logs. One bounded producer owns native task
-scopes. Connection time counts toward the run deadline. Short final writes precede
-terminal events; credentials revoke on every terminal path. Private transport fields
-are excluded from top-level AG-UI events, which validate against the held browser
-schemas. Resume returns conflict. Configured live quality is measured separately.
-
-## 25. Conversations and workspace
-
-Conversation and file operations use the existing PostgreSQL tables. A completed answer adds a typed `craft.retrieval` activity to append-only message history with its run, model, instruction version and ordered path. No migration is added. Standard AG-UI message envelopes exclude native private fields.
-
-`uv run pytest -q app/conversations/tests/test_conversations.py app/conversations/tests/test_workspace.py app/tests/test_contract.py` checks persisted reload, compiled and protocol forms, path retention, ownership, titles, file states, exact downloads, labels, limits, traversal refusal and archive deletion. Shared synthetic fixtures own all their records and clean them after the checks.
-
-`CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests/test_chat_stream.py app/infrastructure/mcp/tests/test_mcp.py` checks the unchanged stream and native tool log chain. The temporary `/dev` page supports chat streaming, saved-history reload, rename, archive and workspace upload/download/delete. The page uses the same cookie and Origin paths.
+Pages contains documentation and downloads. It does not build or publish the authenticated application, local prototypes, original documents, runtime configuration or private records. New public topics must be tracked and included in navigation before a complete site build.

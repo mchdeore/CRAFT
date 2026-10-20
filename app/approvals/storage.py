@@ -234,6 +234,36 @@ def approved_call(session, user, run, conversation, operation, digest, tool_call
     return rows[0] if len(rows) == 1 else None
 
 
+def native_tool_call_id(session, row):
+    """Read an unambiguous native call mapping after the request's ownership checks."""
+    from sqlalchemy import select
+
+    sessions = metadata.tables["agent_sessions"]
+    stored = session.execute(
+        select(sessions.c.state).where(sessions.c.conversation_id == row["conversation_id"])
+    ).scalar_one_or_none()
+    if not isinstance(stored, dict):
+        return None
+    state = stored.get("state")
+    if not isinstance(state, dict):
+        return None
+    pending = state.get("craftApprovals")
+    if not isinstance(pending, list):
+        return None
+    matching = [
+        item
+        for item in pending
+        if isinstance(item, dict)
+        and item.get("id") == str(row["id"])
+        and isinstance(item.get("interrupt"), str)
+        and row["interrupt_id"] == str(row["run_id"]) + ":" + item["interrupt"]
+    ]
+    if len(matching) != 1:
+        return None
+    identifier = matching[0].get("callId")
+    return identifier if isinstance(identifier, str) and identifier else None
+
+
 def events(session, identifier):
     from sqlalchemy import select
 

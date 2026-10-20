@@ -14,10 +14,10 @@ helper offers read tools only. A paused root run accepts an owned approval ident
 and restores the persisted framework session, interrupt and requester decision.
 
 - One agent per conversation: Microsoft Agent Framework (open source).
-- Runs inside the CRAFT backend, on a local machine: tools, approvals and records are proven end to end before anything is deployed.
+- Runs inside the CRAFT backend with local PostgreSQL records.
 - Acts only through CRAFT tools, as the signed-in user. Every call is checked and logged.
 - Effectful actions use the requester approval gate in section 3.4.
-- Answers cite passages and carry a confidence score (example method: §4.2).
+- Answers cite passages and carry the confidence result in section 4.2.
 
 | Component | Dependency or state |
 |---|---|
@@ -28,6 +28,9 @@ and restores the persisted framework session, interrupt and requester decision.
 | History and runtime state | `messages` and `agent_sessions` |
 | Versioned instructions | `app/agent/instructions.md`; every run records its version |
 | Tool-call middleware | Copies the model tool-call identifier into MCP metadata, linking the run, tool call and operation in the call log |
+| Saved skills | Owned immutable definitions, loaded by exact ID and revision as instructions and registered tool references |
+
+`GET /api/tools/capabilities` reports native skill loading as installed. The Skills API saves definitions with an expected revision and mutation identifier, pages through owned definitions and reads exact revisions. A definition grants neither source permission nor approval. Selected and restored references retain their exact revision across an approval pause.
 
 ## 3.2 One request
 
@@ -84,7 +87,8 @@ MCP (Model Context Protocol): the standard way an agent lists and calls tools. I
 - Current local transport: stateless JSON HTTP at `/mcp`. The token is 32 random bytes; its SHA-256 digest and expiry are stored. Paused, finished, failed, cancelled, expired or disabled principals are refused. Completion and disconnect revoke the token before the runtime exits.
 - Trusted log context: parent request/call and sign-in session identifiers come from server-owned run state. MCP metadata supplies the model tool-call identifier only; it grants no identity or parent authority. The private outbound tool observation and checked operation share that identifier.
 - The loopback target defaults to `http://127.0.0.1:8000/mcp`, configurable through `CRAFT_MCP_URL`. Remote hosts, credentials, query strings and fragments are refused. DNS rebinding protection stays enabled.
-- Hosting: Now inside the CRAFT app on the laptop (`http://localhost:8000/mcp`), called by the in-process agent. Deferred: the same app on Azure, optionally called by a Foundry-hosted agent over a private network path + TLS (run token handed over by the backend). Tool code unchanged.
+- The application's `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. It retains native result metadata, parsing, error and cancellation behavior, input filtering, authentication and run/tool-call identity. Approved local effects consume their matching approval in the effect transaction.
+- HTTP MCP runs inside the CRAFT app. The optional Compose MCP service starts the same image and registry over standard input and output. MCP transports carry tool calls; they are separate from code execution and worker queues.
 
 ## 3.4 Human approval
 
@@ -116,14 +120,7 @@ before any request or write is created. Atomic multi-item changes belong in one
 supported batch operation. The frozen native tool-call identifier binds execution
 to its specific approval, including when two stored requests have identical arguments.
 
-```python
-@operation("drafts.save", post="/drafts", effects=DOCUMENT, tool=True)
-def save_draft(caller: Caller, request: NewDraft) -> Draft:
-    """Save a draft document. Use when the user asks to keep a written draft."""
-    return storage.insert_draft(caller, request)   # reached by the agent only after approval
-```
-
-- Kinds that pause: create or change a document, change data, run code or call an outside service, final or high-risk actions.
+- Declared `DATA`, `DOCUMENT`, `EXTERNAL` and `FINAL` effects require approval. Unsupported external and asynchronous execution is refused.
 - Reasoning and retrieval path: a tool that pauses takes one extra argument, `reason`, added by the MCP layer and never passed to the operation; it is the request's reasoning. The retrieval path is the run's tool calls before the request, in order (tool, arguments, time).
 - Rejection: returns to the agent as a refused tool call; the user can reply with a correction.
 - Durability: pauses survive restarts (nothing waits in memory), and every step is an append-only event (§7). The same agent state spans the approval round trip. Resume reads the decision from the database. After a reload, `GET /api/conversations/:id` returns saved messages and `GET /api/approvals?status=pending` lists paused requests.
@@ -142,14 +139,9 @@ def save_draft(caller: Caller, request: NewDraft) -> Draft:
 
 ## 3.6 Where it runs
 
-Now: runs stay on the laptop while tools, approvals and records are demonstrated end to end. Section 12 defines deployment extensions.
+Runs execute inside the CRAFT backend. The model adapter uses the configured provider or fake model, and records live in PostgreSQL.
 
-| | Now | Deferred |
-|---|---|---|
-| Agent run | Inside the `POST /api/agent/runs` request, in the CRAFT process | Worker + queue (runs must survive a disconnect or scale), or a Foundry hosted agent (hosting adapter generally available) |
-| Tools, model, records | `/mcp` on localhost, Foundry or `fake`, local PostgreSQL | The same `/mcp` on Azure, Foundry, Azure PostgreSQL |
-
-- Run boundary (Now): a run lives inside the chat request. Closing the stream cancels the run; saved state survives. `runtime.run()` is the one function a move changes: packaging + deployment + a network path; the tools don't change.
+- A run lives inside the chat request. Closing the stream cancels the run; saved state survives.
 
 ## 3.7 Chat stream (AG-UI)
 
@@ -160,7 +152,7 @@ AG-UI: an open protocol of typed events that streams an agent run to a web page.
   - server: the agent-framework stream adapter;
   - browser: the AG-UI event libraries.
 - The server holds the conversation:
-  - the browser sends AG-UI's `RunAgentInput`; the server reads only `threadId`, `runId`, the newest user message and `resume`;
+  - the browser sends AG-UI's `RunAgentInput`; the server reads `threadId`, `runId`, the newest user message, `resume` and an optional exact skill reference;
   - browser-defined tools are off;
   - `threadId` = conversation ID, owner checked every request.
 - Answer metadata: an `ACTIVITY_SNAPSHOT` event, `activityType` `craft.answer`, content `{messageId, citations, confidence}`, after each completed nonempty assistant text message. Empty tool-plan envelopes carry no answer metadata. Saved as an activity message, so the saved history (AG-UI messages) shows the same.
@@ -186,12 +178,6 @@ six-input calibration exists; cited extracts remain visible and drafting is stop
 
 Each completed text answer also saves a `craft.retrieval` activity. It names the answer message, run, selected model, instruction version and ordered tool/arguments/time path. The record is append-only conversation history. Later runs preserve it. Public and newly saved message envelopes exclude private transport fields.
 
-## 3.8 Deferred: more agents
+## 3.8 Combined answer
 
-| Stage | Shape | Trigger |
-|---|---|---|
-| Sub-agents | Main agent hands a bounded job (summarize, extract figures, check citations) to a helper: short context, lighter model | A job is long, parallel or noisy |
-| Specialists | Coordinator; Research; Analysis; Drafting; Review: own instructions, model, allowlist | CRAFT runs end to end |
-
-- Same infrastructure: tools, checks, approvals, logs; a new agent is configuration. Every hand-off is recorded (job, reason, limits, result); the main agent stays accountable; a helper never exceeds the user.
-- Patterns: sequential for reports; a coordination pattern for open questions. Approvals pause any pattern. Before starting: specialist list, evaluation questions proving the team beats one agent, delegation thresholds.
+`POST /api/agent/ask`, also the `ask_agent` MCP tool, runs the same runtime with read tools only. It uses an owned supplied conversation or creates one, and returns the final answer text, citations, confidence and run ID as one JSON result. It cannot be called recursively from an active agent run.

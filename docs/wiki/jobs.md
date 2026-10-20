@@ -1,5 +1,7 @@
 # Model jobs
 
+`packages/provider_fleet/` is a standalone model-job prototype. Application chat does not dispatch through this queue. Its bounded streaming queue provides backpressure inside one request, not durable job scheduling.
+
 ## 1. Model jobs
 
 The `craft_fleet` library stores job specifications, dispatch attempts, control state, events and artifacts in SQLite. Provider configuration names the endpoint, deployment and protocol. A credential reference names a private configuration file and field; the controller reads its value at dispatch.
