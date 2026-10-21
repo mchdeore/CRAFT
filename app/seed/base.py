@@ -1,6 +1,7 @@
 """Load made-up base users, scopes and provider documents as the owner."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -71,4 +72,40 @@ def seed(settings: Settings) -> dict[str, int]:
                 )
     finally:
         engine.dispose()
+    set_demo_passwords(settings)
     return {"users": 3, "documents": 5}
+
+
+def set_demo_passwords(settings: Settings) -> bool:
+    """Give every seeded account the local SEED_DEMO_PASSWORD, so demos can sign in.
+
+    The password comes only from the environment and is never stored in the repository.
+    Without it, accounts keep their current passwords or stay without one.
+    """
+    from argon2 import PasswordHasher
+
+    password = os.environ.get("SEED_DEMO_PASSWORD", "")
+    if not password:
+        return False
+    if len(password) < settings.password_min_length:
+        raise ValueError("SEED_DEMO_PASSWORD is shorter than the minimum password length")
+    hashed = PasswordHasher().hash(password)
+    sessions, engine = make_owner_sessions(settings)
+    users = metadata.tables["users"]
+    credentials = metadata.tables["local_credentials"]
+    try:
+        with unit_of_work(sessions) as session:
+            for row in json.loads((ROOT / "seeds/base/users.json").read_text()):
+                user = session.execute(
+                    select(users.c.id).where(users.c.username == row["username"])
+                ).scalar_one()
+                session.execute(
+                    insert(credentials)
+                    .values(user_id=user, password_hash=hashed)
+                    .on_conflict_do_update(
+                        index_elements=[credentials.c.user_id], set_={"password_hash": hashed}
+                    )
+                )
+    finally:
+        engine.dispose()
+    return True

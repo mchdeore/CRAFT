@@ -190,8 +190,8 @@ test('real owned picker renders escaped titles and separate New chat and archive
   assert.match(html, /Chat history/); assert.match(html, /New chat/); assert.match(html, /Archive and reset/); assert.doesNotMatch(html, /Session ID|<script>/); assert.match(html, /&lt;script&gt;GENERATED&lt;\/script&gt;/);
 });
 test('real picker disables navigation during pending change but keeps loading state accessible', () => {
-  const html = renderHistory({ pending: true, sessionID: '', historyPending: true });
-  assert.match(html, /role="status"/); assert.match(html, /Loading chat history/); assert.match(html, /<select[^>]*disabled/); assert.match(html, /<button[^>]*disabled[^>]*>New chat/);
+  const html = renderHistory({ pending: true, sessionID: '', historyPending: true, history: [summary(A)] });
+  assert.match(html, /role="status"/); assert.match(html, /Loading chat history/); assert.match(html, /data-chat="[^"]+"[^>]*disabled/); assert.match(html, /<button[^>]*disabled[^>]*>(?:<svg.*?<\/svg>)?New chat/);
 });
 test('real picker makes history error retry and bounded list limitation accessible', () => {
   const html = renderHistory({ historyError: 'Could not load chat history. Try again.', historyLimited: true });
@@ -218,15 +218,15 @@ test('New chat refuses a server response reusing the previous conversation ID', 
 
 test('real picker distinguishes repeated default titles with readable updated dates', () => {
   const html = renderHistory({ history: [summary(A, { title: 'New conversation', updatedAt: '2026-10-17T09:12:00Z' }), summary(B, { title: 'New conversation', updatedAt: '2026-10-18T09:12:00Z' })] });
-  const options = [...html.matchAll(/<option[^>]*value="([^"]+)"[^>]*>(.*?)<\/option>/g)].map(match => ({ value: match[1], label: match[2] }));
+  const options = [...html.matchAll(/data-chat="([^"]+)"[^>]*title="([^"]+)"/g)].map(match => ({ value: match[1], label: match[2] }));
   assert.equal(options.length, 2); assert.deepEqual(options.map(option => option.value), [A, B]);
   assert.equal(new Set(options.map(option => option.label)).size, 2, 'default chat titles need visible distinguishing context');
   assert.match(options[0].label, /17/); assert.match(options[1].label, /18/);
-  assert.equal(options.every(option => !/[0-9a-f]{8}-[0-9a-f-]{27}/i.test(option.label)), true, 'raw UUIDs remain internal option values');
+  assert.equal(options.every(option => !/[0-9a-f]{8}-[0-9a-f-]{27}/i.test(option.label)), true, 'raw UUIDs remain internal identifiers');
 });
 test('real picker distinguishes identical titles and timestamps with compact display ordinals', () => {
   const html = renderHistory({ history: [summary(A, { title: 'New conversation' }), summary(B, { title: 'New conversation' }), summary(C, { title: 'New conversation' })] });
-  const options = [...html.matchAll(/<option[^>]*value="([^"]+)"[^>]*>(.*?)<\/option>/g)].map(match => ({ value: match[1], label: match[2] }));
+  const options = [...html.matchAll(/data-chat="([^"]+)"[^>]*title="([^"]+)"/g)].map(match => ({ value: match[1], label: match[2] }));
   assert.equal(options.length, 3); assert.deepEqual(options.map(option => option.value), [A, B, C]);
   assert.equal(new Set(options.map(option => option.label)).size, 3, 'equal title/time chats must remain distinguishable');
   assert.equal(options.every(option => !/[0-9a-f]{8}-[0-9a-f-]{27}/i.test(option.label)), true);

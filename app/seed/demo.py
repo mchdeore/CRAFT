@@ -20,6 +20,7 @@ from app.infrastructure.provider import Provider, get_provider
 from app.library.handlers import convert_source as convert
 from app.library.handlers import index_provider
 from app.seed import files
+from app.seed.base import set_demo_passwords
 from app.seed.vocabulary import ELEMENTS, FAMILIES, PARAMETERS, narrative
 
 CLOCK = "2026-01-01T00:00:00+00:00"
@@ -530,6 +531,7 @@ def seed(settings: Settings, number: int = 1) -> dict[str, int]:
     truth, pending = prepare(root, number)
     index_provider(settings)
     load_cube(settings, truth)
+    set_demo_passwords(settings)
     finish(root, truth, pending)
     index_provider(settings)
     return {

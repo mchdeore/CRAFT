@@ -29,7 +29,7 @@ export class AuthSession {
   }
   start = async (): Promise<void> => {
     this.active = true;
-    try { sessionStorage.removeItem("craft-mock-sessions"); sessionStorage.removeItem("pi-agent-session-id"); } catch { /* Storage is optional. */ }
+    try { sessionStorage.removeItem("pi-agent-session-id"); } catch { /* Storage is optional. */ }
     const sequence = ++this.sequence;
     this.checkController?.abort();
     const controller = new AbortController();

@@ -17,7 +17,6 @@ export default defineConfig(({ command }) => {
   return {
     base: production ? "./" : "/",
     envDir: production ? false : undefined,
-    define: production ? { "import.meta.env.VITE_MOCK": JSON.stringify("false") } : {},
     publicDir: production ? "release-public" : "public",
     build: { outDir: "dist", sourcemap: false },
     plugins: [react(), tailwindcss()],

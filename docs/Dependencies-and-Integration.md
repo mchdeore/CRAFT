@@ -118,13 +118,13 @@ CRAFT_BACKEND_URL=http://127.0.0.1:8000 npm run dev
 
 The development proxy forwards `/api`, `/health` and `/mcp` to the selected loopback backend. `CRAFT_BACKEND_URL` must be a single HTTP or HTTPS loopback origin without credentials, a path, query or fragment. The backend must allow the frontend Origin. Live mode is the default and uses authenticated sessions.
 
-Development mocks require explicit opt-in, from `web/`:
+For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least 12 characters and is never stored in the repository:
 
 ```bash
-CRAFT_BACKEND_URL=http://127.0.0.1:8000 VITE_MOCK=true npm run dev:mock
+SEED_DEMO_PASSWORD='choose-a-local-password' uv run craft seed demo
 ```
 
-Mocks are development-only. The production build disables mocks, ignores environment files and includes only curated public assets. Serve its `web/dist/` output with the authenticated backend from the same origin and its `/api/` routes; the development proxy does not configure production serving. Return to the repository root for the following backend commands.
+The production build ignores environment files and includes only curated public assets. Serve its `web/dist/` output with the authenticated backend from the same origin and its `/api/` routes; the development proxy does not configure production serving. Return to the repository root for the following backend commands.
 
 Stop the host server before starting the application container on port 8000:
 

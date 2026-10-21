@@ -8,17 +8,15 @@ import "./typescript-loader.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 const configURL = new URL("../vite.config.ts", import.meta.url);
 let sequence = 0;
-async function config(command, target, mock = "true") {
-  const saved = { target: process.env.CRAFT_BACKEND_URL, mock: process.env.VITE_MOCK };
+async function config(command, target) {
+  const saved = { target: process.env.CRAFT_BACKEND_URL };
   if (target === undefined) delete process.env.CRAFT_BACKEND_URL;
   else process.env.CRAFT_BACKEND_URL = target;
-  process.env.VITE_MOCK = mock;
   try {
     const declared = (await import(configURL.href + "?case=" + sequence++)).default;
     return typeof declared === "function" ? await declared({ command, mode: command === "build" ? "production" : "development", isSsrBuild: false, isPreview: false }) : declared;
   } finally {
     if (saved.target === undefined) delete process.env.CRAFT_BACKEND_URL; else process.env.CRAFT_BACKEND_URL = saved.target;
-    if (saved.mock === undefined) delete process.env.VITE_MOCK; else process.env.VITE_MOCK = saved.mock;
   }
 }
 
@@ -27,9 +25,8 @@ test("public build works without a loopback backend configuration", async () => 
   assert.equal(value.base, "./");
   assert.equal(value.server?.proxy, undefined);
 });
-test("production build pins mock mode and excludes env files, maps and general public fixtures", async () => {
-  const value = await config("build", "http://127.0.0.1:53516", "true");
-  assert.equal(value.define?.["import.meta.env.VITE_MOCK"], JSON.stringify("false"));
+test("production build excludes env files, maps and general public fixtures", async () => {
+  const value = await config("build", "http://127.0.0.1:53516");
   assert.equal(value.envDir, false);
   assert.equal(value.build?.sourcemap, false);
   assert.equal(path.basename(value.build?.outDir ?? ""), "dist");
@@ -45,12 +42,11 @@ test("development still rejects a missing or foreign backend", async () => {
   await assert.rejects(config("serve", "https://foreign.generated.example"), /CRAFT_BACKEND_URL/);
 });
 test("development preserves the existing explicit loopback proxies and origin", async () => {
-  const value = await config("serve", "http://127.0.0.1:53516", "false");
+  const value = await config("serve", "http://127.0.0.1:53516");
   for (const route of ["/api", "/health", "/mcp"]) {
     assert.equal(value.server.proxy[route].target, "http://127.0.0.1:53516");
     assert.equal(value.server.proxy[route].changeOrigin, false);
   }
-  assert.notEqual(value.define?.["import.meta.env.VITE_MOCK"], JSON.stringify("false"));
 });
 
 // A test-directory class must never influence the published application CSS.
@@ -59,7 +55,7 @@ const output = process.env.CRAFT_RELEASE_TEST_OUTPUT;
 assert.ok(output && path.isAbsolute(output), "Root must provide a fresh retained artifact output directory");
 assert.equal(existsSync(output), false);
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"].includes(key)));
-Object.assign(env, { NO_COLOR: "1", CRAFT_BACKEND_URL: "http://127.0.0.1:53516", VITE_API_ORIGIN: "https://api.generated.example", VITE_MOCK: "true" });
+Object.assign(env, { NO_COLOR: "1", CRAFT_BACKEND_URL: "http://127.0.0.1:53516", VITE_API_ORIGIN: "https://api.generated.example" });
 execFileSync(process.execPath, [path.join(root, "node_modules/vite/bin/vite.js"), "build", "--outDir", output], { cwd: root, env, timeout: 180000, stdio: "pipe" });
 function files(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]);

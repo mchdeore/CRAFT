@@ -1,6 +1,5 @@
 @import "tailwindcss" source(none);
 @source "./";
-@source not "./mocks";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";

@@ -11,7 +11,7 @@ const origin = "https://api.generated.example";
 registerHooks({ load(url, context, next) {
   const loaded = next(url, context);
   if (url.endsWith("/src/lib/api-client.ts")) {
-    return { ...loaded, source: String(loaded.source).replace(/import\.meta\.env\b/g, JSON.stringify({ VITE_API_ORIGIN: origin, VITE_MOCK: "false" })) };
+    return { ...loaded, source: String(loaded.source).replace(/import\.meta\.env\b/g, JSON.stringify({ VITE_API_ORIGIN: origin })) };
   }
   return loaded;
 } });

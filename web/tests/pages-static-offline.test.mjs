@@ -12,7 +12,6 @@ const main = fileURLToPath(new URL("../src/main.tsx", import.meta.url));
 async function boot({ hostname, apiOrigin, production = true }) {
   const source = (await readFile(main, "utf8"))
     .replaceAll("import.meta.env.PROD", String(production))
-    .replaceAll("import.meta.env.VITE_MOCK", '"false"')
     .replaceAll("import.meta.env.VITE_API_ORIGIN", apiOrigin === undefined ? "undefined" : JSON.stringify(apiOrigin));
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   let mounted;
@@ -24,7 +23,6 @@ async function boot({ hostname, apiOrigin, production = true }) {
     if (name === "@/App") return { __esModule: true, default: App };
     if (name === "@/components/ui/tooltip") return { TooltipProvider: ({ children }) => children };
     if (name === "./index.css") return {};
-    if (name === "@/mocks/browser") throw new Error("mock must remain disabled");
     return require(name);
   };
   vm.runInNewContext(code, context);

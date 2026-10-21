@@ -52,10 +52,8 @@ export async function loadDocumentPreview(source: PreviewDocument, signal: Abort
   try {
     const protectedURL = /^\/api\/library\/documents\/[A-Za-z0-9_-]{1,128}\/preview(?:\?[^#]*)?$/.test(source.previewURL);
     const workspaceURL = /^\/api\/conversations\/[A-Za-z0-9_-]+\/files\/(?:[A-Za-z0-9_.-]|%[a-fA-F0-9]{2})+\/content$/.test(source.previewURL);
-    // The old source-service and public file fixtures remain mock-only.
-    const mockAsset = import.meta.env?.VITE_MOCK === "true" && (/^\/mock-files\/[^?#]+$/.test(source.previewURL) || /^\/api\/documents\/[A-Za-z0-9_-]+\/preview(?:\?[^#]*)?$/.test(source.previewURL));
-    if ((!protectedURL && !workspaceURL && !mockAsset) || signal.aborted) throw new Error();
-    const request: typeof fetch = fetcher ?? (mockAsset ? (url, init) => globalThis.fetch(url, init) : apiFetch);
+    if ((!protectedURL && !workspaceURL) || signal.aborted) throw new Error();
+    const request: typeof fetch = fetcher ?? apiFetch;
     const response = await request(source.previewURL, { credentials: "same-origin", cache: "no-store", signal });
     const format = documentFormat((response.headers.get("Content-Type") ?? "").split(";", 1)[0]!.trim().toLowerCase());
     const contentLength = response.headers.get("Content-Length");
