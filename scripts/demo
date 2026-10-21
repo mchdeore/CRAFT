@@ -73,6 +73,7 @@ go() {
   load_env
   cd "$REPO"
   colima status >/dev/null 2>&1 || { say "Starting Docker"; colima start; }
+  say "Rebuilding the demo at $UI (about 5 minutes). Open tabs cannot sign in until it is ready."
   say "Stopping and wiping the last demo"
   stop
   docker compose -p "$PROJECT" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -113,7 +114,9 @@ go() {
   wait_for "$UI"
 
   open -a "Google Chrome" "$UI" 2>/dev/null || open "$UI"
-  say "Demo running at $UI (sign in as demo, password $DEMO_PASSWORD). Logs: $STATE. Stop with: demo stop"
+  say "Demo ready: $UI"
+  echo "  Sign in as demo with password $DEMO_PASSWORD. Reload any older tab."
+  echo "  Logs: $STATE. Stop with: demo stop"
 }
 
 # One Jupyter container with one kernel, its MCP control server and the private workspace map.
