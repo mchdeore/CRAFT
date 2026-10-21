@@ -28,7 +28,8 @@ craft.save(out.round(2), "outputs/cost_review.csv")
 '''
 exec(script, {})
 saved = craft.save(script, "outputs/cost_review.py")
-print("Saved", saved, "and outputs/cost_review.csv")
+for name in (saved, "outputs/cost_review.csv"):
+    print("Saved", name, craft.path(name).stat().st_size, "bytes")
 ```
 
 ## Answer
@@ -37,6 +38,6 @@ print("Saved", saved, "and outputs/cost_review.csv")
 - One line each for the totals and the +5 point what-if.
 - The item carrying the most reserve, and any item flagged for a thin reserve (under 12%).
 - Three short bullets I could send the finance team.
-- Links to the saved script and table.
+- Links to [cost_review.py](/workspace/outputs/cost_review.py) and [cost_review.csv](/workspace/outputs/cost_review.csv). The printed Saved lines verify both files; do not list files to check them.
 
 Label every figure as calculated from the simulated cost model. If the file came from a search, cite the source document.
