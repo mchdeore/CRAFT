@@ -6,8 +6,8 @@ import hashlib
 import pytest
 from agent_framework import AgentSession, Message, tool
 
-from app.agent.fake import FakeChatClient
 from app.agent.runtime import StatefulAgent
+from app.tests.support.model import ScriptedChatClient
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -16,7 +16,7 @@ def test_master_reaches_each_model_request_and_new_run_with_native_tool_round_tr
     master = "Generated server master: use readable evidence."
     source = "Generated evidence from the declared search tool."
 
-    class RecordingClient(FakeChatClient):
+    class RecordingClient(ScriptedChatClient):
         def _inner_get_response(self, *, messages, options, stream=False, **kwargs):
             requests.append(
                 {
