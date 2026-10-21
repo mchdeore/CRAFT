@@ -1,6 +1,7 @@
 import type { SourceResult } from "@/lib/source-import";
+import type { Tags } from "craft-api/api/types";
 
-export interface ChatSource extends SourceResult { simulated: boolean }
+export interface ChatSource extends SourceResult { simulated: boolean; tags?: Tags; filename?: string; indexedAt?: string }
 export interface ChatSourceResults { sources: ChatSource[]; truncated: boolean }
 const MAX_CHARACTERS = 131072;
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -58,17 +59,19 @@ function searchHit(value: unknown): ChatSource | null {
     typeof value.handle.quoteSha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.handle.quoteSha256) || typeof value.handle.simulated !== "boolean" ||
     !label(value.title, 4096) || !label(value.headingPath, 512) || !text(value.text, 65536) || !tags(value.tags) ||
     typeof value.score !== "number" || !Number.isFinite(value.score) || !classification(value.classification)) return null;
-  return { item: value.handle.item, version: value.handle.version, title: value.title.slice(0, 400), snippet: value.text.slice(0, 640), classification: value.classification, simulated: value.handle.simulated };
+  const context = value.tags as Tags;
+  return { item: value.handle.item, version: value.handle.version, title: value.title.slice(0, 400), snippet: value.text.slice(0, 640), classification: value.classification, simulated: value.handle.simulated, ...(Object.values(context).some(Boolean) ? { tags: context } : {}) };
 }
 
-function documentSource(value: Record<string, unknown>): ChatSource | null {
-  if (!only(value, ["item", "version", "title", "path", "tags", "summary", "summaryKind", "outline", "versions", "simulated", "classification", "deleted"]) ||
+export function documentSource(value: unknown): ChatSource | null {
+  if (!record(value) || !only(value, ["item", "version", "title", "path", "tags", "summary", "summaryKind", "outline", "versions", "simulated", "classification", "deleted"]) ||
     !item(value.item) || !positive(value.version) || !label(value.title, 4096) || !label(value.path, 4096) || !tags(value.tags) || !text(value.summary, 65536) ||
     (value.summaryKind !== "extract" && value.summaryKind !== "generated") || typeof value.simulated !== "boolean" || !classification(value.classification) || value.deleted !== false ||
     !Array.isArray(value.outline) || value.outline.length > 1000 || !value.outline.every(entry => record(entry) && only(entry, ["block", "headingPath"]) && positive(entry.block) && label(entry.headingPath, 512)) ||
     !Array.isArray(value.versions) || value.versions.length > 200 || !value.versions.every(entry => record(entry) && only(entry, ["version", "sha256", "indexedAt"]) && positive(entry.version) && typeof entry.sha256 === "string" && /^[a-f0-9]{64}$/.test(entry.sha256) && label(entry.indexedAt, 128)) ||
     !value.versions.some(entry => entry.version === value.version)) return null;
-  return { item: value.item, version: value.version, title: value.title.slice(0, 400), snippet: value.summary.slice(0, 640), classification: value.classification, simulated: value.simulated };
+  const context = value.tags as Tags;
+  return { item: value.item, version: value.version, title: value.title.slice(0, 400), snippet: value.summary.slice(0, 640), classification: value.classification, simulated: value.simulated, ...(Object.values(context).some(Boolean) ? { tags: context } : {}), filename: value.path.split("/").at(-1), indexedAt: value.versions.find(entry => entry.version === value.version)?.indexedAt };
 }
 
 export function chatSourceResults(parts: readonly unknown[]): ChatSourceResults {
@@ -94,7 +97,7 @@ export function chatSourceResults(parts: readonly unknown[]): ChatSourceResults 
       for (const source of found) {
         const key = JSON.stringify([source.item, source.version]), previous = sources.get(key);
         if (conflicts.has(key)) continue;
-        if (previous && (previous.title !== source.title || previous.classification !== source.classification || previous.simulated !== source.simulated)) {
+        if (previous && (previous.title !== source.title || previous.classification !== source.classification || previous.simulated !== source.simulated || (["mission", "silo", "stage"] as const).some(tag => previous.tags?.[tag] !== source.tags?.[tag]))) {
           sources.delete(key); conflicts.add(key);
         } else if (!previous) sources.set(key, source);
       }

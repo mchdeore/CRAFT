@@ -3,6 +3,10 @@ import { usePersonalChatWorkspace } from "@/components/personal-chat-workspace";
 import { useSourceImport, sourceKey } from "@/hooks/use-source-import";
 import { personalJupyterURL } from "@/lib/personal-preview";
 import type { SourceResult } from "@/lib/source-import";
+import { documentSource, type ChatSource } from "@/lib/chat-source-results";
+import { documentLabel, documentScope } from "@/lib/document-labels";
+import { useMissionTitles } from "@/hooks/use-mission-titles";
+import { StatusMessage } from "@/components/ui/status-message";
 import { apiFetch, apiResourceURL } from "@/lib/api-client";
 import {
   useCitations,
@@ -21,7 +25,6 @@ import {
   DownloadIcon,
   FolderInputIcon,
   ExternalLinkIcon,
-  LoaderCircleIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -96,28 +99,34 @@ function PreviewContent({
 }) {
   const preview = useDocumentPreview(source);
   const workspace = usePersonalChatWorkspace();
+  const details = usePreviewSource(source);
+  const missions = useMissionTitles([details.source?.tags?.mission]);
+  const title = details.source ? documentLabel(details.source.title, details.source.tags, missions) : source.title;
+  const subtitle = details.source ? documentScope(details.source.version, details.source.classification, details.source.simulated, details.source.tags) : previewSubtitle(source);
 
   return (
     <>
       <DialogHeader className="relative border-b px-4 py-3 pr-12">
         {inDialog ? (
           <>
-            <DialogTitle className="truncate">{source.title}</DialogTitle>
-            <DialogDescription className="truncate">
-              {previewSubtitle(source)}
+            <DialogTitle className="break-words">{title}</DialogTitle>
+            <DialogDescription>
+              {subtitle}
             </DialogDescription>
           </>
         ) : (
           <>
-            <h2 className="truncate text-base font-medium leading-none">
-              {source.title}
+            <h2 className="break-words text-base font-semibold leading-snug">
+              {title}
             </h2>
-            <p className="text-muted-foreground truncate text-sm">
-              {previewSubtitle(source)}
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              {subtitle}
             </p>
           </>
         )}
-        {source.sourceID && source.version && workspace?.configuration.status === "configured" && <PreviewImport key={JSON.stringify([source.sourceID, source.version])} source={source} />}
+        {source.sourceID && <p className="text-muted-foreground text-xs">Source preview · Read only{source.locationLabel && ` · ${source.locationLabel}`}</p>}
+        {details.source?.filename && <p className="text-muted-foreground break-words text-xs">{details.source.filename}{details.source.indexedAt && Number.isFinite(Date.parse(details.source.indexedAt)) && ` · Last indexed ${new Date(details.source.indexedAt).toLocaleDateString()}`}</p>}
+        {source.sourceID && source.version && workspace?.configuration.status === "configured" && <PreviewImport key={JSON.stringify([source.sourceID, source.version])} verified={details.source} error={details.error} />}
         <Button
           type="button"
           variant="ghost"
@@ -181,13 +190,11 @@ function PreviewBody({
 }) {
   if (preview.type === "loading") {
     return (
-      <div className="text-muted-foreground flex h-full items-center justify-center gap-2 text-sm">
-        <LoaderCircleIcon className="size-4 animate-spin" /> Loading preview…
-      </div>
+      <StatusMessage kind="loading" title="Loading document preview…" />
     );
   }
   if (preview.type === "error") {
-    return <p className="text-destructive text-sm">{preview.message}</p>;
+    return <StatusMessage kind="error" title={preview.message} detail="Close this preview and open the document again." />;
   }
   return (
     <DocumentRenderer
@@ -202,27 +209,28 @@ function previewSubtitle(source: PreviewDocument): string {
   return source.subtitle ?? source.locationLabel ?? source.locator ?? "";
 }
 
-function PreviewImport({ source }: { source: PreviewDocument }) {
-  const workspace = usePersonalChatWorkspace();
-  const { state, start, reset } = useSourceImport(workspace?.configuration);
-  const [verified, setVerified] = useState<SourceResult>();
-  const [error, setError] = useState<string>();
+function usePreviewSource(source: PreviewDocument) {
+  const [details, setDetails] = useState<{ source?: ChatSource; error?: string }>({});
   useEffect(() => {
+    if (!source.sourceID || !source.version) return;
     const controller = new AbortController();
-    const timer = setTimeout(() => { setError("Source details could not be confirmed. Close the preview and try again."); controller.abort(); }, 10000);
+    const unavailable = () => setDetails({ error: "Source details could not be confirmed. Close the preview and try again." });
+    const timer = setTimeout(() => { unavailable(); controller.abort(); }, 10000);
     const version = Number(source.version);
-    if (source.classification && Number.isSafeInteger(version) && version > 0) {
-      Promise.resolve().then(() => { if (!controller.signal.aborted) setVerified({ item: source.sourceID!, version, title: source.title, classification: source.classification!, snippet: "" }); });
-    } else {
-      void apiFetch(`/api/library/documents/${encodeURIComponent(source.sourceID!)}?version=${version}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
-        if (!response.ok) throw new Error();
-        const body = await response.json();
-        if (body.item !== source.sourceID || body.version !== version || typeof body.title !== "string" || !["unclassified", "protected-a", "protected-b"].includes(body.classification)) throw new Error();
-        if (!controller.signal.aborted) setVerified({ item: body.item, version, title: body.title, classification: body.classification, snippet: "" });
-      }).catch(() => { if (!controller.signal.aborted) setError("Source details could not be confirmed. Close the preview and try again."); }).finally(() => clearTimeout(timer));
-    }
+    void apiFetch(`/api/library/documents/${encodeURIComponent(source.sourceID)}?version=${version}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error();
+      const verified = documentSource(await response.json());
+      if (!verified || verified.item !== source.sourceID || verified.version !== version) throw new Error();
+      if (!controller.signal.aborted) setDetails({ source: verified });
+    }).catch(() => { if (!controller.signal.aborted) unavailable(); }).finally(() => clearTimeout(timer));
     return () => { clearTimeout(timer); controller.abort(); };
   }, [source]);
+  return details;
+}
+
+function PreviewImport({ verified, error }: { verified?: SourceResult; error?: string }) {
+  const workspace = usePersonalChatWorkspace();
+  const { state, start, reset } = useSourceImport(workspace?.configuration);
   const configuration = workspace?.configuration;
   if (configuration?.status !== "configured") return null;
   const current = verified ? state.get(sourceKey(verified)) : undefined;
