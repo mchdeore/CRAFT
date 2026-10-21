@@ -13,7 +13,6 @@ from agent_framework import ChatResponse, Message
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from app.agent.fake import FakeChatClient
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import ApiError, Forbidden, InvalidInput, NotFound, TooLarge
 from app.infrastructure.logging import configure_logging
@@ -21,6 +20,7 @@ from app.infrastructure.shapes import RawFile
 from app.library.handlers import index_provider
 from app.summarize import handlers as summary
 from app.summarize.service import supported_filing, supported_sentence
+from app.tests.support.model import ScriptedChatClient
 
 
 def run_async(function):
@@ -171,10 +171,10 @@ async def test_summarize_unsupported_claim_is_refused(cube_source, monkeypatch):
             "filings": [],
         }
         return ChatResponse(
-            messages=[Message(role="assistant", contents=[json.dumps(data)])], model="fake"
+            messages=[Message(role="assistant", contents=[json.dumps(data)])], model="scripted"
         )
 
-    monkeypatch.setattr(FakeChatClient, "reply", invalid)
+    monkeypatch.setattr(ScriptedChatClient, "reply", invalid)
     with pytest.raises(ApiError):
         await summary.selected(cube_source["caller"], request)
     assert not supported_sentence("The margin is 5 K.", "It is false that The margin is 5 K.")
@@ -195,13 +195,13 @@ async def test_summarize_low_confidence_no_draft(cube_source):
 def test_summarize_auth_origin_ownership_matrix(cube_source, monkeypatch):
     request = selected_source(cube_source)
     called = []
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
 
     def spy(self, messages):
         called.append(True)
         return original(self, messages)
 
-    monkeypatch.setattr(FakeChatClient, "reply", spy)
+    monkeypatch.setattr(ScriptedChatClient, "reply", spy)
     with TestClient(cube_source["app"], base_url="https://testserver") as http:
         headers = {"Origin": "https://testserver"}
         assert http.post("/api/summarize", json=request, headers=headers).status_code == 401
@@ -282,7 +282,7 @@ async def test_summarize_no_transaction_during_model_call(cube_source, monkeypat
 
     active = set()
     checked = []
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
 
     def started(session, *args):
         active.add(id(session))
@@ -297,7 +297,7 @@ async def test_summarize_no_transaction_during_model_call(cube_source, monkeypat
         checked.append(not active)
         return original(self, messages)
 
-    monkeypatch.setattr(FakeChatClient, "reply", spy)
+    monkeypatch.setattr(ScriptedChatClient, "reply", spy)
     try:
         await summary.selected(cube_source["caller"], selected_source(cube_source))
     finally:
@@ -350,13 +350,13 @@ def test_summarize_foreign_admin_and_disabled(cube_source, monkeypatch):
     version = item["versions"][-1]
     request = {"item": item["item"], "version": version["version"], "sha256": version["sha256"]}
     called = []
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
 
     def spy(self, messages):
         called.append(True)
         return original(self, messages)
 
-    monkeypatch.setattr(FakeChatClient, "reply", spy)
+    monkeypatch.setattr(ScriptedChatClient, "reply", spy)
     try:
         with pytest.raises(NotFound):
             asyncio.run(summary.selected(cube_source["caller"], request))
@@ -418,34 +418,34 @@ def test_summarize_foreign_admin_and_disabled(cube_source, monkeypatch):
 @run_async
 async def test_model_rating_does_not_change_confidence(cube_source, monkeypatch):
     request = selected_source(cube_source)
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
 
     def rated(self, messages):
         result = original(self, messages)
         data = json.loads(result.text)
         data["selfRating"] = 1.0
         return ChatResponse(
-            messages=[Message(role="assistant", contents=[json.dumps(data)])], model="fake"
+            messages=[Message(role="assistant", contents=[json.dumps(data)])], model="scripted"
         )
 
-    monkeypatch.setattr(FakeChatClient, "reply", rated)
+    monkeypatch.setattr(ScriptedChatClient, "reply", rated)
     result = await summary.selected(cube_source["caller"], request)
     assert result.confidence.score == 0 and result.confidence.level == "low"
 
 
 @run_async
 async def test_conflict_is_detected_without_model_enumeration(cube_source, monkeypatch):
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
 
     def omitted(self, messages):
         result = original(self, messages)
         data = json.loads(result.text)
         data["filings"] = [candidate for candidate in data["filings"] if candidate["value"] != "C"]
         return ChatResponse(
-            messages=[Message(role="assistant", contents=[json.dumps(data)])], model="fake"
+            messages=[Message(role="assistant", contents=[json.dumps(data)])], model="scripted"
         )
 
-    monkeypatch.setattr(FakeChatClient, "reply", omitted)
+    monkeypatch.setattr(ScriptedChatClient, "reply", omitted)
     result = await summary.upload(cube_source["caller"], upload_file("docx", conflict=True))
     assert result.stage.value is None and result.stage.confidence == 0
     assert len(result.stage.evidence) >= 2
@@ -481,7 +481,7 @@ def test_http_upload_and_failure_logging_chain(cube_source, monkeypatch, capsys,
         def failure(self, messages):
             raise RuntimeError(marker)
 
-        monkeypatch.setattr(FakeChatClient, "reply", failure)
+        monkeypatch.setattr(ScriptedChatClient, "reply", failure)
         rejected = http.post("/api/summarize", json=request, headers=headers)
         assert rejected.status_code == 500 and rejected.json()["code"] == "internal_error"
         with cube_source["owner"].connect() as connection:

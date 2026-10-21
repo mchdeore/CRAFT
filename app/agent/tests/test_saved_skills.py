@@ -14,7 +14,6 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from app.agent import model
-from app.agent.fake import FakeChatClient
 from app.agent.tests.test_approval_resume import clear_run_approvals, events, runtime_client
 from app.approvals.tests.test_decisions import context as context
 from app.infrastructure.database.metadata import metadata
@@ -22,6 +21,7 @@ from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.registry import registry, tool_named
 from app.skills import service
 from app.skills.handlers import SaveSkill, Skill
+from app.tests.support.model import ScriptedChatClient
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +82,7 @@ def pins(context):
     return state["state"].get("craftSkills", [])
 
 
-class SkillClient(FakeChatClient):
+class SkillClient(ScriptedChatClient):
     def __init__(self, mode="selected"):
         super().__init__()
         self.mode, self.definitions, self.calls = mode, [], []

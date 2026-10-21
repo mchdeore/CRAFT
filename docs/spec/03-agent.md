@@ -139,7 +139,7 @@ to its specific approval, including when two stored requests have identical argu
 
 ## 3.6 Where it runs
 
-Runs execute inside the CRAFT backend. The model adapter uses the configured provider or fake model, and records live in PostgreSQL.
+Runs execute inside the CRAFT backend. The model adapter uses the configured provider, and records live in PostgreSQL.
 
 - A run lives inside the chat request. Closing the stream cancels the run; saved state survives.
 
@@ -169,8 +169,7 @@ bounded in-request producer keeps native MCP connection, calls and close on thei
 owning task. The consumer cancels and awaits it on disconnect. This lifetime has no
 work that continues after the request.
 
-Each model call uses the configured output budget, at most 4,000 tokens. The fake
-model bounds its lexical token count and byte envelope before emitting an update.
+Each model call uses the configured output limit, at most 4,000 tokens.
 A run allows 20 tool calls and 120 seconds. Handled stream errors record failed
 operation outcomes. Logs contain identifiers, timings and outcome codes only.
 Citations carry current library handles. Confidence stays zero and low until the

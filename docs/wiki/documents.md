@@ -10,7 +10,7 @@ Application document metadata, chunks, exploration, version comparisons and orig
 
 For document discovery in Chat, request titles and short sentence previews in a numbered table. A reply such as "none of those" can refine the search; a row number, title or "that one" can select a document when the reference is clear. Search hits are bounded matches, not a complete document inventory or whole-document summaries.
 
-A whole-document summary reads the selected version's outline and every indexed block in batches of at most 20. The stored fake-mode summary is a literal extract of at most 150 words. Missing blocks or run limits require a partial-coverage label; extracted text does not guarantee coverage of images or unsupported content in the original. The existing agent budget remains 20 tool calls and 120 seconds per run.
+A whole-document summary reads the selected version's outline and every indexed block in batches of at most 20. The stored index summary is a generated summary of at most 150 words. Missing blocks or run limits require a partial-coverage label; extracted text does not guarantee coverage of images or unsupported content in the original. The existing agent budget remains 20 tool calls and 120 seconds per run.
 
 Document versions expose **Last indexed** through `versions[].indexedAt`. This records index creation for that version, not the provider's last update or synchronization. The demo uses local simulated originals and retains their simulation labels; it does not imply a live external tenant. Supported conversion stores every extracted block and an embedding for each block, but actual original, block and matching-model vector coverage must be verified for the selected snapshot.
 

@@ -33,7 +33,7 @@ def test_rebuild_keeps_handles(library) -> None:
     assert sorted(handles(library)) == before
 
 
-def test_extract_summary(library) -> None:
+def test_generated_summary(library) -> None:
     items = list(SimulatedProvider(library["root"]).items())
     with library["sessions"].begin() as session:
         versions = (
@@ -42,7 +42,7 @@ def test_extract_summary(library) -> None:
             .all()
         )
     assert len(versions) == 5 and all(
-        v["summary_kind"] == "extract" and len(v["summary"].split()) <= 150 for v in versions
+        v["summary_kind"] == "generated" and len(v["summary"].split()) <= 150 for v in versions
     )
 
 
@@ -64,7 +64,8 @@ def test_vectors_per_record(library) -> None:
         chunks = session.execute(owned_chunks).all()
     assert len(vectors) == len(chunks) + 5
     assert all(
-        v["model"] == "fake-embed@1" and v["recipe"] in ["chunk-v1", "doc-v1"] for v in vectors
+        v["model"] == "text-embedding-3-large" and v["recipe"] in ["chunk-v1", "doc-v1"]
+        for v in vectors
     )
 
 

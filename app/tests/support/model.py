@@ -1,4 +1,8 @@
-"""Deterministic scripted model responses and separate hash-derived embeddings."""
+"""A scripted model and word-hash embeddings that tests install in place of the configured model.
+
+`install` swaps the model client and embeddings for settings that name `ENDPOINT`;
+any other endpoint keeps the configured client, so adapter tests still reach the
+intercepted transport."""
 
 import hashlib
 import html
@@ -10,6 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import msgspec
+import pytest
 from agent_framework import (
     BaseChatClient,
     ChatMiddlewareLayer,
@@ -21,14 +26,51 @@ from agent_framework import (
     ResponseStream,
 )
 
+from app.agent import model
+from app.infrastructure.operations import observe
+from app.library import facets, summaries
+
+ENDPOINT = "https://scripted-model.test"
+KEY = "scripted"
+MODEL = "scripted"
+# Subprocess tests run `COMMAND + [craft arguments]` with `ENVIRONMENT` added.
+COMMAND = ["uv", "run", "python", "-m", "app.tests.support.scripted_cli"]
+ENVIRONMENT = {"CRAFT_MODEL_ENDPOINT": ENDPOINT, "CRAFT_MODEL_KEY": KEY}
+
 
 def embedding(text: str) -> list[float]:
-    values = []
-    for index in range(1536):
-        digest = hashlib.sha256(text.encode() + index.to_bytes(2, "big")).digest()
-        values.append((int.from_bytes(digest[:4]) / (2**32 - 1)) * 2 - 1)
-    norm = math.sqrt(sum(value * value for value in values))
-    return [value / norm for value in values]
+    """Signed word hashes: texts sharing words point the same way."""
+    vector = [0.0] * 1536
+    for word in re.findall(r"\w+", text.lower()):
+        digest = hashlib.sha256(word.encode()).digest()
+        vector[int.from_bytes(digest[:4]) % 1536] += 1.0 if digest[4] & 1 else -1.0
+    norm = math.sqrt(sum(v * v for v in vector))
+    return [v / norm for v in vector] if norm else vector
+
+
+def summary_answer(text: str) -> str:
+    return " ".join(text.split()[:150])
+
+
+FACET_SILOS = {
+    "requirements": "purpose",
+    "engineering": "design",
+    "quality": "design",
+    "launch": "operations",
+    "reviews": "program",
+    "budget": "cost_and_risk",
+}
+
+
+def facet_answer(text: str) -> str:
+    """Each facet takes the first summary sentence of every document whose silo feeds it."""
+    result = {facet: [] for facet in facets.FACETS}
+    for document in json.loads(text):
+        facet = FACET_SILOS.get(document["silo"])
+        sentence = re.split(r"(?<=[.!?])\s+", document["summary"].strip())[0]
+        if facet and sentence:
+            result[facet].append(sentence + " [" + document["item"] + "]")
+    return json.dumps({facet: " ".join(parts) for facet, parts in result.items()})
 
 
 def evidence(value):
@@ -203,11 +245,11 @@ def catalog_summary(catalog, kind: str):
     return "\n".join(lines)
 
 
-class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
+class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
     def __init__(self, role: str = "main"):
         super().__init__()
         self.role = role
-        self.model = "fake"
+        self.model = MODEL
 
     async def close(self):
         pass
@@ -229,7 +271,12 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
         ).hexdigest()
         task = summary_task(question)
         catalog_kind = catalog_task(question)
-        if task is not None:
+        system = next((message.text for message in messages if message.role == "system"), "")
+        if system == summaries.INSTRUCTIONS:
+            contents = [Content.from_text(summary_answer(question))]
+        elif system == facets.INSTRUCTIONS:
+            contents = [Content.from_text(facet_answer(question))]
+        elif task is not None:
             contents = [Content.from_text(json.dumps(task))]
         elif self.role == "check":
             contents = [
@@ -280,8 +327,8 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
             ]
         return ChatResponse(
             messages=[Message(role="assistant", contents=contents, message_id=signature[:32])],
-            response_id="fake_" + signature[:24],
-            model="fake",
+            response_id="scripted_" + signature[:24],
+            model=MODEL,
         )
 
     def _inner_get_response(self, *, messages, options, stream=False, **kwargs) -> Any:
@@ -307,19 +354,49 @@ class FakeChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClien
                         role="assistant",
                         contents=message.contents,
                         message_id=message.message_id,
-                        model="fake",
+                        model=MODEL,
                     )
 
             source = ResponseStream(updates(), finalizer=lambda _: self.reply(messages))
             from app.infrastructure.operations.context import current_call
 
             if current_call.get() is not None:
-                from app.agent.model import observed_stream
-
-                return observed_stream(source)
+                return model.observed_stream(source)
             return source
 
-        async def complete():
+        async def reply():
             return self.reply(messages)
 
-        return complete()
+        from app.infrastructure.operations.context import current_call
+
+        return model.complete(reply()) if current_call.get() is not None else reply()
+
+
+def scripted(settings) -> bool:
+    return settings.model_endpoint == ENDPOINT
+
+
+def install(patch: pytest.MonkeyPatch) -> None:
+    configured_client = model.client
+    configured_embeddings = model.embeddings
+
+    def client(settings, role: model.Role = "main"):
+        if not scripted(settings):
+            return configured_client(settings, role)
+        if role not in {"main", "check"}:
+            from app.infrastructure.errors import InvalidInput
+
+            raise InvalidInput()
+        return ScriptedChatClient(role)
+
+    @observe("agent.embedding")
+    async def scripted_embeddings(settings, texts):
+        return [embedding(text) for text in texts]
+
+    async def embeddings(settings, texts):
+        if not scripted(settings):
+            return await configured_embeddings(settings, texts)
+        return await scripted_embeddings(settings, texts)
+
+    patch.setattr(model, "client", client)
+    patch.setattr(model, "embeddings", embeddings)

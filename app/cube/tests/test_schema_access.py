@@ -237,7 +237,7 @@ def test_facet_check(owner_engine, cube) -> None:
         "facet": "design",
         "text": "Synthetic facet",
         "sources": ["itm_000000000001"],
-        "model": "fake",
+        "model": "scripted",
     }
     with owner_engine.connect() as connection, connection.begin() as transaction:
         connection.execute(m.facet_texts.insert().values(**values))

@@ -11,14 +11,14 @@ from sqlalchemy import select
 
 from app import create_app
 from app.agent import model
-from app.agent.fake import FakeChatClient
 from app.approvals.tests.test_decisions import context as context
 from app.approvals.tests.test_decisions import decision_call, latest_auth_session, login
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.mcp.tests.http_fixture import live_server
+from app.tests.support.model import ScriptedChatClient
 
 
-class WriteClient(FakeChatClient):
+class WriteClient(ScriptedChatClient):
     def reply(self, messages):
         results = [
             content
@@ -215,7 +215,7 @@ def test_multiple_native_write_proposals_stop_before_approval(context, monkeypat
                     )
                 ],
                 response_id=uuid4().hex,
-                model="fake",
+                model="scripted",
             )
 
     monkeypatch.setattr(model, "client", lambda _: DoubleWriteClient())

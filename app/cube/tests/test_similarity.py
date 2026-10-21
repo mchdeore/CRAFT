@@ -105,7 +105,7 @@ def set_facets(source, mission, facets, item, first=1.0, second=0.0):
                     facet=facet,
                     text="A simulated cited fact. [" + item + "]",
                     sources=[item],
-                    model="fake",
+                    model="scripted",
                 )
                 .returning(m.facet_texts.c.id)
             ).scalar_one()
@@ -114,7 +114,7 @@ def set_facets(source, mission, facets, item, first=1.0, second=0.0):
                     owner_kind="facet_text",
                     owner_id=identifier,
                     recipe="facet-v1",
-                    model="fake-embed@1",
+                    model="text-embedding-3-large",
                     embedding=[first, second] + [0.0] * 1534,
                 )
             )
