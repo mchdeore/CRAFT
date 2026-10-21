@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { ToolInfo } from "craft-api/api/types";
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
-import { SkillToolCard } from "@/components/skills-workspace";
+import { ToolReferenceRow } from "@/components/tools-reference";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatusMessage } from "@/components/ui/status-message";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchToolReference, filterTools, ToolReferenceError } from "@/lib/tools-reference";
 import { listPersonalFiles, listPersonalSkills, loadPersonalSkill, MAX_SKILL_BYTES, PersonalWorkspaceError, personalAbsolutePath, savePersonalSkill, type PersonalEntry } from "@/lib/personal-workspace";
 import { insertPersonalDocumentText, personalPathText } from "@/lib/personal-references";
 
-type Status = "idle" | "loading" | "ready" | "error";
+type Status = "idle" | "loading" | "ready" | "error" | "signin";
 interface SkillDocument { filename: string; content: string; path?: string }
 const template = "# Goal\nDescribe the result this skill should produce.\n\n## When to use\nExplain when these instructions apply.\n\n## Steps\n1. Read the relevant inputs.\n2. Perform the analysis.\n3. Save and check the result.\n\n## Tools and files\nList tool references and exact personal paths.\n";
 const placeholder = "# Goal\nWhat should this skill achieve?\n\n## When to use\nWhen should the agent use it?\n\n## Steps\n1. ...\n\n## Tools and files\nUse the sidebar to insert references.";
@@ -49,14 +51,14 @@ export function PersonalSkillsEditor({ document, tools, toolStatus, busy, canSav
       </fieldset>
       <aside aria-label="Skill context and tools" className="space-y-4 rounded-lg border bg-muted/20 p-3">
         <div className="space-y-2"><h2 className="font-medium">Files</h2><p className="text-xs text-muted-foreground">Use personal copies as inputs. Import source originals before editing them.</p><button type="button" className={buttonClass} disabled={busy || fileStatus === "loading" || !onBrowseFiles} onMouseDown={event => event.preventDefault()} onClick={onBrowseFiles}>{fileStatus === "loading" ? "Loading files…" : "Browse personal files"}</button>
-          {fileStatus === "error" && <p className="text-sm">Could not load personal files. Open JupyterLab to check your sign-in.</p>}
+          {fileStatus === "error" && <StatusMessage kind="error" title="Could not load files" detail="Sign in to your workspace, then try again." />}
           {fileStatus === "ready" && <><input aria-label="Search personal file references" type="search" className="w-full rounded border bg-background p-2 text-sm" value={fileQuery} onInput={event => setFileQuery(event.currentTarget.value)} placeholder="Filter paths" /><div className="max-h-48 space-y-1 overflow-auto">{filteredFiles.map(file => <button key={file.path} type="button" className="block w-full break-words rounded p-1 text-left font-mono text-xs hover:bg-muted" disabled={busy} onMouseDown={event => event.preventDefault()} onClick={() => insert(personalPathText(file.path))}>{personalAbsolutePath(file.path)}</button>)}{filteredFiles.length === 0 && <p className="text-xs">No matching personal files.</p>}</div></>}
         </div>
         <div className="space-y-2"><h2 className="font-medium">Tools</h2><input aria-label="Search tools" type="search" className="w-full rounded border bg-background p-2 text-sm" placeholder="Name or purpose" value={query} onInput={event => setQuery(event.currentTarget.value)} />
-          {toolStatus === "loading" && <p role="status" className="text-sm">Loading tool references…</p>}
-          {toolStatus === "error" && <><p className="text-sm">Tool references are unavailable. You can still save your document.</p><button type="button" className={buttonClass} onClick={onRetryTools}>Retry tool references</button></>}
+          {toolStatus === "loading" && <StatusMessage kind="loading" title="Loading tools…" />}
+          {toolStatus === "error" && <><StatusMessage kind="error" title="Tools are unavailable" detail="Try again to refresh the list. You can still save your skill." /><button type="button" className={buttonClass} onClick={onRetryTools}>Retry tool references</button></>}
           {toolStatus === "ready" && <p className="text-xs text-muted-foreground">{filterTools(tools, query, "all").length} of {tools.length} registered tools</p>}
-          <div className="max-h-[32rem] space-y-3 overflow-auto">{filterTools(tools, query, "all").map(tool => <SkillToolCard key={tool.name} tool={tool} disabled={busy || toolStatus !== "ready" || !tool.availableIn.includes("chat")} onInsert={() => { if (tools.some(registered => registered.name === tool.name && registered.availableIn.includes("chat"))) insert(`/${tool.name}`); }} />)}</div>
+          <div className="max-h-[32rem] space-y-3 overflow-auto">{filterTools(tools, query, "all").map(tool => <ToolReferenceRow key={tool.name} tool={tool} disabled={busy || toolStatus !== "ready" || !tool.availableIn.includes("chat")} onInsert={() => { if (tools.some(registered => registered.name === tool.name && registered.availableIn.includes("chat"))) insert(`/${tool.name}`); }} />)}</div>
         </div>
       </aside>
     </div>
@@ -64,7 +66,7 @@ export function PersonalSkillsEditor({ document, tools, toolStatus, busy, canSav
 }
 
 export function PersonalSkillsWorkspace({ configuration, onAuthInvalid }: { configuration: WorkspaceConfiguration; onAuthInvalid: () => void }) {
-  if (configuration.status !== "configured") return <div className="p-6 text-sm">Connect your personal JupyterLab workspace to load and save Markdown skills.</div>;
+  if (configuration.status !== "configured") return <div className="p-6"><PageHeader title="Skills" description="Reusable instructions the assistant can follow. Type / in chat to use one." /><StatusMessage kind="signin" detail="Sign in to your workspace to load and save skills." /></div>;
   return <ConnectedSkills key={configuration.url} configuration={configuration} onAuthInvalid={onAuthInvalid} />;
 }
 function ConnectedSkills({ configuration, onAuthInvalid }: { configuration: WorkspaceConfiguration & { status: "configured" }; onAuthInvalid: () => void }) {
@@ -81,7 +83,7 @@ function ConnectedSkills({ configuration, onAuthInvalid }: { configuration: Work
   const dirty = document.content !== savedContent;
   useEffect(() => {
     const controller = new AbortController();
-    void listPersonalSkills(configuration, controller.signal).then(rows => { if (!controller.signal.aborted) { setSkills(rows); setListStatus("ready"); } }).catch(() => { if (!controller.signal.aborted) setListStatus("error"); });
+    void listPersonalSkills(configuration, controller.signal).then(rows => { if (!controller.signal.aborted) { setSkills(rows); setListStatus("ready"); } }).catch(reason => { if (!controller.signal.aborted) setListStatus(reason instanceof PersonalWorkspaceError && reason.code === "workspace_auth" ? "signin" : "error"); });
     return () => controller.abort();
   }, [configuration, refresh]);
   useEffect(() => {
@@ -128,13 +130,13 @@ function ConnectedSkills({ configuration, onAuthInvalid }: { configuration: Work
     catch { if (!controller.signal.aborted) setFileStatus("error"); }
   };
   return <section aria-label="Personal skills" className="min-h-0 flex-1 overflow-auto p-4"><div className="mx-auto max-w-6xl space-y-4">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-xl font-semibold">Skills</h1><p className="text-sm text-muted-foreground">Markdown documents in your personal workspace.</p></div><div className="flex gap-2"><button type="button" className={buttonClass} disabled={busy} onClick={() => choose()}>New</button><a href={configuration.url} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open JupyterLab ↗</a></div></header>
+    <PageHeader title="Skills" description="Reusable instructions the assistant can follow. Type / in chat to use one." actions={<><button type="button" className={buttonClass} disabled={busy} onClick={() => choose()}>New</button><a href={configuration.url} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open in JupyterLab</a></>} />
     <details className="rounded-lg border p-3" open><summary className="cursor-pointer text-sm">Load a workspace skill</summary><div className="mt-3 flex flex-wrap items-center gap-2">
-      {listStatus === "loading" && <p role="status" className="text-sm">Loading personal skills…</p>}{listStatus === "error" && <p className="text-sm">Could not read /workspace/skills. Check your JupyterLab sign-in.</p>}{listStatus === "ready" && skills.length === 0 && <p className="text-sm text-muted-foreground">No Markdown skills yet. Save your first document below.</p>}
+      {listStatus === "loading" && <StatusMessage kind="loading" title="Loading skills…" />}{(listStatus === "error" || listStatus === "signin") && <StatusMessage kind={listStatus} title={listStatus === "error" ? "Could not load skills" : undefined} detail="Sign in to your workspace, then try again." workspaceURL={configuration.url} />}{listStatus === "ready" && skills.length === 0 && <StatusMessage kind="empty" title="No skills yet. Save your first skill below." />}
       {skills.map(skill => <button key={skill.path} type="button" className={buttonClass} disabled={busy} onClick={() => choose(skill.path)}>Load {skill.name}</button>)}<button type="button" className={buttonClass} disabled={busy || listStatus === "loading"} onClick={refreshList}>Refresh skills</button>
     </div></details>
     {pendingSwitch && <div role="alert" className="flex flex-wrap items-center gap-3 rounded border p-3 text-sm"><p>This replaces your unsaved instructions.</p><button type="button" className={buttonClass} onClick={() => { const next = pendingSwitch; setPendingSwitch(null); if (next.path) void load(next.path); else reset(); }}>Discard edits and continue</button><button type="button" className={buttonClass} onClick={() => setPendingSwitch(null)}>Keep editing</button></div>}
-    {error && <p role="alert" className="text-sm">{error} <a className="underline" href={configuration.url} target="_blank" rel="noopener noreferrer">Open JupyterLab</a>{blockedSave && " Load the file or choose New before another save."}</p>}{notice && <p role="status" className="text-sm">{notice}</p>}
+    {error && <StatusMessage kind="error" title="Could not finish this skill operation" detail="Sign in to your workspace, then try again." action={<><a className="underline" href={configuration.url} target="_blank" rel="noopener noreferrer">Open workspace</a>{blockedSave && <p>Load the saved file or choose New before saving again.</p>}</>} />}{notice && <p role="status" className="text-sm">{notice}</p>}
     <PersonalSkillsEditor document={document} tools={tools} toolStatus={toolStatus} files={files} fileStatus={fileStatus} busy={busy} canSave={dirty && !blockedSave && !pendingSwitch} onChange={patch => { setDocument(previous => ({ ...previous, ...patch })); setNotice(null); }} onSave={() => void save()} onRetryTools={() => { setToolStatus("loading"); setToolRefresh(previous => previous + 1); }} onBrowseFiles={() => void browseFiles()} />
   </div></section>;
 }
