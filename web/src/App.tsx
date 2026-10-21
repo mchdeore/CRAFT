@@ -70,11 +70,16 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
     retrySession,
     pending,
     history,
+    archivedHistory,
     historyPending,
     historyError,
     historyLimited,
     newChat,
     selectChat,
+    renameChat,
+    groupChat,
+    archiveChat,
+    restoreChat,
     refreshHistory,
   } = useAgentSession(owner, onAuthInvalid);
   // An empty chat is reused instead of stacking more empty chats in history.
@@ -92,12 +97,17 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
       chats={<ChatHistory
         sessionID={sessionID}
         history={history}
+        archivedHistory={archivedHistory}
         pending={pending}
         historyPending={historyPending}
         historyError={historyError}
         historyLimited={historyLimited}
         onNewChat={() => { if (!empty.current) void newChat(); }}
         onSelectChat={id => void selectChat(id)}
+        onRenameChat={(id, title) => void renameChat(id, title)}
+        onGroupChat={(id, groupName) => void groupChat(id, groupName)}
+        onArchiveChat={id => void archiveChat(id)}
+        onRestoreChat={id => void restoreChat(id)}
         onRefreshHistory={() => void refreshHistory()}
         onReset={() => void resetSession()}
       />}

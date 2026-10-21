@@ -26,9 +26,11 @@ conversations = Table(
     Column("id", UUID, primary_key=True, server_default=text("uuidv7()")),
     Column("owner_id", UUID, ForeignKey("users.id"), nullable=False),
     Column("title", Text, nullable=False),
+    Column("group_name", Text),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("archived_at", DateTime(timezone=True)),
+    CheckConstraint("group_name is null or char_length(group_name) between 1 and 80", name="group_name"),
 )
 Index(
     "ix_conversations_owner_id_updated_at",
@@ -102,10 +104,12 @@ def summaries(session, user):
     )
 
 
-def create(session, user, title):
+def create(session, user, title, group_name=None):
     return (
         session.execute(
-            conversations.insert().values(owner_id=user, title=title).returning(conversations)
+            conversations.insert()
+            .values(owner_id=user, title=title, group_name=group_name)
+            .returning(conversations)
         )
         .mappings()
         .one()

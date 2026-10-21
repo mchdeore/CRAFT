@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
+import msgspec
 from sqlalchemy import func, select
 from starlette.responses import Response
 
@@ -59,6 +60,7 @@ def summary(row) -> dict[str, Any]:
     return dict(
         id=row["id"],
         title=row["title"],
+        group_name=row["group_name"],
         updated_at=row["updated_at"].isoformat(),
         archived=row["archived_at"] is not None,
         pending_approvals=0,
@@ -70,9 +72,9 @@ def list_owned(caller):
         return [summary(row) for row in storage.summaries(session, caller.user_id)]
 
 
-def create(caller, title):
+def create(caller, title, group_name=None):
     with unit_of_work(scope(caller)) as session:
-        return summary(storage.create(session, caller.user_id, title))
+        return summary(storage.create(session, caller.user_id, title, group_name))
 
 
 def read(caller, identifier) -> dict[str, Any]:
@@ -93,7 +95,9 @@ def update(caller, request):
         values: dict[str, Any] = {"updated_at": func.now()}
         if request.title is not None:
             values["title"] = request.title
-        if request.archived is not None:
+        if request.group_name is not msgspec.UNSET:
+            values["group_name"] = request.group_name
+        if request.archived is not msgspec.UNSET:
             if storage.active_run(session, request.id):
                 raise Conflict()
             values["archived_at"] = func.now() if request.archived else None

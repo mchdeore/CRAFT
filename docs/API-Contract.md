@@ -418,9 +418,9 @@ export interface Citation {
 }
 export interface AnswerMeta { messageId: string; citations: Citation[]; confidence: Confidence }
 
-export interface NewConversation { title?: string }
-export interface ConversationUpdate { title?: string; archived?: boolean }
-export interface ConversationSummary { id: Id; title: string; updatedAt: string; archived: boolean; pendingApprovals: number }
+export interface NewConversation { title?: string; groupName?: string | null }
+export interface ConversationUpdate { title?: string; groupName?: string | null; archived?: boolean }
+export interface ConversationSummary { id: Id; title: string; groupName: string | null; updatedAt: string; archived: boolean; pendingApprovals: number }
 export interface Conversation extends ConversationSummary { messages: AgUiMessage[] }
 export interface RunRecoveryRef { id: Id }
 export interface RunRecovery {

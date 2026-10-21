@@ -13,7 +13,7 @@ const otherOwner = '22222222-2222-4222-8222-222222222222';
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-const summary = (id = A, extra = {}) => ({ id, title: 'Generated chat', updatedAt: '2026-10-17T00:00:00Z', archived: false, pendingApprovals: 0, ...extra });
+const summary = (id = A, extra = {}) => ({ id, title: 'Generated chat', groupName: null, updatedAt: '2026-10-17T00:00:00Z', archived: false, pendingApprovals: 0, ...extra });
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const deferred = () => { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
 class MemoryStorage {
@@ -32,7 +32,7 @@ async function ready() {
 function requireMethod(state, name) { assert.equal(typeof state[name], 'function', `${name} must implement owned chat navigation`); }
 function renderHistory(props = {}) {
   assert.equal(typeof ui.ChatHistory, 'function', 'owned ChatHistory component must render the real picker');
-  return renderToStaticMarkup(React.createElement(ui.ChatHistory, { sessionID: A, history: [], pending: false, historyPending: false, historyLimited: false, onNewChat() {}, onSelectChat() {}, onRefreshHistory() {}, onReset() {}, ...props }));
+  return renderToStaticMarkup(React.createElement(ui.ChatHistory, { sessionID: A, history: [], archivedHistory: [], pending: false, historyPending: false, historyLimited: false, onNewChat() {}, onSelectChat() {}, onRenameChat() {}, onGroupChat() {}, onArchiveChat() {}, onRestoreChat() {}, onRefreshHistory() {}, onReset() {}, ...props }));
 }
 
 test('signed-out App never exposes New chat or owned history controls', () => {
@@ -64,10 +64,64 @@ for (const outcome of ['403', 'transport']) test(`New chat ${outcome} failure re
   await state.newChat(); assert.equal(state.getSnapshot().sessionID, A); assert.equal(sessionStorage.getItem(pointer), A);
   assert.ok(state.getSnapshot().error); assert.doesNotMatch(state.getSnapshot().error, /GENERATED_PRIVATE/);
 });
+test('rename and group patch helpers update owned chat metadata through PATCH', async () => {
+  const state = await ready(); requireMethod(state, 'renameChat'); requireMethod(state, 'groupChat');
+  const calls = [];
+  let currentTitle = 'Generated chat';
+  let currentGroup = null;
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options.method, options.credentials, JSON.parse(options.body)]);
+    const patch = JSON.parse(options.body);
+    if (Object.hasOwn(patch, 'title')) currentTitle = patch.title;
+    if (Object.hasOwn(patch, 'groupName')) currentGroup = patch.groupName;
+    return json(summary(A, { title: currentTitle, groupName: currentGroup }));
+  };
+  await state.renameChat(A, 'Renamed chat');
+  await state.groupChat(A, 'Operations');
+  const snapshot = state.getSnapshot();
+  assert.deepEqual(calls, [
+    [`/api/conversations/${A}`, 'PATCH', 'same-origin', { title: 'Renamed chat' }],
+    [`/api/conversations/${A}`, 'PATCH', 'same-origin', { groupName: 'Operations' }],
+  ]);
+  assert.equal(snapshot.history[0].title, 'Renamed chat');
+  assert.equal(snapshot.history[0].groupName, 'Operations');
+});
+test('archive and restore helpers rebucket owned chats without changing current selection for other chats', async () => {
+  const state = await ready();
+  requireMethod(state, 'refreshHistory'); requireMethod(state, 'archiveChat'); requireMethod(state, 'restoreChat');
+  globalThis.fetch = async () => json([summary(A, { updatedAt: '2026-10-18T00:00:00Z' }), summary(B, { updatedAt: '2026-10-17T00:00:00Z' })]);
+  await state.refreshHistory();
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options.method, options.credentials, JSON.parse(options.body)]);
+    const patch = JSON.parse(options.body);
+    return json(summary(B, { archived: patch.archived, updatedAt: '2026-10-19T00:00:00Z' }));
+  };
+  await state.archiveChat(B);
+  assert.deepEqual(state.getSnapshot().history.map(chat => chat.id), [A]);
+  assert.deepEqual(state.getSnapshot().archivedHistory.map(chat => chat.id), [B]);
+  assert.equal(state.getSnapshot().sessionID, A);
+  await state.restoreChat(B);
+  assert.deepEqual(state.getSnapshot().history.map(chat => chat.id), [B, A]);
+  assert.deepEqual(state.getSnapshot().archivedHistory, []);
+  assert.deepEqual(calls, [
+    [`/api/conversations/${B}`, 'PATCH', 'same-origin', { archived: true }],
+    [`/api/conversations/${B}`, 'PATCH', 'same-origin', { archived: false }],
+  ]);
+});
+test('archiving the active chat through helper clears the owner pointer and active selection', async () => {
+  const state = await ready(); requireMethod(state, 'archiveChat');
+  globalThis.fetch = async (_url, options) => json(summary(A, { archived: JSON.parse(options.body).archived }));
+  await state.archiveChat(A);
+  assert.equal(state.getSnapshot().sessionID, '');
+  assert.equal(state.getSnapshot().archivedHistory.map(chat => chat.id).includes(A), true);
+  assert.equal(sessionStorage.getItem(pointer), null);
+});
 test('owned history GET filters archived chats and orders newest first without changing active pointer', async () => {
   const state = await ready(); requireMethod(state, 'refreshHistory');
   const calls = []; globalThis.fetch = async (url, options) => { calls.push([url, options.method ?? 'GET', options.credentials]); return json([summary(A), summary(B, { updatedAt: '2026-10-18T00:00:00Z' }), summary(C, { archived: true })]); };
   await state.refreshHistory(); assert.deepEqual(state.getSnapshot().history.map(chat => chat.id), [B, A]);
+  assert.deepEqual(state.getSnapshot().archivedHistory.map(chat => chat.id), [C]);
   assert.deepEqual(calls, [['/api/conversations', 'GET', 'same-origin']]);
   assert.equal(state.getSnapshot().sessionID, A); assert.equal(sessionStorage.getItem(pointer), A);
   assert.equal(sessionStorage.writes.every(([, value]) => /^[0-9a-f-]{36}$/i.test(value)), true);
@@ -99,7 +153,7 @@ for (const [label, returned, archived, visible, limited, first, last] of [
   else assert.doesNotMatch(html, /Chat history is limited/);
   assert.doesNotMatch(html, /newest 100|more chats|total chats/i);
 });
-for (const [label, extra] of [['bad UUID', { id: 'foreign' }], ['overlong title', { title: 'x'.repeat(201) }], ['invalid time', { updatedAt: 'not-a-date' }], ['wrong archive flag', { archived: 'false' }], ['negative approvals', { pendingApprovals: -1 }], ['fractional approvals', { pendingApprovals: 0.5 }], ['unsafe approvals', { pendingApprovals: 9007199254740992 }]]) test(`owned history rejects ${label} metadata without showing response body`, async () => {
+for (const [label, extra] of [['bad UUID', { id: 'foreign' }], ['overlong title', { title: 'x'.repeat(201) }], ['missing group', { groupName: undefined }], ['overlong group', { groupName: 'x'.repeat(81) }], ['invalid time', { updatedAt: 'not-a-date' }], ['wrong archive flag', { archived: 'false' }], ['negative approvals', { pendingApprovals: -1 }], ['fractional approvals', { pendingApprovals: 0.5 }], ['unsafe approvals', { pendingApprovals: 9007199254740992 }]]) test(`owned history rejects ${label} metadata without showing response body`, async () => {
   const state = await ready(); requireMethod(state, 'refreshHistory');
   globalThis.fetch = async () => json([summary(A, extra)]); await state.refreshHistory();
   assert.deepEqual(state.getSnapshot().history, []); assert.ok(state.getSnapshot().historyError); assert.doesNotMatch(state.getSnapshot().historyError, /not-a-date|foreign|xxx/);
@@ -141,7 +195,7 @@ for (const operation of ['newChat', 'selectChat', 'refreshHistory']) test(`${ope
   const state = await ready(); requireMethod(state, operation); requireMethod(state, 'refreshHistory');
   globalThis.fetch = async () => json([summary()]); await state.refreshHistory(); let invalid = 0; state.onAuthInvalid = () => invalid++;
   globalThis.fetch = async () => json({ message: 'GENERATED_PRIVATE_BODY' }, 401); await state[operation](operation === 'selectChat' ? B : undefined);
-  assert.equal(state.getSnapshot().sessionID, ''); assert.deepEqual(state.getSnapshot().history, []); assert.equal(sessionStorage.getItem(pointer), null); assert.equal(invalid, 1);
+  assert.equal(state.getSnapshot().sessionID, ''); assert.deepEqual(state.getSnapshot().history, []); assert.deepEqual(state.getSnapshot().archivedHistory, []); assert.equal(sessionStorage.getItem(pointer), null); assert.equal(invalid, 1);
   let requests = 0; globalThis.fetch = async () => { requests++; return json(summary(B)); }; await state.newChat(); await state.selectChat(B); await state.refreshHistory(); assert.equal(requests, 0);
 });
 test('slow selection A cannot overwrite newer verified selection B or pointer', async () => {
@@ -181,13 +235,13 @@ test('history error is body free and successful retry recovers while selected ch
 for (const operation of ['selectChat', 'newChat', 'refreshHistory']) test(`disposed owner refuses late ${operation} completion and all pointer writes`, async () => {
   const state = await ready(); requireMethod(state, operation); const waiting = deferred(); globalThis.fetch = async () => waiting.promise; sessionStorage.writes = [];
   const pending = state[operation](operation === 'selectChat' ? B : undefined); state.dispose(); waiting.resolve(json(operation === 'refreshHistory' ? [summary(B)] : summary(B))); await pending;
-  assert.equal(state.getSnapshot().sessionID, ''); assert.deepEqual(state.getSnapshot().history, []); assert.deepEqual(sessionStorage.writes, []);
+  assert.equal(state.getSnapshot().sessionID, ''); assert.deepEqual(state.getSnapshot().history, []); assert.deepEqual(state.getSnapshot().archivedHistory, []); assert.deepEqual(sessionStorage.writes, []);
   const next = new ConversationSession(otherOwner); globalThis.fetch = async () => json(summary(C)); await next.start(); assert.equal(next.getSnapshot().sessionID, C);
   assert.equal(sessionStorage.getItem(`craft-conversation:${otherOwner}`), C);
 });
 test('real owned picker renders escaped titles and separate New chat and archive controls', () => {
   const html = renderHistory({ history: [summary(A, { title: '<script>GENERATED</script>' })] });
-  assert.match(html, /Chat history/); assert.match(html, /New chat/); assert.match(html, /Archive and reset/); assert.doesNotMatch(html, /Session ID|<script>/); assert.match(html, /&lt;script&gt;GENERATED&lt;\/script&gt;/);
+  assert.match(html, /Chat history/); assert.match(html, /New chat/); assert.match(html, /Archive and reset/); assert.match(html, /Rename chat/); assert.match(html, /Set group/); assert.doesNotMatch(html, /Session ID|<script>/); assert.match(html, /&lt;script&gt;GENERATED&lt;\/script&gt;/);
 });
 test('real picker disables navigation during pending change but keeps loading state accessible', () => {
   const html = renderHistory({ pending: true, sessionID: '', historyPending: true, history: [summary(A)] });
@@ -197,6 +251,11 @@ test('real picker makes history error retry and bounded list limitation accessib
   const html = renderHistory({ historyError: 'Could not load chat history. Try again.', historyLimited: true });
   assert.match(html, /role="alert"/); assert.match(html, /Retry history/); assert.match(html, /Chat history is limited to 100 entries\./);
   assert.doesNotMatch(html, /newest 100|more chats|total chats/i);
+});
+test('real picker shows archived reveal control and restore affordance text', () => {
+  const html = renderHistory({ archivedHistory: [summary(C, { archived: true, title: 'Older chat' })] });
+  assert.match(html, /Show archived chats \(1\)/);
+  assert.doesNotMatch(html, /No chats yet/);
 });
 
 test('newer selection supersedes pending create and refuses its late pointer write', async () => {
