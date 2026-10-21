@@ -206,7 +206,7 @@ npm run build
 
 ## 6. Continuous integration
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. A draft pull request runs only the quick checks: lock, Ruff, format and Pyright. Marking it ready for review runs the full set, and pushes to main always do. Pull requests that change only `docs/`, `mkdocs.yml` or root Markdown files skip this workflow. A commit whose message contains `[skip ci]` skips every workflow for that push. The full set installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the contract and stream suites.
+`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. A draft pull request runs only the quick checks: lock, Ruff, format and Pyright. Marking it ready for review runs the full set, and pushes to main always do. A commit whose message contains `[skip ci]` skips every workflow for that push. `ci` and `build` are required checks, so a pull request whose latest push skipped them cannot merge until a later push runs them. The full set installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the contract and stream suites.
 
 The full-stack gate builds Compose, checks readiness and request IDs, verifies the non-root app and its password-variable boundary, then removes the disposable project volume. A local repeat needs free application/database ports and its own Compose project; never reset an existing corpus to reproduce that check.
 

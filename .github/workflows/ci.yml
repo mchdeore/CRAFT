@@ -1,12 +1,11 @@
 # Ready PRs and pushes to main run everything; any failure blocks the merge.
 # Draft PRs run only the quick checks (lock, lint, format, types); marking a PR
-# ready for review runs the full set. Documentation-only PRs skip this workflow.
+# ready for review runs the full set.
 name: CI
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore: ["docs/**", "mkdocs.yml", "*.md"]
   push:
     branches: [main]
 
