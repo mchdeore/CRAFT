@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Notebook } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatusMessage } from "@/components/ui/status-message";
 import type { WorkspaceConfiguration } from "./workspace-url";
 import { PersonalFileBrowser, PersonalFilePreview } from "./personal-file-browser";
 
 export function JupyterWorkspace({ configuration }: { configuration: WorkspaceConfiguration }) {
   if (configuration.status !== "configured") return <section aria-label="Files and notebooks" className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
     <div className="max-w-md space-y-3 rounded-lg border bg-muted/30 p-6">
-      <h2 className="text-lg font-medium">Workspace service is not connected</h2>
+      <StatusMessage kind="signin" detail="Sign in to your workspace to attach files and skills." />
       <p className="text-sm text-muted-foreground">Your chat stays available. Connect the local JupyterLab workspace to use personal files and Markdown skills.</p>
       {configuration.status === "invalid" && <p role="alert" className="text-sm">The workspace address must be a separate local HTTP server root without credentials, a query or a fragment.</p>}
       <p className="text-sm text-muted-foreground">JupyterLab provides files, notebooks, Python editing, terminals and downloads. USER_ROOT and agent file access require the workspace service binding.</p>
@@ -30,6 +32,7 @@ function ConnectedWorkspace({ configuration }: { configuration: WorkspaceConfigu
     setSelection({ path });
   };
   return <section aria-label="Files and notebooks" className="relative flex min-h-0 flex-1 flex-col">
+    <PageHeader title="Workspace" />
     <div inert={!!selection} className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1">
         <PersonalFileBrowser configuration={configuration} onOpenFile={openCopy} />
