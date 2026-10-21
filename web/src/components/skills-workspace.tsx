@@ -70,7 +70,7 @@ function SkillEditor({ editor, tools, toolStatus, busy, tryPending, onChange, on
           <label className="block text-sm">Description<textarea className="mt-1 w-full rounded border bg-background p-2" value={editor.fields.description} maxLength={4000} rows={2} onChange={event => onChange?.({ description: event.target.value })} /></label>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div><h2 className="font-medium">Skill document</h2><p className="text-xs text-muted-foreground">Write reusable instructions in Markdown.</p></div>
+          <div><h2 className="font-medium">Skill document</h2><p className="text-xs text-muted-foreground">Write reusable, versioned instructions in Markdown.</p></div>
           <button type="button" className="rounded border px-3 py-1.5 text-sm" disabled={occupied || !onChange} onMouseDown={event => event.preventDefault()} onClick={() => insert()}>Insert template</button>
         </div>
         <label className="block text-sm">Instructions<Textarea ref={textarea} className="mt-1 min-h-[24rem] resize-y bg-background p-4 font-mono text-sm leading-relaxed placeholder:text-muted-foreground/50" value={editor.fields.instructions} placeholder={documentPlaceholder} required maxLength={200000} rows={18} onChange={event => { pendingCaret.current = null; setInsertionError(null); onChange?.({ instructions: event.target.value }); }} /></label>
@@ -108,11 +108,11 @@ export function SkillsView({ listStatus, catalog, editor, tools = [], toolStatus
   const occupied = busy !== "idle";
   return <section aria-label="Saved skills" className="min-h-0 flex-1 overflow-auto p-4">
     <div className="mx-auto max-w-6xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Skills</h1><div className="flex gap-2">
-        <button type="button" className="rounded border px-3 py-2" onClick={onNew} disabled={occupied}>New skill</button>
-        <button type="button" className="rounded border px-3 py-2" onClick={onRefresh} disabled={occupied || listStatus === "loading"}>Refresh skills</button>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">Saved skills</h1><div className="flex gap-2">
+        <button type="button" className="rounded border px-3 py-2" onClick={onNew} disabled={occupied}>New saved skill</button>
+        <button type="button" className="rounded border px-3 py-2" onClick={onRefresh} disabled={occupied || listStatus === "loading"}>Refresh saved skills</button>
       </div></div>
-      <p className="text-sm text-muted-foreground">Write a reusable skill document. Each save keeps a numbered revision. Save your edits before trying that revision in a new chat.</p>
+      <p className="text-sm text-muted-foreground">Saved skills are reusable, versioned definitions. Save your edits before trying that revision in a new chat. For workspace-local Markdown skills, use the Workspace Skills section.</p>
       {listStatus === "loading" && <p role="status">Loading skills…</p>}
       {listStatus === "error" && <p role="alert">Could not load skills. Use Refresh skills to try again.</p>}
       {listStatus === "ready" && catalog?.items.length === 0 && <p className="text-sm text-muted-foreground">No saved skills.</p>}
@@ -126,7 +126,7 @@ export function SkillsView({ listStatus, catalog, editor, tools = [], toolStatus
       {error && <p role="alert">{error.message}</p>}
       {savedRevision && <p role="status">Saved revision {savedRevision}.</p>}
       {busy === "opening" && <p role="status">Opening saved skill…</p>}
-      {editor ? <SkillEditor key={editor.id} editor={editor} tools={tools} toolStatus={toolStatus} busy={busy} tryPending={tryPending} onChange={onChange} onSave={onSave} onReload={onReload} onRetryTools={onRetryTools} onTry={onTry} /> : <p>Create a skill or open a saved definition.</p>}
+      {editor ? <SkillEditor key={editor.id} editor={editor} tools={tools} toolStatus={toolStatus} busy={busy} tryPending={tryPending} onChange={onChange} onSave={onSave} onReload={onReload} onRetryTools={onRetryTools} onTry={onTry} /> : <p>Create a saved skill or open a saved definition.</p>}
     </div>
   </section>;
 }

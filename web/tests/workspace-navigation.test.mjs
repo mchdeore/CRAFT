@@ -35,6 +35,7 @@ test("the configured workspace launches its exact Jupyter URL in a separate tab 
     assert.equal(host.elements("iframe").length, 0);
     const launch = host.elements("a").find(row => row.textContent.includes("Open in JupyterLab")); assert.ok(launch);
     assert.equal(launch.getAttribute("href"), configured.url); assert.equal(launch.getAttribute("target"), "_blank"); assert.equal(launch.getAttribute("rel"), "noopener noreferrer");
+    assert.match(host.container.textContent, /Use JupyterLab for notebooks and code-driven analysis/);
     // Sources are imported from chat answers; Workspace has no separate source search.
     assert.equal(buttonAt(host, "Search sources"), undefined);
   } finally { try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = oldFetch; host.restore(); } }

@@ -110,9 +110,12 @@ test('editing another field preserves original empty and multiline examples', ()
   assert.deepEqual(requireFunction('prepareSkillSave')(changed, mutation).request.exampleInputs, ['', 'one\ntwo']);
 });
 
-test('Skills page shows meaningful empty and loading states', () => {
+test('Saved skills page shows meaningful states and distinguishes workspace Markdown skills', () => {
+  assert.match(render({ listStatus: 'loading', catalog: null, editor: null }), /Saved skills/);
   assert.match(render({ listStatus: 'loading', catalog: null, editor: null }), /Loading skills/);
-  assert.match(render({ listStatus: 'ready', catalog: { items: [], nextCursor: null }, editor: null }), /No saved skills/);
+  const empty = render({ listStatus: 'ready', catalog: { items: [], nextCursor: null }, editor: null });
+  assert.match(empty, /No saved skills/);
+  assert.match(empty, /workspace-local Markdown skills/);
 });
 
 test('Skills page exposes actual current revisions and cursor controls', () => {

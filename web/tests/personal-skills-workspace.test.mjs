@@ -19,7 +19,7 @@ const click = async (host, label) => React.act(async () => { button(host, label)
 test("personal skill authoring is one roomy Markdown file with real tool metadata", () => {
   assert.equal(typeof view.PersonalSkillsEditor, "function");
   const html = renderToStaticMarkup(React.createElement(view.PersonalSkillsEditor, { document: { filename: "check.md", content: "# Goal\nCheck inputs." }, tools: [tool], toolStatus: "ready", busy: false, onChange() {}, onSave() {} }));
-  for (const text of ["Skill filename", "Skill document", "Save to workspace", "Insert template", "Words to find", "query", "required"]) assert.ok(html.includes(text), text);
+  for (const text of ["Skill filename", "Skill document", "Save to workspace", "workspace-local Markdown skill file", "Insert template", "Words to find", "query", "required"]) assert.ok(html.includes(text), text);
   assert.match(html, /min-h-\[24rem\]/); assert.match(html, /placeholder=/);
   assert.doesNotMatch(html, /Save skill|Revision|mutationId|Register skill|toolNames/);
 });

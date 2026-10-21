@@ -43,11 +43,11 @@ export function PersonalSkillsEditor({ document, tools, toolStatus, busy, canSav
       <fieldset disabled={busy} className="min-w-0 space-y-4">
         <label className="block text-sm">Skill filename<input aria-label="Skill filename" className="mt-1 w-full rounded border bg-background p-2 font-mono" value={document.filename} readOnly={!!document.path} maxLength={255} required placeholder="analysis.md" onInput={event => onChange({ filename: event.currentTarget.value })} /></label>
         <p className="break-words text-xs text-muted-foreground">{document.path ? personalAbsolutePath(document.path) : "/workspace/skills/"}{!document.path && " — use a .md filename"}</p>
-        <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-medium">Skill document</h2><p className="text-xs text-muted-foreground">Write the instructions the agent should follow in Markdown.</p></div><button type="button" className={buttonClass} onMouseDown={event => event.preventDefault()} onClick={() => insert(`\n${template}\n`, false)}>Insert template</button></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-medium">Skill document</h2><p className="text-xs text-muted-foreground">Write workspace-local instructions in Markdown.</p></div><button type="button" className={buttonClass} onMouseDown={event => event.preventDefault()} onClick={() => insert(`\n${template}\n`, false)}>Insert template</button></div>
         <label className="block text-sm">Instructions<Textarea ref={textarea} aria-label="Skill document" value={document.content} placeholder={placeholder} rows={20} maxLength={MAX_SKILL_BYTES} required className="mt-1 min-h-[24rem] resize-y bg-background p-4 font-mono text-sm leading-relaxed placeholder:text-muted-foreground/50" onInput={event => { pendingCaret.current = null; onChange({ content: event.currentTarget.value }); }} /></label>
         {insertionError && <p role="alert" className="text-sm">This reference exceeds the skill document limit.</p>}
         <button type="submit" className={buttonClass} disabled={busy || !canSave || !document.content.trim()}>{busy ? "Saving or loading…" : "Save to workspace"}</button>
-        <p className="text-xs text-muted-foreground">Save writes this personal file. In chat, type / to choose a saved Markdown skill; the agent reads its current contents.</p>
+        <p className="text-xs text-muted-foreground">Save writes this workspace-local Markdown skill file. In chat, type / to select it and the agent reads the current file contents.</p>
       </fieldset>
       <aside aria-label="Skill context and tools" className="space-y-4 rounded-lg border bg-muted/20 p-3">
         <div className="space-y-2"><h2 className="font-medium">Files</h2><p className="text-xs text-muted-foreground">Use personal copies as inputs. Import source originals before editing them.</p><button type="button" className={buttonClass} disabled={busy || fileStatus === "loading" || !onBrowseFiles} onMouseDown={event => event.preventDefault()} onClick={onBrowseFiles}>{fileStatus === "loading" ? "Loading files…" : "Browse personal files"}</button>
@@ -66,7 +66,7 @@ export function PersonalSkillsEditor({ document, tools, toolStatus, busy, canSav
 }
 
 export function PersonalSkillsWorkspace({ configuration, onAuthInvalid }: { configuration: WorkspaceConfiguration; onAuthInvalid: () => void }) {
-  if (configuration.status !== "configured") return <div className="p-6"><PageHeader title="Skills" description="Reusable instructions the assistant can follow. Type / in chat to use one." /><StatusMessage kind="signin" detail="Sign in to your workspace to load and save skills." /></div>;
+  if (configuration.status !== "configured") return <div className="p-6"><PageHeader title="Workspace skills" description="Workspace-local Markdown skills in /workspace/skills. Type / in chat to use one." /><StatusMessage kind="signin" detail="Sign in to your workspace to load and save workspace skills." /></div>;
   return <ConnectedSkills key={configuration.url} configuration={configuration} onAuthInvalid={onAuthInvalid} />;
 }
 function ConnectedSkills({ configuration, onAuthInvalid }: { configuration: WorkspaceConfiguration & { status: "configured" }; onAuthInvalid: () => void }) {
@@ -130,8 +130,8 @@ function ConnectedSkills({ configuration, onAuthInvalid }: { configuration: Work
     catch { if (!controller.signal.aborted) setFileStatus("error"); }
   };
   return <section aria-label="Personal skills" className="min-h-0 flex-1 overflow-auto p-4"><div className="mx-auto max-w-6xl space-y-4">
-    <PageHeader title="Skills" description="Reusable instructions the assistant can follow. Type / in chat to use one." actions={<><button type="button" className={buttonClass} disabled={busy} onClick={() => choose()}>New</button><a href={configuration.url} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open in JupyterLab</a></>} />
-    <details className="rounded-lg border p-3" open><summary className="cursor-pointer text-sm">Load a workspace skill</summary><div className="mt-3 flex flex-wrap items-center gap-2">
+    <PageHeader title="Workspace skills" description="Workspace-local Markdown skills in /workspace/skills. Type / in chat to use one." actions={<><button type="button" className={buttonClass} disabled={busy} onClick={() => choose()}>New</button><a href={configuration.url} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open in JupyterLab</a></>} />
+    <details className="rounded-lg border p-3" open><summary className="cursor-pointer text-sm">Load a workspace Markdown skill file</summary><div className="mt-3 flex flex-wrap items-center gap-2">
       {listStatus === "loading" && <StatusMessage kind="loading" title="Loading skills…" />}{(listStatus === "error" || listStatus === "signin") && <StatusMessage kind={listStatus} title={listStatus === "error" ? "Could not load skills" : undefined} detail="Sign in to your workspace, then try again." workspaceURL={configuration.url} />}{listStatus === "ready" && skills.length === 0 && <StatusMessage kind="empty" title="No skills yet. Save your first skill below." />}
       {skills.map(skill => <button key={skill.path} type="button" className={buttonClass} disabled={busy} onClick={() => choose(skill.path)}>Load {skill.name}</button>)}<button type="button" className={buttonClass} disabled={busy || listStatus === "loading"} onClick={refreshList}>Refresh skills</button>
     </div></details>
