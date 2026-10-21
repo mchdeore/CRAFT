@@ -1,0 +1,20 @@
+erDiagram
+    users ||--o| local_credentials : user_id
+    users ||--o{ user_roles : user_id
+    users ||--o{ auth_sessions : user_id
+    users ||--o{ workspace_tokens : user_id
+    users ||--o{ mission_grants : user_id
+    users ||--o{ conversations : owner_id
+    conversations ||--o{ messages : conversation_id
+    conversations ||--o{ agent_runs : conversation_id
+    users ||--o{ agent_runs : started_by
+    conversations ||--o| agent_sessions : conversation_id
+    conversations ||--o{ workspace_files : conversation_id
+    agent_runs o|--o{ messages : run_id
+    agent_runs ||--o{ approval_requests : run_id
+    conversations ||--o{ approval_requests : conversation_id
+    users ||--o{ approval_requests : requested_by
+    approval_requests ||--o{ approval_events : request_id
+    users o|--o{ approval_events : actor_id
+    users ||--o{ skills : owner
+    skills ||--o{ skill_revisions : "skill_id + owner"

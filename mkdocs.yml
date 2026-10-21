@@ -13,6 +13,8 @@ nav:
       - Agent runtime: wiki/runtime.md
       - Process lifecycle: wiki/processes.md
       - Workspace: wiki/workspace.md
+      - Identity and workspace ownership: wiki/identity.md
+      - Identity table reference: wiki/identity-tables.md
       - Python workspace prototype: wiki/python.md
       - Documents and evidence: wiki/documents.md
       - Model jobs: wiki/jobs.md

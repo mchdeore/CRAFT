@@ -11,6 +11,8 @@ This site contains CRAFT documentation. Run the application separately to use it
 - [Agent runtime](wiki/runtime.md): application runs, saved skills and decisions.
 - [Process lifecycle](wiki/processes.md): owned services, readiness and shutdown.
 - [Workspace](wiki/workspace.md): shared files, notebooks, source copies and native Python tools.
+- [Identity and workspace ownership](wiki/identity.md): stable users, credentials, runtime boundaries and migration gates.
+- [Identity table reference](wiki/identity-tables.md): current tables and relationship graphs.
 - [Python workspace prototype](wiki/python.md): standalone code, CSV data and artifacts.
 - [Documents and evidence](wiki/documents.md): identity, versions, extraction and relationships.
 - [Model jobs](wiki/jobs.md): a standalone prototype for queued model work.
