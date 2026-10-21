@@ -381,7 +381,7 @@ test("malformed JSON and network errors expose generic text with a manual retry"
 });
 
 // Static matrix: 2 cases.
-for (const approve of [true, false]) test(`explicit boolean ${approve} decision precedes distinct freshly verified continuation`, async () => {
+for (const approve of [true, false]) test(`explicit boolean ${approve} decision continues once after fresh verification`, async () => {
   const wait = deferred(); const calls = []; const resumed = []; let refreshes = 0, wireStatus = "pending";
   const state = await ready(async (url, options) => {
     calls.push({ url, options }); return options.method === "POST" ? wait.promise : response(detail(wireStatus));
@@ -402,9 +402,9 @@ for (const approve of [true, false]) test(`explicit boolean ${approve} decision 
     assert.equal(calls.filter(call => call.options.method === "POST").length, 1);
     // Detail alone after a decision cannot replace stale pending metadata.
     await state.refresh(); noActions(state.getSnapshot()); await denied(() => state.resume()); assert.deepEqual(resumed, []);
-    state.setRecovery(metadata(wireStatus)); await flush(); assert.equal(state.getSnapshot().canResume, true);
-    assert.equal(state.getSnapshot().canDecide, false); assert.deepEqual(resumed, []);
-    await state.resume(); assert.deepEqual(resumed, [[runId, approvalId]]);
+    // Once the recorded decision is freshly verified, the run continues without a second click, exactly once.
+    state.setRecovery(metadata(wireStatus)); await flush(); assert.deepEqual(resumed, [[runId, approvalId]]);
+    assert.equal(state.getSnapshot().canDecide, false); assert.equal(state.getSnapshot().canResume, false);
     await denied(() => state.resume()); assert.equal(resumed.length, 1);
   } finally { state.release(); }
 });

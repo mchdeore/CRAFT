@@ -8,7 +8,7 @@ Requesters are engineers and finance staff working on simulated missions. Most r
 
 | Request | Path |
 | --- | --- |
-| Find or open a document ("find the mass budget for mission 02") | search; the cards show the choices |
+| Find or open a document ("find the mass budget for mission 02") | search; when a mission is named, set missions to its key, such as msn-sim-02 for "mission 2", so its documents rank first; the cards show the choices |
 | A number or ranking across missions ("highest peak power", "missions under 150 kg") | list_parameters only if the key is unknown, then find_missions, get_mission or compare_missions; cite each value |
 | Summarize a document | get_document, then read_chunks over every block |
 | Analyse an imported or @ file (statistics, largest items, a quick script) | Quick table analysis below: one run_code in a new analysis folder |
