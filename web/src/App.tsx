@@ -3,6 +3,7 @@ import { AgentThread } from "@/components/agent-thread";
 import { PersonalSkillsWorkspace } from "@/components/personal-skills-workspace";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { JupyterWorkspace } from "@/components/jupyter-workspace";
+import { StatusMessage } from "@/components/ui/status-message";
 import { resolveUserWorkspaceURL } from "@/components/workspace-url";
 import { useAgentSession } from "@/hooks/use-agent-session";
 import { useAuthSession } from "@/hooks/use-auth-session";
@@ -17,7 +18,7 @@ export default function App() {
     <main className="flex h-dvh flex-col bg-background">
       {auth.error && <p role="alert" className="mx-auto mt-3 max-w-3xl px-4 text-sm text-destructive">{auth.error}</p>}
       {auth.me ? <AuthenticatedChat key={`${auth.generation}:${auth.me.id}`} owner={auth.me} generation={auth.generation} onAuthInvalid={auth.invalidate} onSignOut={() => void auth.signOut()} /> :
-        auth.status === "checking" ? <div role="status" className={`${centered} text-muted-foreground`}>Checking sign-in...</div> :
+        auth.status === "checking" ? <div className={centered}><StatusMessage kind="loading" title="Checking sign-in..." /></div> :
         auth.status === "signing-out" ? <div role="status" className={centered}>Signing out...</div> :
         auth.status === "logout-failed" ? <div className={centered}><button type="button" className="rounded-lg border px-3 py-2 hover:bg-muted" onClick={() => void auth.signOut()}>Retry sign-out</button></div> :
         auth.status === "error" ? <div className={centered}><button type="button" className="rounded-lg border px-3 py-2 hover:bg-muted" onClick={() => void auth.retry()}>Retry sign-in check</button></div> :
@@ -121,7 +122,7 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
         />
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          {error ? <button type="button" className="rounded-lg border px-3 py-2 hover:bg-muted" onClick={() => void retrySession()}>Retry session</button> : "Initializing session..."}
+          {error ? <button type="button" className="rounded-lg border px-3 py-2 hover:bg-muted" onClick={() => void retrySession()}>Retry session</button> : <StatusMessage kind="loading" title="Initializing session..." />}
         </div>
       )}
       </>}

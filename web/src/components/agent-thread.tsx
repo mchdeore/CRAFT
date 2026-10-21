@@ -69,7 +69,7 @@ export const AgentThread = memo(function AgentThread({ sessionId, title = "New c
         <PersonalChatWorkspaceProvider configuration={workspace} ownerKey={sessionId}>
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4 pl-12 md:pl-4">
+            <header className="flex min-h-16 shrink-0 items-center gap-3 border-b px-4 py-3">
               <ChatTitle sessionId={sessionId} title={title} onChanged={onChanged} />
               {selectedSkill && <span role="status" className="hidden max-w-48 truncate rounded-full border px-2 py-0.5 text-xs text-muted-foreground sm:inline">Skill: {selectedSkill.name} · revision {selectedSkill.revision}</span>}
               <RunRecoveryStatus view={recoveryView} onRefresh={recovery.refresh} />
