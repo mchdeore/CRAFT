@@ -124,7 +124,7 @@ For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` 
 SEED_DEMO_PASSWORD='choose-a-local-password' uv run craft seed demo
 ```
 
-`scripts/demo go` runs the whole local demo on the configured models: it wipes the demo database and workspace, builds the workspace image, migrates and seeds the database, starts one demo workspace, the backend and the frontend, then opens `http://localhost:5200`. `scripts/demo stop` stops them. Model settings come from the checkout's `.env`; generated database passwords and the demo password live in the ignored `var/demo/`.
+`scripts/demo go` runs the whole local demo on the configured models: it wipes the demo database and workspace, builds the workspace image, migrates and seeds the database, starts one demo workspace, the backend and the frontend, then opens `http://localhost:5200`. `scripts/demo stop` stops them. The seeded accounts sign in with password `1` unless `DEMO_PASSWORD` is set. Model settings come from the checkout's `.env`; generated database passwords live in the ignored `var/demo/`.
 
 The production build ignores environment files and includes only curated public assets. Serve its `web/dist/` output with the authenticated backend from the same origin and its `/api/` routes; the development proxy does not configure production serving. Return to the repository root for the following backend commands.
 
