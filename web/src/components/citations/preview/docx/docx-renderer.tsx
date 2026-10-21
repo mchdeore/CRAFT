@@ -1,6 +1,7 @@
 import { OfficePreviewToolbar } from "@/components/citations/preview/office-preview-toolbar";
 import type { DocumentRendererProps } from "@/components/citations/preview/renderer-contract";
 import { Button } from "@/components/ui/button";
+import { StatusMessage } from "@/components/ui/status-message";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -53,6 +54,10 @@ export function DocxRenderer({ blob, source }: DocumentRendererProps) {
     if (!container) return;
 
     let isCurrent = true;
+    setError(undefined);
+    setRendering(true);
+    setPageCount(0);
+    setCurrentPage(1);
     container.replaceChildren();
     citationTargetRef.current = undefined;
 
@@ -92,14 +97,10 @@ export function DocxRenderer({ blob, source }: DocumentRendererProps) {
           }
         }
       })
-      .catch((renderError: unknown) => {
+      .catch(() => {
         if (isCurrent) {
           setRendering(false);
-          setError(
-            renderError instanceof Error
-              ? renderError.message
-              : "Word document preview failed",
-          );
+          setError("Word preview unavailable");
         }
       });
 
@@ -183,11 +184,23 @@ export function DocxRenderer({ blob, source }: DocumentRendererProps) {
       </div>
 
       {rendering && !error && (
-        <div className="text-muted-foreground flex h-48 items-center justify-center text-sm">
-          Opening Word document…
+        <div className="flex h-48 items-center justify-center p-4">
+          <StatusMessage
+            kind="loading"
+            title="Opening Word document…"
+            detail="You can use Open original or Download below while the preview opens."
+          />
         </div>
       )}
-      {error && <p className="text-destructive p-4 text-sm">{error}</p>}
+      {error && (
+        <div className="p-4">
+          <StatusMessage
+            kind="error"
+            title={error}
+            detail="Use Open original or Download below to view this document."
+          />
+        </div>
+      )}
       <div
         ref={documentRef}
         style={{ zoom }}
