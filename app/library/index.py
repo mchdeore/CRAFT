@@ -2,6 +2,7 @@
 
 import hashlib
 import mimetypes
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,6 +14,7 @@ from app.infrastructure.config.settings import Settings
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.unit_of_work import unit_of_work
+from app.infrastructure.errors import ApiError
 from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.convert import convert
@@ -23,6 +25,8 @@ from app.library.summaries import make as make_summary
 
 # Documents summarized and embedded at once during a build.
 WORKERS = 8
+# Model calls for one document are tried this often, waiting 2, 4 then 8 seconds between.
+ATTEMPTS = 4
 
 
 def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
@@ -123,13 +127,20 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
 
         def represent(job):
             item, _, blocks = job
-            summary, summary_kind = make_summary(caller, blocks)
-            vectors = embed_many(
-                [item["title"] + " " + summary]
-                + [item["title"] + " " + b.heading_path + " " + b.text for b in blocks],
-                caller=caller,
-            )
-            return summary, summary_kind, vectors[0], vectors[1:]
+            for attempt in range(ATTEMPTS):
+                try:
+                    summary, summary_kind = make_summary(caller, blocks)
+                    vectors = embed_many(
+                        [item["title"] + " " + summary]
+                        + [item["title"] + " " + b.heading_path + " " + b.text for b in blocks],
+                        caller=caller,
+                    )
+                    return summary, summary_kind, vectors[0], vectors[1:]
+                except ApiError:
+                    # One failed call would otherwise discard the whole build.
+                    if attempt == ATTEMPTS - 1:
+                        raise
+                    time.sleep(2 ** (attempt + 1))
 
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             represented = list(pool.map(represent, pending))

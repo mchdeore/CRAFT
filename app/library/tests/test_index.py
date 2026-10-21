@@ -1,7 +1,9 @@
 from sqlalchemy import select
 
 from app.infrastructure.database import metadata as m
+from app.infrastructure.errors import ApiError
 from app.infrastructure.provider.simulated import SimulatedProvider
+from app.library import index
 from app.library.index import build
 
 
@@ -74,3 +76,20 @@ def test_unsupported_format_continues(library) -> None:
     provider.write_content("reference/test.docx", b"Synthetic")
     assert build(library["settings"])["unsupported"] == 1
     assert len(handles(library)) > 0
+
+
+def test_failed_model_call_is_retried(library, monkeypatch) -> None:
+    provider = SimulatedProvider(library["root"])
+    provider.write_content("reference/retry.md", b"# Retry\n\nSynthetic retried text.")
+    summarize, calls = index.make_summary, []
+
+    def flaky(caller, blocks):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ApiError()
+        return summarize(caller, blocks)
+
+    monkeypatch.setattr(index, "make_summary", flaky)
+    monkeypatch.setattr(index.time, "sleep", lambda seconds: None)
+    build(library["settings"])
+    assert len(calls) == 2
