@@ -124,25 +124,30 @@ export async function checkSource(citation: AnswerCitation, signal: AbortSignal,
   }
 }
 
-function codeExecutionFailed(value: unknown): boolean {
+type CodeExecutionStatus = "ok" | "error" | "unknown";
+// Allows escaped 64 KiB output in paired text/structured MCP envelopes.
+const MAX_CODE_RESULT_CHARACTERS = 2 * 1024 * 1024;
+
+function codeExecutionStatus(value: unknown): CodeExecutionStatus {
   try {
     // Workspace actions can be wrapped in nested MCP envelopes in live/history.
     // Inspect only bounded results; never surface kernel error or output text.
     for (let depth = 0; depth < 4; depth++) {
       if (typeof value === "string") {
-        if (value.length > 131072) return false;
+        if (value.length > MAX_CODE_RESULT_CHARACTERS) return "unknown";
         value = JSON.parse(value);
       }
-      if (!record(value)) return false;
-      if (value.status === "error" && only(value, ["status", "outputs", "error", "truncated"]) &&
-        typeof value.truncated === "boolean" && (value.error === null || typeof value.error === "string" && value.error.length <= 131072) &&
-        Array.isArray(value.outputs) && value.outputs.length <= 1000 && value.outputs.every(output => typeof output === "string" && output.length <= 131072)) return true;
+      if (!record(value)) return "unknown";
+      if (value.isError === true) return "error";
+      if ((value.status === "ok" || value.status === "error") && only(value, ["status", "outputs", "error", "truncated"]) &&
+        typeof value.truncated === "boolean" && (value.error === null || typeof value.error === "string" && value.error.length <= MAX_CODE_RESULT_CHARACTERS) &&
+        Array.isArray(value.outputs)) return value.status;
       if (record(value.structuredContent)) value = value.structuredContent;
       else if (Array.isArray(value.content) && value.content.length === 1 && record(value.content[0]) && value.content[0].type === "text") value = value.content[0].text;
-      else return false;
+      else return "unknown";
     }
   } catch { /* Malformed tool JSON supplies no execution-status claim. */ }
-  return false;
+  return "unknown";
 }
 
 export function toolView(part: unknown): ToolView {
@@ -150,10 +155,11 @@ export function toolView(part: unknown): ToolView {
   const name = typeof p.toolName === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(p.toolName) ? p.toolName : "Tool";
   const correlationId = typeof p.toolCallId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p.toolCallId) ? p.toolCallId : undefined;
   const status = record(p.status) ? p.status.type as ToolCallMessagePartStatus["type"] : undefined;
-  const failed = p.isError === true || name === "run_code" && codeExecutionFailed(p.result);
+  const execution = status === "complete" && name === "run_code" && p.isError !== true ? codeExecutionStatus(p.result) : undefined;
+  const completed = p.isError === true || execution === "error" ? "Failed" : execution === "unknown" ? "Unavailable" : "Completed";
   return {
     name, correlationId,
-    status: status === "running" ? "Running" : status === "complete" ? (failed ? "Failed" : "Completed") : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
+    status: status === "running" ? "Running" : status === "complete" ? completed : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
   };
 }
 
