@@ -21,7 +21,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
-    password_min_length: Annotated[int, msgspec.Meta(ge=12)] = 12
+    password_min_length: Annotated[int, msgspec.Meta(ge=1)] = 12
     allowed_origins: str = "http://localhost:8000"
     cross_origin_browser: bool = False
     dev_page: bool = False

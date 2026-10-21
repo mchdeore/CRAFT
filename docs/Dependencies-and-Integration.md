@@ -118,7 +118,7 @@ CRAFT_BACKEND_URL=http://127.0.0.1:8000 npm run dev
 
 The development proxy forwards `/api`, `/health` and `/mcp` to the selected loopback backend. `CRAFT_BACKEND_URL` must be a single HTTP or HTTPS loopback origin without credentials, a path, query or fragment. The backend must allow the frontend Origin. Live mode is the default and uses authenticated sessions.
 
-For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least 12 characters and is never stored in the repository:
+For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and is never stored in the repository:
 
 ```bash
 SEED_DEMO_PASSWORD='choose-a-local-password' uv run craft seed demo
