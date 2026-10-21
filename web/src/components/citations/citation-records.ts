@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type { CitationSource } from "@/components/citations/citation-context";
 
 // A citation is a Markdown link like [1](/api/citations/<id>). craft-sources
@@ -86,24 +85,6 @@ export function currentStates(urls: readonly string[]): Map<string, CitationStat
 export function useCitationStates(
   urls: readonly string[],
 ): ReadonlyMap<string, CitationState> {
-  // Legacy citation-service records are used only by the explicit mock UI.
-  // The standalone cache functions retain their original unit semantics.
-  const mock = import.meta.env?.VITE_MOCK === "true";
-  const key = mock ? urls.join("\n") : "";
-  // Bumped when a lookup settles, so the component reads `settled` again.
-  const [, setVersion] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    for (const url of key ? key.split("\n") : []) {
-      void loadCitation(url).then(() => {
-        if (!cancelled) setVersion((version) => version + 1);
-      });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [key]);
-
-  return mock ? currentStates(urls) : new Map(urls.map((url) => [url, { status: "unverified" } as CitationState]));
+  // Inline links are not verified here; checked answer evidence owns citations.
+  return new Map(urls.map((url) => [url, { status: "unverified" } as CitationState]));
 }

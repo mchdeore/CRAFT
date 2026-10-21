@@ -21,7 +21,6 @@ import {
   ReasoningText,
   ReasoningTrigger,
 } from "@/components/assistant-ui/elements/reasoning.aui";
-import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -494,7 +493,6 @@ const MessageError: FC = () => {
 
 const AssistantMessage: FC = () => {
   const {
-    ToolFallback: ToolFallbackComponent = ToolFallback,
     ToolGroup,
     ReasoningGroup,
     TaskGroup: TaskGroupComponent,
@@ -558,9 +556,7 @@ const AssistantMessage: FC = () => {
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
-                return import.meta.env?.VITE_MOCK === "true"
-                  ? (part.toolUI ?? <ToolFallbackComponent {...part} />)
-                  : <ChatTool {...part} />;
+                return <ChatTool {...part} />;
               case "data":
                 return part.name === "agui-activity/craft.answer" ? null : part.dataRendererUI;
               case "file":

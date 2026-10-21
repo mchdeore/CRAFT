@@ -9,7 +9,6 @@ const sessions = await import('../src/hooks/use-agent-session.ts');
 const citations = await import('../src/components/citations/citation-records.ts');
 const history = await import('../src/lib/agent-history.ts');
 const thread = history;
-const storage = await import('../src/mocks/storage.ts');
 const App = (await import('../src/App.tsx')).default;
 const ownerA = { id: '11111111-1111-4111-8111-111111111111', username: 'generated-a', displayName: 'Generated A', roles: ['member'] };
 const ownerB = { id: '22222222-2222-4222-8222-222222222222', username: 'generated-b', displayName: 'Generated B', roles: ['member'] };
@@ -125,11 +124,6 @@ test('pending citation cannot repopulate the next owner cache', async () => {
   const old = citations.loadCitation('/api/citations/generated'); citations.clearCitationCache(); await citations.loadCitation('/api/citations/generated'); waiting.resolve(json({ title: 'Generated A', subtitle: 'Generated', previewURL: '/generated', mediaType: 'text/plain' })); await old;
   assert.equal(citations.currentStates(['/api/citations/generated']).get('/api/citations/generated').record.title, 'Generated B'); citations.clearCitationCache();
 });
-test('mock answers remain in memory and are never persisted', () => {
-  globalThis.sessionStorage = new MemoryStorage(); sessionStorage.setItem('craft-mock-sessions', 'legacy-generated'); sessionStorage.writes = [];
-  storage.saveSessions({ [id]: { ...summary, messages: [{ id: 'generated-message', role: 'assistant', content: 'generated-answer' }] } });
-  assert.equal(storage.loadSessions()[id].messages[0].content, 'generated-answer'); assert.deepEqual(sessionStorage.writes, []); assert.equal(sessionStorage.getItem('craft-mock-sessions'), null);
-});
 test('run HTTP 401 invalidates authentication without renewing conversation', async () => {
   let expired = 0, renewed = 0; const state = threadSession({ onAuthInvalid: () => expired++, onSessionInvalid: () => renewed++, onError: () => {} });
   globalThis.fetch = async () => json({ code: 'not_signed_in', message: 'generated', requestId: 'generated' }, 401);
@@ -179,7 +173,7 @@ test('thread disposal clears citation cache and refuses its pending completion',
   assert.equal(citations.currentStates(['/api/citations/generated']).get('/api/citations/generated').status, 'loading');
 });
 test('signed-out authentication removes legacy candidate body and ownerless ID storage', async () => {
-  globalThis.sessionStorage = new MemoryStorage(); sessionStorage.setItem('craft-mock-sessions', 'generated-legacy-body'); sessionStorage.setItem('pi-agent-session-id', id); sessionStorage.setItem('unrelated-setting', 'generated-setting');
+  globalThis.sessionStorage = new MemoryStorage(); sessionStorage.setItem('pi-agent-session-id', id); sessionStorage.setItem('unrelated-setting', 'generated-setting');
   const state = authSession(); globalThis.fetch = async () => json({}, 401); await state.start();
-  assert.equal(sessionStorage.getItem('craft-mock-sessions'), null); assert.equal(sessionStorage.getItem('pi-agent-session-id'), null); assert.equal(sessionStorage.getItem('unrelated-setting'), 'generated-setting');
+  assert.equal(sessionStorage.getItem('pi-agent-session-id'), null); assert.equal(sessionStorage.getItem('unrelated-setting'), 'generated-setting');
 });

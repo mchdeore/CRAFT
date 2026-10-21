@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import './typescript-loader.mjs';
-registerHooks({load(url,context,next){const loaded=next(url,context);return url.endsWith('/src/lib/api-client.ts')?{...loaded,source:String(loaded.source).replace(/import\.meta\.env\b/g,JSON.stringify({VITE_API_ORIGIN:'https://api.generated.example',VITE_MOCK:'false'}))}:loaded;}});
+registerHooks({load(url,context,next){const loaded=next(url,context);return url.endsWith('/src/lib/api-client.ts')?{...loaded,source:String(loaded.source).replace(/import\.meta\.env\b/g,JSON.stringify({VITE_API_ORIGIN:'https://api.generated.example'}))}:loaded;}});
 const {fromAgUiMessages,toAgUiMessages}=await import('@assistant-ui/react-ag-ui');
 const {createSessionHistory}=await import('../src/lib/agent-history.ts');
 const conversation='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
