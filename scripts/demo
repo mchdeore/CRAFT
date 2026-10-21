@@ -2,6 +2,7 @@
 # Local demo on real models and a freshly built workspace image.
 #   demo go    wipe the demo database and workspace, seed them, start everything, open Chrome
 #              (the workspace also gets app/seed/demo-finance-skill.md as a personal skill)
+#   demo go --reseed  index every document again with the model instead of restoring the saved seed
 #   demo stop  stop the backend, frontend, workspace and database
 # Accounts sign in with password 1 unless DEMO_PASSWORD is set. Generated database
 # passwords live in var/demo (ignored by git); nothing secret is printed.
@@ -9,6 +10,7 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 STATE=$REPO/var/demo
+SNAPSHOT=$STATE/seed-snapshot
 DB_PORT=55470 API_PORT=18766 UI_PORT=5200 JUPYTER_PORT=18881 MCP_PORT=4040 BRIDGE_PORT=18790
 UI=http://localhost:$UI_PORT
 PROJECT=craft-demo
@@ -65,6 +67,13 @@ stop() {
   fi
 }
 
+# The saved seed is reused until the seed code, migrations, embedding model or password change.
+seed_key() {
+  { (cd "$REPO" && find migrations app/seed seeds -type f -not -path '*/__pycache__/*' -not -name '*.md' \
+      | sort | xargs shasum)
+    echo "${CRAFT_MODEL_EMBEDDING:-}" "$DEMO_PASSWORD"; } | shasum -a 256 | cut -c1-16
+}
+
 wait_for() {
   for _ in $(seq 120); do curl -fs -o /dev/null "$@" && return; sleep 1; done
   echo "Timed out waiting for $*" >&2; exit 1
@@ -92,16 +101,27 @@ go() {
   say "Building the workspace image"
   docker build -q -f packages/user_workspace/Dockerfile -t "$IMAGE" packages/user_workspace >/dev/null
 
-  say "Creating and seeding the database"
   compose up -d --wait db >/dev/null
-  uv run -q alembic upgrade head
-  uv run -q craft seed base >/dev/null
-  # Indexing makes one real model call per document; a rerun resumes after a failed call.
-  for attempt in 1 2 3; do
-    uv run -q craft seed demo > "$STATE/seed.log" 2>&1 && break
-    [ "$attempt" = 3 ] && { echo "Seeding failed; see $STATE/seed.log" >&2; exit 1; }
-    say "Seeding stopped on a model error; resuming"
-  done
+  if [ "${1:-}" != --reseed ] && [ -f "$SNAPSHOT/key" ] && [ "$(cat "$SNAPSHOT/key")" = "$(seed_key)" ]; then
+    say "Restoring the saved seed (no model calls)"
+    compose exec -T db pg_restore -U postgres -d craft_dev --exit-on-error < "$SNAPSHOT/craft_dev.dump"
+    tar -xzf "$SNAPSHOT/provider.tgz" -C "$STATE"
+  else
+    say "Creating and seeding the database (indexes every document with the model)"
+    uv run -q alembic upgrade head
+    uv run -q craft seed base >/dev/null
+    # Indexing makes one real model call per document; a rerun resumes after a failed call.
+    for attempt in 1 2 3; do
+      uv run -q craft seed demo > "$STATE/seed.log" 2>&1 && break
+      [ "$attempt" = 3 ] && { echo "Seeding failed; see $STATE/seed.log" >&2; exit 1; }
+      say "Seeding stopped on a model error; resuming"
+    done
+    say "Saving the seed so the next demo go skips indexing"
+    rm -rf "$SNAPSHOT"; mkdir -p "$SNAPSHOT"
+    compose exec -T db pg_dump -U postgres -Fc craft_dev > "$SNAPSHOT/craft_dev.dump"
+    tar -czf "$SNAPSHOT/provider.tgz" -C "$STATE" provider
+    seed_key > "$SNAPSHOT/key"
+  fi
 
   say "Starting the demo workspace"
   workspace
@@ -216,7 +236,7 @@ MAP
 }
 
 case "${1:-}" in
-  go) go ;;
+  go) go "${2:-}" ;;
   stop) stop; say "Demo stopped" ;;
-  *) echo "usage: demo go | demo stop" >&2; exit 2 ;;
+  *) echo "usage: demo go [--reseed] | demo stop" >&2; exit 2 ;;
 esac
