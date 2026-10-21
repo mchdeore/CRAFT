@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api-client";
 import { resolveWorkspaceURL, type WorkspaceConfiguration } from "@/components/workspace-url";
-import type { LibraryHit, LibrarySearch } from "craft-api/api/types";
+import type { LibraryHit } from "craft-api/api/types";
 
 export type SourceResult = Pick<LibraryHit, "title" | "classification"> & {
   item: string; version: number; snippet: string;
@@ -39,36 +39,6 @@ const positiveVersion = (value: unknown): value is number => typeof value === "n
 const classification = (value: unknown) => value === "unclassified" || value === "protected-a" || value === "protected-b";
 const hasControl = (value: string) => [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 const cancelled = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException("Request cancelled", "AbortError"); };
-
-export async function searchSources(query: string, signal: AbortSignal): Promise<{ results: SourceResult[]; truncated: boolean }> {
-  if (!query.trim() || query.length > 500 || hasControl(query)) throw new SourceImportFailure("invalid_query");
-  cancelled(signal);
-  const request: LibrarySearch = { query: query.trim(), kinds: ["document"], limit: 6 };
-  try {
-    const response = await apiFetch("/api/library/search", {
-      method: "POST", credentials: "same-origin", redirect: "error", cache: "no-store", signal,
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
-    });
-    cancelled(signal);
-    if (response.status === 401) throw new SourceImportFailure("craft_auth");
-    if (!response.ok) throw new SourceImportFailure("search_unavailable");
-    const body: unknown = await response.json();
-    cancelled(signal);
-    if (!record(body) || !Array.isArray(body.hits) || body.hits.length > 6 || typeof body.truncated !== "boolean") throw new SourceImportFailure("invalid_response");
-    const results: SourceResult[] = [];
-    for (const hit of body.hits) {
-      if (!record(hit) || hit.kind !== "document" || !record(hit.handle) || !safeItem(hit.handle.item) || !positiveVersion(hit.handle.version)
-        || typeof hit.title !== "string" || typeof hit.text !== "string" || !classification(hit.classification)) throw new SourceImportFailure("invalid_response");
-      const item = hit.handle.item, version = hit.handle.version;
-      if (results.some(result => result.item === item && result.version === version)) continue;
-      results.push({ item, version, title: hit.title.slice(0, 400), snippet: hit.text.slice(0, 640), classification: hit.classification as LibraryHit["classification"] });
-    }
-    return { results, truncated: body.truncated };
-  } catch (error) {
-    cancelled(signal);
-    throw error instanceof SourceImportFailure ? error : new SourceImportFailure("search_unavailable");
-  }
-}
 
 function workspaceOrigin(configuration: WorkspaceConfiguration): string {
   try {
