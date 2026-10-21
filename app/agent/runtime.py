@@ -43,7 +43,7 @@ from app.infrastructure.paths import ROOT
 from app.library.handlers import ChunkText, LibraryDocument, LibraryHit
 from app.skills import native as saved_skills
 
-RUN_SECONDS = 120
+RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
 _read_only_query = ContextVar("read_only_query", default=False)
 
@@ -354,7 +354,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         parent.caller = trusted
     started = asyncio.get_running_loop().time()
     elapsed = 0
-    deadline = started + RUN_SECONDS
+    limit = min(RUN_SECONDS, caller.settings.agent_run_seconds)
+    deadline = started + limit
     status = "failed"
     selected = None
     transport = None
@@ -382,8 +383,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             budget["calls"] = previous.get("toolCalls", 0)
             trace.extend(previous.get("retrievalPath", []))
             results.extend(dict(item, text=item["quote"]) for item in previous.get("evidence", []))
-            deadline = started + max(0, RUN_SECONDS - elapsed)
-            if elapsed >= RUN_SECONDS:
+            deadline = started + max(0, limit - elapsed)
+            if elapsed >= limit:
                 raise TimeoutError()
             initial_skills = await run_in_threadpool(
                 saved_skills.load, trusted, saved.state.get("craftSkills", []), set(allowed)
