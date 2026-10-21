@@ -18,7 +18,7 @@ Select a `/workspace` file link in a chat response to open the current personal 
 
 In **Chat**, describe the document in ordinary language. Source-result cards show its title, sentence preview and pinned version. Select **Import copy** to save the full original into the personal workspace and open its preview in chat. The browser performs this transfer with the existing CRAFT and Jupyter sign-ins; the agent does not receive those credentials. A previous saved copy can also be opened from the agent’s `/workspace` link.
 
-In **Workspace → Files**, open JupyterLab and sign in there if needed, then choose **Search sources** in CRAFT and select **Import copy**. This saves the selected original version into `USER_ROOT/imports` with a readable name, such as `report.xlsx`, and reveals its containing folder in Personal files. If that name is taken, it tries numeric alternatives such as `report-2.xlsx`, up to 20 names, without overwriting existing files. The import limit is 16 MB.
+In **Workspace → Files**, open JupyterLab and sign in there if needed, then choose **Search sources** in CRAFT and select **Import copy**. This saves the selected original version into the workspace root (`USER_ROOT`) with a readable name, such as `report.xlsx`, and reveals its containing folder in Personal files. If that name is taken, it tries numeric alternatives such as `report-2.xlsx`, up to 20 names, without overwriting existing files. The import limit is 16 MB.
 
 Source identity and the initial SHA-256 hash are recorded separately in `USER_ROOT/imports/source-metadata/<UUID>.json`. If metadata cannot be confirmed after the copy saves, search stays open with the warning, saved path and **Open copy** action. The personal browser still refreshes and reveals the saved copy.
 

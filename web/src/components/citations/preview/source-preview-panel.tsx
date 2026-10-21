@@ -1,4 +1,9 @@
-import { apiResourceURL } from "@/lib/api-client";
+import { useEffect, useState } from "react";
+import { usePersonalChatWorkspace } from "@/components/personal-chat-workspace";
+import { useSourceImport, sourceKey } from "@/hooks/use-source-import";
+import { personalJupyterURL } from "@/lib/personal-preview";
+import type { SourceResult } from "@/lib/source-import";
+import { apiFetch, apiResourceURL } from "@/lib/api-client";
 import {
   useCitations,
   type PreviewDocument,
@@ -14,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   DownloadIcon,
+  FolderInputIcon,
   ExternalLinkIcon,
   LoaderCircleIcon,
   XIcon,
@@ -89,6 +95,7 @@ function PreviewContent({
   inDialog: boolean;
 }) {
   const preview = useDocumentPreview(source);
+  const workspace = usePersonalChatWorkspace();
 
   return (
     <>
@@ -110,6 +117,7 @@ function PreviewContent({
             </p>
           </>
         )}
+        {source.sourceID && source.version && workspace?.configuration.status === "configured" && <PreviewImport key={JSON.stringify([source.sourceID, source.version])} source={source} />}
         <Button
           type="button"
           variant="ghost"
@@ -192,4 +200,41 @@ function PreviewBody({
 
 function previewSubtitle(source: PreviewDocument): string {
   return source.subtitle ?? source.locationLabel ?? source.locator ?? "";
+}
+
+function PreviewImport({ source }: { source: PreviewDocument }) {
+  const workspace = usePersonalChatWorkspace();
+  const { state, start, reset } = useSourceImport(workspace?.configuration);
+  const [verified, setVerified] = useState<SourceResult>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => { setError("Source details could not be confirmed. Close the preview and try again."); controller.abort(); }, 10000);
+    const version = Number(source.version);
+    if (source.classification && Number.isSafeInteger(version) && version > 0) {
+      Promise.resolve().then(() => { if (!controller.signal.aborted) setVerified({ item: source.sourceID!, version, title: source.title, classification: source.classification!, snippet: "" }); });
+    } else {
+      void apiFetch(`/api/library/documents/${encodeURIComponent(source.sourceID!)}?version=${version}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
+        if (!response.ok) throw new Error();
+        const body = await response.json();
+        if (body.item !== source.sourceID || body.version !== version || typeof body.title !== "string" || !["unclassified", "protected-a", "protected-b"].includes(body.classification)) throw new Error();
+        if (!controller.signal.aborted) setVerified({ item: body.item, version, title: body.title, classification: body.classification, snippet: "" });
+      }).catch(() => { if (!controller.signal.aborted) setError("Source details could not be confirmed. Close the preview and try again."); }).finally(() => clearTimeout(timer));
+    }
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [source]);
+  const configuration = workspace?.configuration;
+  if (configuration?.status !== "configured") return null;
+  const current = verified ? state.get(sourceKey(verified)) : undefined;
+  if (current?.status === "done" || current?.status === "partial") return <div role={current.status === "done" ? "status" : "alert"} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+    <span>Imported as {current.path}</span>
+    {current.message && <span>{current.message}</span>}
+    {current.path && <a className="underline" href={personalJupyterURL(configuration, current.path)} target="_blank" rel="noopener noreferrer">Open</a>}
+    {current.status === "done" && <button type="button" className="underline" onClick={() => { reset(verified!); void start(verified!); }}>Import another copy</button>}
+  </div>;
+  return <div className="mt-2 space-y-1 text-xs">
+    <Button size="sm" variant="outline" disabled={!verified || current?.status === "pending" || current?.status === "unknown"} onClick={() => verified && void start(verified)}><FolderInputIcon />{current?.status === "pending" ? "Importing…" : "Import to workspace"}</Button>
+    {(error || current?.message) && <p role="alert">{error ?? current?.message}{current?.path && ` Check ${current.path}.`}</p>}
+    {current?.signIn && <a className="underline" href={configuration.url} target="_blank" rel="noopener noreferrer">Sign in to workspace</a>}
+  </div>;
 }

@@ -14,6 +14,7 @@ import {
 // published. The location fields only exist for citations, and let the
 // panel jump to the cited page, heading or row.
 export interface PreviewDocument {
+  classification?: "unclassified" | "protected-a" | "protected-b";
   title: string;
   mediaType: string;
   previewURL: string;

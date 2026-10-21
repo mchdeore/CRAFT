@@ -302,7 +302,7 @@ they issue no credentials or persistent runs.
 ## Import source copies
 
 In Workspace, sign in to JupyterLab, search sources and select Import to copy an
-original version into `USER_ROOT/imports`. Files up to 16 MB receive readable names
+original version into the workspace root (`USER_ROOT`). Files up to 16 MB receive readable names
 such as `report.xlsx`. If a name is taken, Import tries numeric alternatives such
 as `report-2.xlsx`, up to 20 names, without overwriting existing files.
 

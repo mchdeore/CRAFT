@@ -1,30 +1,13 @@
 import { useAuiState } from "@assistant-ui/react";
 import { ChevronDownIcon, FilesIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 import { chatSourceResults, type ChatSource, type ChatSourceResults } from "@/lib/chat-source-results";
-import { importSource, SourceImportFailure } from "@/lib/source-import";
+import { useSourceImport, sourceKey, type ImportState } from "@/hooks/use-source-import";
 import { personalJupyterURL } from "@/lib/personal-preview";
+import { useCitations } from "@/components/citations/citation-context";
 import { usePersonalChatWorkspace } from "@/components/personal-chat-workspace";
 
-type ImportState = { source: ChatSource; status: "pending" | "done" | "partial" | "unknown" | "error"; path?: string; message?: string; signIn?: boolean };
-type ImportStore = { states: ReadonlyMap<string, ImportState>; subscribe: (listener: () => void) => () => void; snapshot: () => ReadonlyMap<string, ImportState>; set: (state: ImportState) => void };
-const scopes = new WeakMap<(path: string) => void, ImportStore>();
-const sourceKey = (source: ChatSource) => JSON.stringify([source.item, source.version]);
 const buttonClass = "rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50";
-
-function importStore(open?: (path: string) => void): ImportStore {
-  const existing = open && scopes.get(open);
-  if (existing) return existing;
-  const listeners = new Set<() => void>();
-  const store: ImportStore = {
-    states: new Map(),
-    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    snapshot: () => store.states,
-    set(state) { store.states = new Map(store.states).set(sourceKey(state.source), state); for (const listener of listeners) listener(); },
-  };
-  if (open) scopes.set(open, store);
-  return store;
-}
 
 // One turn can span several assistant messages, one per step. Its sources show
 // once, collapsed under the turn's last message, so the answer stays on top.
@@ -43,43 +26,15 @@ export function ChatSourceCards() {
 
 export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
   const workspace = usePersonalChatWorkspace();
-  // The provider's stable open function belongs to one owner and workspace URL.
-  // Share outcomes across messages without retaining another owner's identities.
-  const store = useMemo(() => importStore(workspace?.open), [workspace?.open]);
-  const states = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  const { openSource } = useCitations();
+  const { state: states, start } = useSourceImport(workspace?.configuration);
   const [initiated, setInitiated] = useState<ReadonlySet<string>>(() => new Set());
-  const request = useRef<{ controller: AbortController; source: ChatSource } | null>(null);
-  useEffect(() => () => {
-    const active = request.current; request.current = null;
-    if (active) {
-      active.controller.abort();
-      store.set({ source: active.source, status: "unknown", message: "Import was cancelled. A personal file may have been created. Check JupyterLab before importing again." });
-    }
-  }, [store]);
   const configured = workspace?.configuration.status === "configured" ? workspace.configuration : undefined;
   const pending = [...states.values()].some(state => state.status === "pending");
   const importCopy = async (source: ChatSource) => {
-    const previous = store.states.get(sourceKey(source));
-    if (!configured || !workspace || request.current || [...store.states.values()].some(state => state.status === "pending") || previous && previous.status !== "error") return;
-    const controller = new AbortController(); request.current = { controller, source };
     setInitiated(current => new Set(current).add(sourceKey(source)));
-    store.set({ source, status: "pending" });
-    let outcome: ImportState;
-    try {
-      const path = await importSource(source, configured, controller.signal);
-      outcome = { source, status: "done", path };
-    } catch (error) {
-      const failure = error instanceof SourceImportFailure ? error : undefined;
-      outcome = {
-        source, status: failure?.copiedPath ? "partial" : failure?.code === "outcome_unknown" || !failure ? "unknown" : "error",
-        path: failure?.copiedPath ?? failure?.possiblePath,
-        message: failure?.message ?? "The import result could not be confirmed. Check JupyterLab before importing again.",
-        signIn: failure?.code === "workspace_auth" || failure?.code === "import_unavailable",
-      };
-    }
-    if (request.current?.controller !== controller || controller.signal.aborted) return;
-    request.current = null; store.set(outcome);
-    if (outcome.status === "done" && outcome.path) workspace.open(outcome.path);
+    const outcome = await start(source);
+    if (outcome?.status === "done" && outcome.path) workspace?.open(outcome.path);
   };
   const status = (state: ImportState) => {
     if (state.status === "pending") return <p role="status" className="text-sm">Importing...</p>;
@@ -107,7 +62,10 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
       const state = states.get(sourceKey(source)), finished = state && state.status !== "pending" && state.status !== "error";
       const label = state?.status === "pending" ? "Importing..." : state?.status === "done" ? "Copy imported" : state?.status === "partial" ? "Copy saved" : state?.status === "unknown" ? "Check import" : state?.status === "error" ? "Retry Import" : "Import copy";
       return <article key={sourceKey(source)} className="flex flex-col gap-1.5 rounded-lg border bg-background p-3">
-        <p className="break-words text-sm font-medium">{source.title.trim() || "Untitled document"}</p>
+        <button type="button" className="break-words text-left text-sm font-medium hover:underline" onClick={() => {
+          const base = `/api/library/documents/${encodeURIComponent(source.item)}`;
+          openSource({ title: source.title, classification: source.classification, sourceID: source.item, version: String(source.version), mediaType: "", previewURL: `${base}/preview?version=${source.version}`, downloadURL: `${base}/download?version=${source.version}` });
+        }}>{source.title.trim() || "Untitled document"}</button>
         <p className="truncate text-xs text-muted-foreground" title={source.item}>Source {source.item} · Version {source.version} · {source.classification}{source.simulated && " · Simulated"}</p>
         <p className="line-clamp-3 break-words text-sm text-foreground/80" title={source.snippet.trim()}>{source.snippet.trim() || "No sentence preview is available."}</p>
         <button type="button" className={buttonClass} aria-label={label + " for " + (source.title.trim() || "Untitled document") + ", source " + source.item + ", version " + source.version} disabled={!configured || pending || !!finished} onClick={() => void importCopy(source)}>{label}</button>

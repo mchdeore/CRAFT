@@ -23,6 +23,8 @@ export function resolveWorkspaceURL(value: string | undefined, craftOrigin: stri
     if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
       || url.username || url.password || url.search || url.hash || url.pathname !== "/"
       || url.origin === new URL(craftOrigin).origin) return { status: "invalid" };
+    const craftHost = new URL(craftOrigin).hostname;
+    if (["localhost", "127.0.0.1", "[::1]"].includes(craftHost)) url.hostname = craftHost;
     url.pathname = "/lab";
     return { status: "configured", url: url.href };
   } catch {
