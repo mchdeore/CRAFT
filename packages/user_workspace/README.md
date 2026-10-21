@@ -37,10 +37,12 @@ image installs the locked `analysis` extra for these additional imports:
 | NumPy and SciPy | Numerical analysis, statistics and optimization |
 | Matplotlib | Save charts for preview and export |
 | OpenPyXL | Read and write Excel workbooks |
+| python-docx | Edit personal Word copies and write Word outputs |
 
 Other deployments may have fewer packages. Check imports before specialized
 handling: Pandas XLSX I/O needs an installed engine such as OpenPyXL.
-`python-docx` provides a high-level DOCX API and is not installed in this image.
+`python-docx` provides the installed image's high-level DOCX API. It does not
+guarantee lossless editing of every Word feature; verify changes to an owned copy.
 Simple bounded DOCX text inspection can use the standard library's ZIP/XML
 tools; state their coverage limits and verify edits to an owned copy. External
 network access and source writes are not granted by the Python package.
