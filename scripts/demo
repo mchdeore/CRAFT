@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Local demo on real models and a freshly built workspace image.
 #   demo go    wipe the demo database and workspace, seed them, start everything, open Chrome
+#              (the workspace also gets app/seed/demo-finance-skill.md as a personal skill)
 #   demo stop  stop the backend, frontend, workspace and database
 # Accounts sign in with password 1 unless DEMO_PASSWORD is set. Generated database
 # passwords live in var/demo (ignored by git); nothing secret is printed.
@@ -165,9 +166,9 @@ POLICY
 
   wait_for -H "Authorization: token $(cat "$w/jupyter-token")" "http://127.0.0.1:$JUPYTER_PORT/api/status"
 
-  python3 - "$JUPYTER_PORT" "$w" <<'KERNEL'
+  python3 - "$JUPYTER_PORT" "$w" "$REPO/app/seed/demo-finance-skill.md" <<'KERNEL'
 import json, sys, urllib.request
-port, folder = sys.argv[1], sys.argv[2]
+port, folder, skill = sys.argv[1], sys.argv[2], sys.argv[3]
 token = open(folder + "/jupyter-token").read()
 def call(method, path, body=None):
     request = urllib.request.Request(
@@ -178,6 +179,8 @@ def call(method, path, body=None):
         return json.loads(response.read() or b"null")
 notebook = {"type": "notebook", "content": {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}}
 call("PUT", "/api/contents/analysis.ipynb", notebook)
+call("PUT", "/api/contents/skills/demo-finance-skill.md",
+     {"type": "file", "format": "text", "content": open(skill).read()})
 session = call("POST", "/api/sessions", {"path": "analysis.ipynb", "type": "notebook", "kernel": {"name": "python3"}})
 open(folder + "/kernel-id", "w").write(session["kernel"]["id"])
 KERNEL
