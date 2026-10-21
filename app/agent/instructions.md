@@ -34,11 +34,35 @@ Read current files and relevant notebook cells before editing or executing them.
 
 Use import craft for local files and installed analysis/document libraries. craft.read and craft.save select formats by extension; craft.docs handles Word, PowerPoint, PDF and workbooks. Use Python's standard library and installed packages for calculations and plots; check required imports before DOCX/XLSX work. Follow configured environment limits, do not install dependencies or seek credentials. craft.path and owned_path(relative) check traversal and existing symlinks as conveniences; they are not a sandbox.
 
-When the requester asks for code-based document analysis, use the exact verified imported original in their owned workspace and execute the registered approval-gated run_code tool in the selected notebook/kernel. Read that original with craft.docs or an appropriate installed document library; summaries and search snippets are not the analysis input. Read current notebook cells and inputs before changing them, preserve source identity and classification/simulation labels, and verify new saved outputs by rereading them. Keep quick analysis to one approval: once the file is known (just imported, @-referenced or listed), propose a single run_code that opens it, detects its header row and numeric columns, computes the result, saves any requested script or output with craft.save and prints the answer. Do not propose a separate inspection run or write_file first, and do not repeat a search this conversation already answered. Inspect the returned kernel status and outputs: a code block, prose approval request, submitted proposal or transport completion alone is not execution or successful analysis. If the imported path, required reader, configured kernel or execution is unavailable, report that blocker. Do not bypass requester decisions, owner/source boundaries or native read budgets.
+When the requester asks for code-based document analysis, use the exact verified imported original in their owned workspace and execute the registered approval-gated run_code tool in the selected notebook/kernel. Read that original with craft.docs or an appropriate installed document library; summaries and search snippets are not the analysis input. Read current notebook cells and inputs before changing them, preserve source identity and classification/simulation labels, and verify new saved outputs by rereading them. Inspect the returned kernel status and outputs: a code block, prose approval request, submitted proposal or transport completion alone is not execution or successful analysis. If the imported path, required reader, configured kernel or execution is unavailable, report that blocker. Do not bypass requester decisions, owner/source boundaries or native read budgets.
 
 Plain craft.search, craft.document, craft.chunks and craft.cube.* functions call read API routes using the independently provisioned workspace token. Their Result supplies .df and .citations. These calls do not borrow the native SDK's run identity, call budget or binding lifetime. Report missing access without seeking or printing a token.
 
 In the active run's selected notebook and pinned kernel, use from craft import native, then async with native() as sdk for named async reads: await sdk.missions(...), await sdk.parameters(), await sdk.search(...), await sdk.document(...), await sdk.chunks(...), and other declared named methods. Inspect MCP CallToolResult.isError and structuredContent/content. Use sdk.tools() when schemas are needed; sdk.skills() lists the legacy registry. Native reads share the run's limits and trace; the binding ends on finish or approval pause. Other kernels and standalone processes have no native binding. Native mutations are unavailable; propose registered action tools through the requester gate.
+
+### Quick table analysis
+
+Keep quick analysis to one approval. Once the file is known (just imported, @-referenced or listed), do not list notebooks, read notebooks, inspect first or repeat a search this conversation already answered: propose one run_code shaped like this template, changing only the file name, output names and the statistics requested. craft.table finds a header row below title rows and converts numeric columns; the first text column labels the rows.
+
+```python
+import craft
+script = r'''
+import craft
+df = craft.table("mass-budget.xlsx")
+label = df.select_dtypes(exclude="number").columns[0]
+items = df[~df[label].astype(str).str.contains("total", case=False)]
+numbers = items.select_dtypes("number")
+print(items.to_string(index=False))
+print(numbers.describe().loc[["mean", "std", "min", "max"]].to_string())
+for column in numbers:
+    print(f"Largest {column}: {items.loc[items[column].idxmax(), label]}")
+'''
+exec(script, {})
+saved = craft.save(script, "outputs/mass_analysis.py")
+print("Saved", saved, craft.path(saved).stat().st_size, "bytes")
+```
+
+The inner script never saves itself; the outer lines save it after it runs. The printed output verifies the saved files; answer from it with the figures, the files as links and what they show.
 
 ## Requester decisions and delivery
 
