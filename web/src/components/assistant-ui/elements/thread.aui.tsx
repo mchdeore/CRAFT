@@ -75,6 +75,7 @@ import {
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
@@ -133,6 +134,8 @@ const taskAwareGroupBy = (
 
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
+  /** Shown directly above the composer, such as a pending approval. */
+  beforeComposer?: ReactNode;
   autoFocus?: boolean | undefined;
   workspace?: WorkspaceConfiguration | undefined;
 };
@@ -180,20 +183,22 @@ export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   autoFocus = true,
   workspace,
+  beforeComposer,
 }) => {
   const isEmpty = useAuiState(isNewChatView);
 
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} workspace={workspace} />
+      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} workspace={workspace} beforeComposer={beforeComposer} />
     </ThreadComponentsContext.Provider>
   );
 };
 
-const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; workspace?: WorkspaceConfiguration }> = ({
+const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; workspace?: WorkspaceConfiguration; beforeComposer?: ReactNode }> = ({
   isEmpty,
   autoFocus,
   workspace,
+  beforeComposer,
 }) => {
   const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
 
@@ -242,8 +247,10 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; workspace?: Workspa
           >
             <ThreadScrollToBottom />
             <ThreadFollowupSuggestions />
+            {beforeComposer}
             <Composer autoFocus={autoFocus} workspace={workspace} />
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
+              <ThreadStarters />
               <ThreadSuggestions />
             </AuiIf>
           </ThreadPrimitive.ViewportFooter>
@@ -370,15 +377,36 @@ const ThreadScrollToBottom: FC = () => {
   );
 };
 
+const STARTERS = [
+  { title: "Find missions", prompt: "Which missions have a dry mass under 150 kg? Cite the values." },
+  { title: "Compare missions", prompt: "Compare peak power and dry mass for msn-sim-01 and msn-sim-02." },
+  { title: "Search documents", prompt: "Which documents mention the radiator margin, and what do they say?" },
+  { title: "Summarize a document", prompt: "Summarize the thermal design document for msn-sim-01." },
+];
+
 const ThreadWelcome: FC = () => {
   return (
-    <div className="aui-thread-welcome-root mb-6 flex flex-col px-2">
+    <div className="aui-thread-welcome-root mb-6 flex flex-col gap-1.5 px-2">
       <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-2xl font-medium tracking-tight duration-200">
-        How can I help you today?
+        What are we working on?
+      </p>
+      <p className="fade-in animate-in fill-mode-both text-sm text-muted-foreground duration-300">
+        Ask about project documents and mission parameters. Answers cite their sources. Type / for your skills and @ for your files.
       </p>
     </div>
   );
 };
+
+const ThreadStarters: FC = () => (
+  <div className="grid w-full gap-2 sm:grid-cols-2">
+    {STARTERS.map(starter => (
+      <ThreadPrimitive.Suggestion key={starter.title} prompt={starter.prompt} send={false} render={<button type="button" className="fade-in animate-in fill-mode-both flex flex-col items-start gap-0.5 rounded-xl border px-3.5 py-2.5 text-start text-sm transition-colors duration-200 hover:bg-foreground/[0.03]" />}>
+        <span className="font-medium">{starter.title}</span>
+        <span className="line-clamp-1 text-muted-foreground">{starter.prompt}</span>
+      </ThreadPrimitive.Suggestion>
+    ))}
+  </div>
+);
 
 const ThreadSuggestions: FC = () => {
   return (
@@ -413,7 +441,7 @@ const Composer: FC<{ autoFocus: boolean; workspace?: WorkspaceConfiguration }> =
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       {workspace && <PersonalReferencePickers configuration={workspace} />}
       <ComposerPrimitive.AttachmentDropzone render={<div data-slot="aui_composer-shell" className="border-foreground/10 focus-within:border-foreground/25 data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]" />}><ComposerAttachments /><ComposerPrimitive.Input
-                      placeholder="Send a message… / for personal skills, @ for personal files"
+                      placeholder="Ask CRAFT…  / skills  @ files"
                       className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
                       rows={1}
                       autoFocus={autoFocus}

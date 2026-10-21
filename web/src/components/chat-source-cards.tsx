@@ -80,22 +80,24 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
   const visible = new Set(results.sources.map(sourceKey));
   const retained = [...states.values()].filter(state => initiated.has(sourceKey(state.source)) && !visible.has(sourceKey(state.source)));
   if (!results.sources.length && !retained.length) return null;
-  return <section aria-label="Source choices and personal imports" className="mt-4 space-y-3 rounded-xl border p-3">
-    <h3 className="text-sm font-semibold">Source documents</h3>
+  return <section aria-label="Source choices and personal imports" className="mt-3 space-y-2.5 rounded-xl border bg-muted/20 p-3">
+    <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Source documents</h3>
     <p className="text-xs text-muted-foreground">Import copy saves the original version in your personal workspace. Maximum 16 MB; inline previews support up to 10 MB.</p>
     {!configured && <p role="status" className="text-sm">Connect your personal workspace to import a copy.</p>}
     {results.truncated && <p className="text-xs text-muted-foreground">Source choices are bounded. Refine your search for more results.</p>}
+    <div className="grid gap-2 sm:grid-cols-2">
     {results.sources.map(source => {
       const state = states.get(sourceKey(source)), finished = state && state.status !== "pending" && state.status !== "error";
       const label = state?.status === "pending" ? "Importing..." : state?.status === "done" ? "Copy imported" : state?.status === "partial" ? "Copy saved" : state?.status === "unknown" ? "Check import" : state?.status === "error" ? "Retry Import" : "Import copy";
-      return <article key={sourceKey(source)} className="space-y-2 rounded-md border p-3">
+      return <article key={sourceKey(source)} className="flex flex-col gap-1.5 rounded-lg border bg-background p-3">
         <p className="break-words text-sm font-medium">{source.title.trim() || "Untitled document"}</p>
-        <p className="break-words text-xs text-muted-foreground">Source {source.item} · Version {source.version} · {source.classification}{source.simulated && " · Simulated"}</p>
-        <p className="whitespace-pre-wrap break-words text-sm">{source.snippet.trim() || "No sentence preview is available."}</p>
+        <p className="truncate text-xs text-muted-foreground" title={source.item}>Source {source.item} · Version {source.version} · {source.classification}{source.simulated && " · Simulated"}</p>
+        <p className="line-clamp-3 break-words text-sm text-foreground/80" title={source.snippet.trim()}>{source.snippet.trim() || "No sentence preview is available."}</p>
         <button type="button" className={buttonClass} aria-label={label + " for " + (source.title.trim() || "Untitled document") + ", source " + source.item + ", version " + source.version} disabled={!configured || pending || !!finished} onClick={() => void importCopy(source)}>{label}</button>
         {state && status(state)}
       </article>;
     })}
+    </div>
     {retained.map(state => <article key={sourceKey(state.source)} className="space-y-2 rounded-md border p-3"><p className="text-sm font-medium">{state.source.title.trim() || "Untitled document"}</p><p className="break-words text-xs text-muted-foreground">Source {state.source.item} · Version {state.source.version} · {state.source.classification}{state.source.simulated && " · Simulated"}</p>{status(state)}</article>)}
   </section>;
 }
