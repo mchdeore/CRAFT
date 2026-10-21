@@ -194,7 +194,7 @@ def test_native_shape_limits_are_checked(library) -> None:
 
 def test_candidate_budget_is_global(library) -> None:
     from app.library import storage
-    from app.library.embed import embed
+    from app.tests.support.model import embedding
 
     provider = SimulatedProvider(library["root"])
     source = "\n".join(f"# {n} Section\n\nSimulated budget verification." for n in range(70))
@@ -205,7 +205,8 @@ def test_candidate_budget_is_global(library) -> None:
             session,
             library["callers"]["admin"],
             LibrarySearch(query="simulated"),
-            embed("simulated"),
+            embedding("simulated"),
+            library["settings"].model_embedding,
         )
     counts = Counter(method for _, method, _ in candidates)
     assert counts["lexical"] == 50 and counts["semantic"] == 50

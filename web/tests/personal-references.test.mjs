@@ -188,7 +188,7 @@ test("picker auth errors expose a retry that recovers without inserting unavaila
   globalThis.fetch = async () => { calls++; return authorized ? json({ type: "directory", path: "skills", content: [entry("skills/check.md")] }) : new Response("private response body", { status: 403 }); };
   const mounted = await mountReferenceControls();
   try {
-    await mounted.type("/", "/"); await settle(() => mounted.host.container.textContent.includes("sign in"));
+    await mounted.type("/", "/"); await settle(() => /sign in/i.test(mounted.host.container.textContent));
     assert.equal(mounted.host.elements("button").some(row => row.getAttribute("data-personal-path")), false); assert.doesNotMatch(mounted.host.container.textContent, /private response body/);
     authorized = true; await mounted.click("Retry"); await settle(() => mounted.host.elements("button").some(row => row.getAttribute("data-personal-path") === "skills/check.md")); assert.equal(calls, 2);
     await mounted.key("/", "Enter"); assert.equal(mounted.runtime().thread.composer.getState().text, "/workspace/skills/check.md ");

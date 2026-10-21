@@ -20,6 +20,7 @@ export default defineConfig(({ command }) => {
     publicDir: production ? "release-public" : "public",
     build: { outDir: "dist", sourcemap: false },
     plugins: [react(), tailwindcss()],
+    optimizeDeps: { include: ["docx-preview", "exceljs"] },
     server,
     resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   };

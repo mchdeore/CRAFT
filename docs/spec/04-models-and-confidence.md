@@ -10,12 +10,13 @@ The application programming interface (API) gives confidence as a score, level a
 | Groundedness check | GPT-5.2 | low | `CRAFT_MODEL_CHECK` |
 | Embeddings | text-embedding-3-large, 1536 dimensions | | `CRAFT_MODEL_EMBEDDING` |
 
-- `CRAFT_MODEL_MAIN=fake` selects a deterministic model and needs no endpoint or model key.
+- Every model, summary and embedding call goes to the configured provider. Without an endpoint and key the server still starts, serves sign-in, documents and the datacube, and refuses model calls.
 - Responses API calls use `store=false`. Conversations live in CRAFT's PostgreSQL. Each call has an output-token limit.
 - `CRAFT_MODEL_ENDPOINT` selects the Foundry project endpoint. `CRAFT_MODEL_KEY` supplies the local model API key. Configured mode requires an HTTPS endpoint and a key.
-- `CRAFT_MODEL_MAX_OUTPUT_TOKENS` accepts 16 to 4,000 tokens and defaults to 4,000. Main and groundedness calls retain their selected model, effort, budget and storage setting.
+- `CRAFT_MODEL_MAX_OUTPUT_TOKENS` accepts 16 to 16,000 tokens and defaults to 4,000. Reasoning tokens count toward it, so agents that propose code need more than the default. Main and groundedness calls retain their selected model, effort, budget and storage setting.
+- `CRAFT_AGENT_RUN_SECONDS` accepts 30 to 900 seconds and defaults to 120. It caps one agent run's active time; time spent waiting for an approval does not count, but active time before and after it does.
 - Service-owned conversation references and software development kit (SDK) console payload logging are refused. Model requests run outside database transactions through private observations.
-- The separate fake model embedding is labeled `fake-model-embed@1`. Library fake mode uses `fake-embed@1`; configured mode uses the selected embedding model and 1,536 dimensions. Changing the embedding model requires `craft index --rebuild`. Semantic queries use matching-model vectors only.
+- Embeddings use the selected embedding model and 1,536 dimensions. Indexing sends each document's texts in batches of up to 64. Changing the embedding model requires `craft index --rebuild`. Semantic queries use matching-model vectors only.
 - Instructions live in `app/agent/instructions.md`; each run records their version.
 
 ## 4.2 Confidence

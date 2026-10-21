@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.agent import model
 from app.agent import service as agent_service
-from app.agent.fake import FakeChatClient
 from app.agent.handlers import RunAgentInput
 from app.approvals.handlers import (
     ApprovalRef,
@@ -47,6 +46,7 @@ from app.infrastructure.mcp.tests.http_fixture import live_server
 from app.infrastructure.operations.pipeline import ApprovalRequired
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library.handlers import index_provider
+from app.tests.support.model import ScriptedChatClient
 
 
 @pytest.fixture
@@ -490,7 +490,7 @@ def test_native_mcp_batch_resumes_after_application_restart(
     source = publication_source
     request = values(source)
 
-    class BatchClient(FakeChatClient):
+    class BatchClient(ScriptedChatClient):
         def reply(self, messages):
             completed = any(
                 content.type == "function_result"

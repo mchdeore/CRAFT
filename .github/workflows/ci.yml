@@ -66,10 +66,9 @@ jobs:
             --security-opt no-new-privileges --tmpfs /tmp \
             --entrypoint python craft-user-workspace:local-pilot \
             -c 'import os, craft, jupyterlab, pandas, duckdb, numpy, scipy, matplotlib, openpyxl; assert os.getuid() == 1000; assert str(craft.USER_ROOT) == "/workspace"'
+      # The full suite includes the contract and chat stream tests; the slowest tests are listed.
       - name: Tests
-        run: uv run pytest
-      - name: Contract tests
-        run: CRAFT_MODEL_MAIN=fake uv run pytest -q app/tests/test_contract.py app/agent/tests/test_chat_stream.py
+        run: uv run pytest --durations=15
       - name: Full stack
         env:
           CRAFT_DATABASE_PORT: "5433"  # the CI service holds 5432

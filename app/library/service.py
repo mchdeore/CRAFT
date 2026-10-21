@@ -464,19 +464,22 @@ def explore(caller: Caller, request):
             max(1, request.handle.block - request.before),
             request.handle.block + request.after,
         )
+        stored = (
+            storage.chunk_vectors(session, [b["id"] for b in blocks], model_name(settings))
+            if request.query
+            else {}
+        )
+    # Stored chunk vectors score the neighbours; only the query is embedded here.
     query = embed(request.query, caller=caller) if request.query else None
+
+    def score(block):
+        vector = stored.get(block["id"])
+        if query is None or vector is None:
+            return None
+        return sum(x * y for x, y in zip(query, vector, strict=True))
+
     return ChunkPage(
-        chunks=[
-            chunk_text(
-                item,
-                request.handle.version,
-                b,
-                sum(x * y for x, y in zip(query, embed(b["text"], caller=caller), strict=True))
-                if query
-                else None,
-            )
-            for b in blocks
-        ],
+        chunks=[chunk_text(item, request.handle.version, b, score(b)) for b in blocks],
         truncated=False,
     )
 

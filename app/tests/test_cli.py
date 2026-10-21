@@ -30,18 +30,19 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
             "run",
             "craft",
             "call",
-            "library.search",
+            "library.list_documents",
             "--as",
             "demo",
-            '{"query":"radiator margin"}',
+            "{}",
         ],
         env=env,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
-    hits = json.loads(result.stdout)["hits"]
-    assert hits and hits[0]["handle"]["item"].startswith("itm_")
+    # Search embeds its query with the configured model; the catalog needs no model.
+    documents = json.loads(result.stdout)["documents"]
+    assert documents and documents[0]["item"].startswith("itm_")
 
     async def run():
         parameters = StdioServerParameters(
@@ -56,8 +57,8 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
             assert {"search", "get_document", "read_chunks", "explore"} <= {
                 t.name for t in tools.tools
             }
-            result = await session.call_tool("search", {"query": "radiator margin"})
-            assert result.structuredContent is not None and result.structuredContent["hits"]
+            result = await session.call_tool("list_documents", {})
+            assert result.structuredContent is not None and result.structuredContent["documents"]
 
     try:
         asyncio.run(run())

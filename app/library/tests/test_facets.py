@@ -40,7 +40,7 @@ def test_validator(pair, monkeypatch):
     assert not any(row["mission_key"] == pair["mission"] for row in records(pair))
 
 
-def test_fake_facets_deterministic(pair):
+def test_scripted_facets_deterministic(pair):
     sessions, engine = make_owner_sessions(pair["settings"])
     caller = Caller(settings=pair["settings"], sessions=sessions)
     try:
@@ -95,9 +95,8 @@ def test_generated_summary_mode(cube_source, monkeypatch):
     from agent_framework import ChatResponse, Message
 
     from app.agent import model
-    from app.agent.fake import FakeChatClient
-    from app.library import index
-    from app.library.embed import embed
+    from app.tests.support import model as scripted_model
+    from app.tests.support.model import ScriptedChatClient
 
     calls = []
 
@@ -117,15 +116,13 @@ def test_generated_summary_mode(cube_source, monkeypatch):
             messages=[Message(role="assistant", contents=[answer])], model="scripted"
         )
 
-    monkeypatch.setattr(FakeChatClient, "reply", reply)
-    monkeypatch.setattr(model, "client", lambda settings, role: FakeChatClient(role))
-    monkeypatch.setattr(index, "embed", lambda text, caller=None: embed(text))
-    monkeypatch.setattr(facets, "embed", lambda text, caller=None: embed(text))
+    monkeypatch.setattr(ScriptedChatClient, "reply", reply)
+    monkeypatch.setattr(model, "client", lambda settings, role: ScriptedChatClient(role))
     configured = msgspec.structs.replace(
         cube_source["settings"],
         model_main="synthetic-model",
-        model_key="synthetic-key",
-        model_endpoint="https://synthetic.invalid",
+        model_key=scripted_model.KEY,
+        model_endpoint=scripted_model.ENDPOINT,
     )
     cube_source["provider"].write_content(
         cube_source["path"], b"# Simulated\n\nA new simulated source.\n"

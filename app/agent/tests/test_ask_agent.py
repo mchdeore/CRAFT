@@ -6,7 +6,6 @@ from uuid import uuid4
 from agent_framework import ChatResponse, Content, Message
 from sqlalchemy import select
 
-from app.agent.fake import FakeChatClient
 from app.agent.handlers import AskAgent, ask_agent
 from app.infrastructure.database import metadata as m
 from app.infrastructure.mcp.client import client
@@ -15,6 +14,7 @@ from app.library.handlers import CitationCheck, check_citation
 from app.tests.support.chat import chat as chat
 from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.model import ScriptedChatClient
 from app.tests.support.notes import remove_notes as remove_notes
 
 
@@ -82,7 +82,7 @@ def test_agent_not_offered_ask_agent(chat):
 
 
 def test_read_only_query_cannot_write_notes(chat, monkeypatch):
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
     title = "Run note " + uuid4().hex
 
     def scripted(self, messages):
@@ -111,11 +111,11 @@ def test_read_only_query_cannot_write_notes(chat, monkeypatch):
                     )
                 ],
                 response_id=uuid4().hex,
-                model="fake",
+                model="scripted",
             )
         return original(self, messages)
 
-    monkeypatch.setattr(FakeChatClient, "reply", scripted)
+    monkeypatch.setattr(ScriptedChatClient, "reply", scripted)
     result = asyncio.run(
         ask_agent(
             chat["caller"], AskAgent(question="Make a working note", conversation_id=chat["thread"])

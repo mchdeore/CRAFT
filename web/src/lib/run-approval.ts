@@ -89,6 +89,8 @@ export class RunApprovalController {
   private recovery: RunRecovery | null = null;
   private contextKey: string | null = null;
   private consumedKey: string | null = null;
+  // A decision made here resumes the run once its recorded status loads, without a second click.
+  private resumeAfterDecision: string | null = null;
   private snapshot = emptyView();
 
   constructor(sessionId: string, callbacks: RunApprovalCallbacks, fetcher: typeof fetch = apiFetch) {
@@ -114,6 +116,7 @@ export class RunApprovalController {
     this.recovery = null;
     this.contextKey = null;
     this.consumedKey = null;
+    this.resumeAfterDecision = null;
     this.snapshot = emptyView();
   };
   setRecovery = (view: RunRecoveryView) => {
@@ -151,6 +154,10 @@ export class RunApprovalController {
       if (!this.matches(data, recovery) || data.status !== recovery.approvalStatus) throw new Error(unavailable);
       if (!operation.current()) return;
       this.publish(this.readyView(data, recovery));
+      if (this.resumeAfterDecision === data.id) {
+        this.resumeAfterDecision = null;
+        if (this.snapshot.canResume) void this.resume();
+      }
     } catch { if (operation.current()) this.publishError(); }
   };
   decide = async (approve: boolean): Promise<void> => {
@@ -174,6 +181,7 @@ export class RunApprovalController {
       const decided = parseSummary(body);
       if (!this.matches(decided, recovery) || decided.status !== (approve ? "approved" : "rejected")) throw new Error(unavailable);
       this.consumedKey = this.contextKey;
+      this.resumeAfterDecision = data.id;
       this.publish(emptyView());
       if (operation.current()) void this.callbacks.onRecoveryRefresh();
     } catch { if (operation.current()) this.publishError(); }

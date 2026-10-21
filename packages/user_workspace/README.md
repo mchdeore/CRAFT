@@ -9,10 +9,12 @@ which is `/workspace`. Jupyter provides terminals, uploads, and downloads.
 
 Use `@` to select an owned file and `/` to select a Markdown skill under
 `/workspace/skills`. The message retains the exact path to its current contents.
-The agent reads that path through the configured `workspace_` tools, using their
-actual schemas. An exact path needs no discovery call; a missing file or an
-ambiguous name needs an honest response. Files and personal Markdown skills stay
-user-owned and need no registration in the saved-skill catalog.
+The configured `workspace_` tools list entries and read notebook cells, using their
+actual schemas. Plain files and selected Markdown skills require a small approved
+`run_code` read in a configured Jupyter kernel. An exact path needs no discovery
+call; a missing file, unavailable reader or ambiguous name needs an honest response.
+Files and personal Markdown skills stay user-owned and need no registration in the
+saved-skill catalog.
 
 Ask the agent to read before editing or executing, preserve unrelated work, and
 verify a save by reading the resulting bytes. Selected skill instructions remain
@@ -56,8 +58,10 @@ craft.save(summary, "outputs/sales-summary.xlsx")
 craft.docs.report("outputs/sales-summary.docx", "Sales", "# Totals", summary)
 ```
 
-`craft.read` and `craft.save` pick the format from the extension. `craft.ls`,
-`craft.find` and `craft.path` list and resolve owned names. `craft.docs` reads,
+`craft.read` and `craft.save` pick the format from the extension. `craft.table`
+reads a spreadsheet or CSV whose header sits below title rows and converts
+numeric columns. `craft.ls`, `craft.find` and `craft.path` list and resolve
+owned names; `craft.path` also accepts a path it returned. `craft.docs` reads,
 edits and builds Word, PowerPoint, PDF and Excel files. The image copies the
 starter skills in `skills/` into `USER_ROOT/skills` on first start and never
 replaces an existing file.
@@ -218,8 +222,11 @@ and changing files use the CRAFT operations `run_code`, `write_file` and
 `edit_notebook`, which wait for the requester's approval and dispatch once. Workspace calls
 share the CRAFT run's 20-tool-call and 120-second limits. The transport dispatches
 once; a lost response is an unknown outcome. Keep Markdown skill files under
-`/workspace/skills` and refer to exact owned paths. The agent reads these files
-through workspace tools; they are separate from the registered CRAFT skill catalog.
+`/workspace/skills` and refer to exact owned paths. Read selected or relevant skill
+contents through a small approved `run_code` call; the direct list/notebook tools
+do not read plain Markdown files. Personal files remain separate from the registered
+CRAFT skill catalog. Without a configured Jupyter kernel, only the configured
+list/notebook reads are available.
 
 ## SDK reads in an active notebook
 
@@ -259,10 +266,11 @@ and `structuredContent`); it does not add a separate data API:
 | Call | Purpose |
 | --- | --- |
 | `await sdk.tools()` | Read allowed native tool names and input schemas when needed |
-| `await sdk.call("list_missions", {"query": "sim", "limit": 5})` | Resolve readable mission names and aliases to returned keys |
-| `await sdk.call("list_parameters", {})` | Read parameter keys and registered units before numeric filters |
+| `await sdk.missions(query="sim", limit=5)` | Resolve readable mission names and aliases to returned keys |
+| `await sdk.parameters()` | Read parameter keys and registered units before numeric filters |
 | `await sdk.search(query, **filters)` | Search readable source text |
 | `await sdk.document(item, version=version)` | Read the selected exact item/version metadata and ordered outline |
+| `await sdk.chunks(item, version, from_block=1, to_block=20)` | Read an inclusive block range from the selected exact version |
 | `await sdk.skills(limit=10)` | List the legacy saved-skill registry only when explicitly requested |
 
 `search` takes a 1–500 character `query`, optional `missions`, `silos`, `stages`
@@ -302,7 +310,7 @@ they issue no credentials or persistent runs.
 ## Import source copies
 
 In Workspace, sign in to JupyterLab, search sources and select Import to copy an
-original version into `USER_ROOT/imports`. Files up to 16 MB receive readable names
+original version into the workspace root (`USER_ROOT`). Files up to 16 MB receive readable names
 such as `report.xlsx`. If a name is taken, Import tries numeric alternatives such
 as `report-2.xlsx`, up to 20 names, without overwriting existing files.
 

@@ -5,9 +5,7 @@ requires-python = "==3.12.*"
 [manifest]
 members = [
     "craft",
-    "craft-data-provider",
     "craft-process-manager",
-    "craft-provider-fleet",
     "craft-python-workspace",
     "craft-runtime",
 ]
@@ -459,8 +457,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "craft-data-provider" },
-    { name = "craft-provider-fleet" },
     { name = "craft-python-workspace" },
     { name = "craft-runtime" },
     { name = "fpdf2" },
@@ -500,8 +496,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "craft-data-provider", editable = "packages/data_provider" },
-    { name = "craft-provider-fleet", editable = "packages/provider_fleet" },
     { name = "craft-python-workspace", editable = "packages/python_workspace" },
     { name = "craft-runtime", editable = "packages/runtime" },
     { name = "fpdf2", specifier = "==2.8.9" },
@@ -510,17 +504,6 @@ dev = [
     { name = "ruff", specifier = "==0.16.10" },
 ]
 docs = [{ name = "mkdocs", specifier = "==1.6.1" }]
-
-[[package]]
-name = "craft-data-provider"
-version = "0.1.0"
-source = { editable = "packages/data_provider" }
-dependencies = [
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "httpx", specifier = "==0.28.1" }]
 
 [[package]]
 name = "craft-process-manager"
@@ -536,17 +519,6 @@ requires-dist = [
     { name = "docker", specifier = "==7.2.0" },
     { name = "supervisor", specifier = "==4.3.0" },
 ]
-
-[[package]]
-name = "craft-provider-fleet"
-version = "0.1.0"
-source = { editable = "packages/provider_fleet" }
-dependencies = [
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "httpx", specifier = "==0.28.1" }]
 
 [[package]]
 name = "craft-python-workspace"

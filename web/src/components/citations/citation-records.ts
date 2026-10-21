@@ -88,3 +88,13 @@ export function useCitationStates(
   // Inline links are not verified here; checked answer evidence owns citations.
   return new Map(urls.map((url) => [url, { status: "unverified" } as CitationState]));
 }
+
+// An inline source link the agent writes: /sources/<item>?version=<n>&block=<n>.
+export interface SourceLink { item: string; version: number; block?: number }
+const SOURCE_PATH = /^\/sources\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\?version=([1-9]\d{0,5})(?:&block=([1-9]\d{0,5}))?$/;
+
+export function sourceLink(href: string | undefined): SourceLink | null {
+  const match = href ? SOURCE_PATH.exec(href) : null;
+  if (!match) return null;
+  return { item: match[1]!, version: Number(match[2]), block: match[3] ? Number(match[3]) : undefined };
+}

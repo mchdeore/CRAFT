@@ -43,7 +43,7 @@ from app.infrastructure.paths import ROOT
 from app.library.handlers import ChunkText, LibraryDocument, LibraryHit
 from app.skills import native as saved_skills
 
-RUN_SECONDS = 120
+RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
 _read_only_query = ContextVar("read_only_query", default=False)
 
@@ -60,9 +60,20 @@ def read_only_query():
 
 def _workspace_for_caller(caller):
     """Only a private server file and trusted owner can select an external endpoint."""
+    if _read_only_query.get():
+        return (
+            None,
+            "\nWorkspace tools are unavailable in this read-only query. "
+            "Do not claim workspace access or propose workspace actions.",
+            None,
+        )
     path = os.environ.get("USER_WORKSPACES_FILE")
-    if not path or _read_only_query.get():
-        return None, "", None
+    if not path:
+        return (
+            None,
+            "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
+            None,
+        )
     endpoints = json.loads(Path(path).read_text())
     if not isinstance(endpoints, dict):
         raise ValueError("Invalid private workspace configuration")
@@ -102,15 +113,23 @@ def _workspace_for_caller(caller):
         )
     endpoint = WorkspaceEndpoint(entry["url"], entry["headers"], tuple(entry["tools"]))
     selected = WorkspaceToolsets({str(caller.user_id): endpoint}).for_caller(caller)
-    return (
-        selected,
-        "\nUSER_ROOT=/workspace. Workspace tools list and read this owner's files. "
-        "Run Python with run_code and change files with write_file or edit_notebook; "
-        "each call waits for the requester's approval, so propose one at a time. "
-        "Source originals are read-only until imported into the workspace. "
-        "Read owned Markdown skill files using the workspace tools and follow their instructions.",
-        jupyter,
+    guidance = (
+        "\nUSER_ROOT=/workspace. Only the supplied workspace_ list/notebook read tools "
+        "are available; use their advertised schemas. "
     )
+    if jupyter is None:
+        guidance += (
+            "Workspace actions are unavailable: run_code, write_file and edit_notebook "
+            "cannot execute without a configured Jupyter kernel. native() is unavailable. "
+            "These list/notebook tools cannot read plain files or Markdown skill contents."
+        )
+    else:
+        guidance += (
+            "A Jupyter kernel is configured. run_code, write_file and edit_notebook require "
+            "the requester's approval. Read plain files and selected Markdown skills with "
+            "small approved run_code calls."
+        )
+    return selected, guidance, jupyter
 
 
 def fault(code):
@@ -335,7 +354,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         parent.caller = trusted
     started = asyncio.get_running_loop().time()
     elapsed = 0
-    deadline = started + RUN_SECONDS
+    limit = min(RUN_SECONDS, caller.settings.agent_run_seconds)
+    deadline = started + limit
     status = "failed"
     selected = None
     transport = None
@@ -363,8 +383,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             budget["calls"] = previous.get("toolCalls", 0)
             trace.extend(previous.get("retrievalPath", []))
             results.extend(dict(item, text=item["quote"]) for item in previous.get("evidence", []))
-            deadline = started + max(0, RUN_SECONDS - elapsed)
-            if elapsed >= RUN_SECONDS:
+            deadline = started + max(0, limit - elapsed)
+            if elapsed >= limit:
                 raise TimeoutError()
             initial_skills = await run_in_threadpool(
                 saved_skills.load, trusted, saved.state.get("craftSkills", []), set(allowed)
@@ -542,11 +562,21 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         {key: field for key, field in message.items() if not key.startswith("_")}
                         for message in value["messages"]
                     ]
+                    # The framework re-identifies replayed history, so only messages after the
+                    # newest user turn belong to this run; earlier ones come from stored history.
+                    latest = max(
+                        (i for i, message in enumerate(snapshot) if message.get("role") == "user"),
+                        default=-1,
+                    )
+                    snapshot = snapshot[latest + 1 :]
                     for message in snapshot:
                         if message.get("id"):
                             message["id"] = mapped(message["id"])
                     value["messages"] = list(
-                        {message["id"]: message for message in snapshot + output}.values()
+                        {
+                            message["id"]: message
+                            for message in history + ([user] if user else []) + snapshot + output
+                        }.values()
                     )
                 if kind == "RUN_ERROR":
                     status = "failed"

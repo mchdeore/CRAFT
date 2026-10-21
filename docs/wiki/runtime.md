@@ -6,13 +6,15 @@ The application agent uses the framework agent, registered operations and the [A
 
 Tools expose typed input and output. The controller supplies the allowed catalog and the decision boundary. Model output is validated before it changes run or stored state.
 
+The controller reads the master instructions from `app/agent/instructions.md` on each fresh or resumed run. The framework supplies them on every model request, including requests after tool results. Reuse supplied tool schemas and current dictionary information; catalog discovery serves requested inventories or missing information. Exact owned file references need no rediscovery. Read only selected or relevant personal Markdown skills, rereading their mutable contents on a new turn. Skill and retrieved-source instructions remain subordinate to the master, authorization and approval boundaries.
+
 Signed-in accounts own their conversations and runs. `GET /api/tools` describes registered tools and their channels. `GET /api/tools/capabilities` returns read tools, up to 100 owned skill names and `skillsStatus: "installed"`. The paged Skills API supplies complete definitions and immutable revisions. A selected skill supplies instructions and actual tool references; it grants no source access or write approval. `GET /api/library/documents` lists currently readable indexed documents.
 
 The registry derives tool bindings and approval requirements from declared operations. Root runs can propose writes; the `ask_agent` helper sees read tools only and returns a combined answer with citations and confidence. The application's `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local writes consume their matching approval in the effect transaction; a repeated invocation cannot consume it again.
 
-MCP is the tool protocol. The app serves HTTP MCP at `/mcp`; `craft mcp --as <username>` serves the same registry over standard input and output. Compose starts services and has an optional MCP profile using the application image. The native registry does not execute arbitrary code or schedule durable jobs.
+MCP is the tool protocol. The app serves HTTP MCP at `/mcp`; `craft mcp --as <username>` serves the same registry over standard input and output. Compose starts services and has an optional MCP profile using the application image. Workspace code execution uses registered approval-gated operations; durable jobs use the separate runner.
 
-Configured owners also have [workspace](workspace.md) tools for shared Jupyter files and code execution. Native Python SDK reads borrow the active chat run's identity, call budget, deadline, retrieval trace and audit records. Access is confined to its selected notebook kernel and ends when the run finishes or pauses. The SDK refuses approval-gated operations before dispatch; chat keeps its approval and resume workflow.
+Configured owners also have [workspace](workspace.md) list/notebook read tools. Plain files and selected Markdown skill contents need a small approved `run_code` read when a Jupyter kernel is configured; without one, workspace actions are unavailable. Plain `craft.search`, `craft.document`, `craft.chunks` and `craft.cube.*` access points use the independently provisioned workspace-token read API and return table/citation views. Named async `native()` SDK reads return MCP results and borrow the active chat run's identity, call budget, deadline, retrieval trace and audit records. Native access is confined to its selected notebook kernel and ends when the run finishes or pauses; workspace-token access is independent of that binding. The SDK refuses approval-gated operations before dispatch; chat keeps its approval and resume workflow.
 
 ## 2. Approvals
 
@@ -28,7 +30,7 @@ Root runs review one effectful call at a time. Parallel proposals stop before an
 
 ## 3. Standalone runtime
 
-`packages/runtime/` is a separate runner with local run-state and memory interfaces. Its `SingleAttemptMCP` transport sends a tool call once and fails on a lost response. The application does not use that class. The [Python workspace prototype](python.md) and [model job queue](jobs.md) are also standalone prototypes.
+`packages/runtime/` is a separate runner with local run-state and memory interfaces. Its `SingleAttemptMCP` transport sends a tool call once and fails on a lost response. The application does not use that class. The [Python workspace prototype](python.md) is also a standalone prototype.
 
 ## 4. Related topics
 

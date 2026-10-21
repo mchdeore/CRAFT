@@ -220,3 +220,28 @@ def test_word_edit_roundtrip_preserves_original(tmp_path):
         ["Cost", "50"],
     ]
     assert original.read_bytes() == original_bytes
+
+
+def test_table_finds_header_below_title_rows_and_path_accepts_its_own_result(tmp_path, monkeypatch):
+    import pandas as pd
+    from craft import _root, files
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    rows = [
+        ["Simulated mission 02", "SIMULATED / UNCLASSIFIED", None, None],
+        ["Valid from", "2026-01-01", None, None],
+        [None, None, None, None],
+        ["Element", "Masse sèche (g)", "Volume utile (L)", "Design life"],
+        ["Mission total", 104000, 215, 5],
+        ["payload", 46800, 96.75, 5],
+    ]
+    pd.DataFrame(rows).to_excel(tmp_path / "budget.xlsx", header=False, index=False)
+    frame = files.table("budget.xlsx")
+    assert list(frame.columns) == ["Element", "Masse sèche (g)", "Volume utile (L)", "Design life"]
+    assert frame["Masse sèche (g)"].tolist() == [104000, 46800]
+    assert pd.api.types.is_numeric_dtype(frame["Volume utile (L)"])
+    saved = files.path("outputs/result.csv")
+    assert files.path(saved) == saved
+    assert files.save(frame, saved) == "outputs/result.csv"
+    with pytest.raises(ValueError):
+        files.path(tmp_path / ".." / "outside.csv")

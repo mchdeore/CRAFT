@@ -10,13 +10,12 @@ from agent_framework_foundry import FoundryChatClient
 from azure.ai.projects.aio import AIProjectClient
 from openai import DefaultAsyncHttpxClient
 
-from app.agent.fake import FakeChatClient
-from app.agent.fake import embedding as fake_embedding
 from app.infrastructure.config.settings import Settings, validate_models
 from app.infrastructure.errors import ApiError, InvalidInput
 from app.infrastructure.operations import observe
 
 Role = Literal["main", "check"]
+EMBEDDING_BATCH = 64
 
 
 class NoProjectIdentity:
@@ -158,12 +157,16 @@ class ConfiguredChatClient(FoundryChatClient):
         await self.project_client.close()
 
 
+def configured(settings: Settings) -> bool:
+    return bool(settings.model_key.strip() and settings.model_endpoint.strip())
+
+
 def client(settings: Settings, role: Role = "main"):
-    validate_models(settings)
     if role not in {"main", "check"}:
         raise InvalidInput()
-    if settings.model_main == "fake":
-        return FakeChatClient(role)
+    if not configured(settings):
+        raise ApiError()
+    validate_models(settings)
     try:
         return ConfiguredChatClient(settings, role)
     except Exception:
@@ -173,30 +176,41 @@ def client(settings: Settings, role: Role = "main"):
 async def request(settings: Settings, messages, role: Role):
     selected = client(settings, role)
     try:
-        source = selected.get_response(
+        result = await selected.get_response(
             [Message(role=message.role, contents=[message.text]) for message in messages]
         )
-        result = await complete(source) if settings.model_main == "fake" else await source
-        return result.text, result.model or "fake"
+        return result.text, result.model or getattr(selected, "selected_model", "")
     finally:
         await selected.close()
 
 
-@observe("agent.embedding")
 async def embedding(settings: Settings, text: str) -> list[float]:
+    return (await embeddings(settings, [text]))[0]
+
+
+@observe("agent.embedding")
+async def embeddings(settings: Settings, texts: list[str]) -> list[list[float]]:
+    """Embed texts in batches through one client; vectors keep the input order."""
+    if not configured(settings):
+        raise ApiError()
     validate_models(settings)
-    if settings.model_main == "fake":
-        return fake_embedding(text)
     project = KeyProjectClient(settings)
     remote = project.get_openai_client()
     try:
-        response = await remote.embeddings.create(
-            model=settings.model_embedding, input=text, dimensions=1536, encoding_format="float"
-        )
-        values = response.data[0].embedding
-        if len(values) != 1536:
-            raise ApiError()
-        return values
+        vectors = []
+        for start in range(0, len(texts), EMBEDDING_BATCH):
+            batch = texts[start : start + EMBEDDING_BATCH]
+            response = await remote.embeddings.create(
+                model=settings.model_embedding,
+                input=batch,
+                dimensions=1536,
+                encoding_format="float",
+            )
+            values = [row.embedding for row in sorted(response.data, key=lambda row: row.index)]
+            if len(values) != len(batch) or any(len(value) != 1536 for value in values):
+                raise ApiError()
+            vectors.extend(values)
+        return vectors
     except Exception:
         raise ApiError() from None
     finally:

@@ -14,18 +14,23 @@ from app import create_app
 from app.infrastructure.config.env import read_env
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.paths import ROOT
+from app.tests.support import model as scripted_model
 
 TEST_DATABASE = "craft_test"
 
 
 @pytest.fixture(scope="session")
 def settings() -> Settings:
-    source = read_env() | {
-        "CRAFT_MODEL_MAIN": "fake",
-        "CRAFT_MODEL_KEY": "",
-        "CRAFT_MODEL_ENDPOINT": "",
-    }
+    source = read_env() | scripted_model.ENVIRONMENT
     return msgspec.structs.replace(Settings.from_env(source), database_name=TEST_DATABASE)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def scripted() -> Iterator[None]:
+    """Tests answer from the scripted model, never the configured one."""
+    with pytest.MonkeyPatch.context() as patch:
+        scripted_model.install(patch)
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)

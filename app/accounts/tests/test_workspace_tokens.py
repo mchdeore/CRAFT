@@ -123,7 +123,14 @@ def test_token_reads_as_its_account_and_is_logged_as_workspace(account, owner_en
             .all()
         )
     names = [row["name"] for row in rows]
-    assert names == ["accounts.me", "cube.list_parameters", "library.search"]
+    # Search embeds its query, and those model calls are logged under the same token.
+    assert names == [
+        "accounts.me",
+        "cube.list_parameters",
+        "agent.embedding",
+        "agent.embed",
+        "library.search",
+    ]
     assert {str(row["workspace_token_id"]) for row in rows} == {issued["id"]}
 
 

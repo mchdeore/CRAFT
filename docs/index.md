@@ -15,7 +15,6 @@ This site contains CRAFT documentation. Run the application separately to use it
 - [Identity table reference](wiki/identity-tables.md): current tables and relationship graphs.
 - [Python workspace prototype](wiki/python.md): standalone code, CSV data and artifacts.
 - [Documents and evidence](wiki/documents.md): identity, versions, extraction and relationships.
-- [Model jobs](wiki/jobs.md): a standalone prototype for queued model work.
 
 ## Concepts
 

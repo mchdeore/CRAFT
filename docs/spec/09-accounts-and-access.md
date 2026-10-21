@@ -6,7 +6,7 @@ The command-line interface (CLI) creates local accounts. Agent-User Interaction 
 
 | Item | Now | Deferred |
 |---|---|---|
-| Sign-in | Local accounts with Argon2id password hashes, passwords of at least 12 characters and creation through the CLI. No sign-up, default account or email recovery | Microsoft Entra ID |
+| Sign-in | Local accounts with Argon2id password hashes, passwords of at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and creation through the CLI. No sign-up, default account or email recovery | Microsoft Entra ID |
 | Roles | `member` uses CRAFT; `admin` also manages accounts through `craft users promote`. Operation and resource permissions apply to both | Expanded role mapping and Entra group grants. New values in a database check constraint (`CHECK`) require a migration |
 | Approvals | The requester decides an effectful action under section 3.4. The agent cannot decide | Expanded decision policy in section 12 |
 

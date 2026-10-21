@@ -17,7 +17,6 @@ nav:
       - Identity table reference: wiki/identity-tables.md
       - Python workspace prototype: wiki/python.md
       - Documents and evidence: wiki/documents.md
-      - Model jobs: wiki/jobs.md
   - Concepts:
       - Scope: spec/01-scope.md
       - Connections: spec/02-connections.md

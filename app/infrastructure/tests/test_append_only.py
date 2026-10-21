@@ -24,7 +24,7 @@ def history(owner_engine: Engine) -> Iterator[dict[str, UUID]]:
         ).scalar_one()
         run = connection.execute(
             text("""insert into agent_runs (conversation_id, started_by, status, model,
-                     instructions_version) values (:conversation, :user, 'running', 'fake', '1')
+                     instructions_version) values (:conversation, :user, 'running', 'scripted', '1')
                      returning id"""),
             {"conversation": conversation, "user": user},
         ).scalar_one()

@@ -14,7 +14,6 @@ from agent_framework import Message
 from sqlalchemy import select, text
 
 from app.agent import model
-from app.agent.fake import embedding as fake_embedding
 from app.agent.handlers import EmbeddingInput, embed
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.config.settings import Settings
@@ -25,6 +24,7 @@ from app.infrastructure.logging import configure_logging
 from app.infrastructure.operations import operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.operations.storage import call_log
+from app.tests.support import model as scripted_model
 from app.tests.support.demo import demo as demo
 
 
@@ -93,7 +93,10 @@ class Intercept:
                     "object": "list",
                     "model": body["model"],
                     "data": [
-                        {"object": "embedding", "embedding": [1.0] + [0.0] * 1535, "index": 0}
+                        {"object": "embedding", "embedding": [1.0] + [0.0] * 1535, "index": index}
+                        for index, _ in enumerate(
+                            body["input"] if isinstance(body["input"], list) else [body["input"]]
+                        )
                     ],
                     "usage": {"prompt_tokens": 4, "total_tokens": 4},
                 },
@@ -202,15 +205,14 @@ def log_rows(app, names):
         ]
 
 
-def test_model_adapter_fake_deterministic(settings):
-    local = msgspec.structs.replace(settings, model_main="fake", model_key="", model_endpoint="")
-    fake = model.client(local)
+def test_scripted_model_deterministic(settings):
+    scripted = model.client(settings)
     messages = [Message(role="user", contents=["Synthetic thermal evidence"])]
 
     async def run():
-        first = await fake.get_response(messages)
-        second = await fake.get_response(messages)
-        stream = fake.get_response(messages, stream=True)
+        first = await scripted.get_response(messages)
+        second = await scripted.get_response(messages)
+        stream = scripted.get_response(messages, stream=True)
         updates = [update async for update in stream]
         final = await stream.get_final_response()
 
@@ -230,8 +232,8 @@ def test_model_adapter_fake_deterministic(settings):
         assert first.messages[0].contents[0].name == "search"
 
     asyncio.run(run())
-    first = fake_embedding("Synthetic embedding")
-    stable = first == fake_embedding("Synthetic embedding")
+    first = scripted_model.embedding("Synthetic embedding")
+    stable = first == scripted_model.embedding("Synthetic embedding")
     assert stable and len(first) == 1536
 
 
@@ -341,7 +343,7 @@ def test_model_adapter_settings_fail_safe(settings, intercepted, monkeypatch):
         ("MODEL_KEY", ""),
         ("MODEL_ENDPOINT", "not-an-endpoint"),
         ("MODEL_MAX_OUTPUT_TOKENS", "0"),
-        ("MODEL_MAX_OUTPUT_TOKENS", "4001"),
+        ("MODEL_MAX_OUTPUT_TOKENS", "16001"),
         ("MODEL_CHECK", ""),
         ("MODEL_EMBEDDING", ""),
     ]:
@@ -353,8 +355,10 @@ def test_model_adapter_settings_fail_safe(settings, intercepted, monkeypatch):
     with pytest.raises(SystemExit) as failure:
         model.client(intercepted.settings)
     assert "model_logging" in str(failure.value)
-    fake = Settings.from_env({"CRAFT_APP_DB_PASSWORD": settings.app_db_password})
-    assert fake.model_main == "fake" and not fake.model_key
+    unconfigured = Settings.from_env({"CRAFT_APP_DB_PASSWORD": settings.app_db_password})
+    assert unconfigured.model_main == "gpt-5.2" and not unconfigured.model_key
+    with pytest.raises(ApiError):
+        model.client(unconfigured)
 
 
 def test_embedding(app, intercepted):
@@ -363,8 +367,8 @@ def test_embedding(app, intercepted):
     )
     assert len(result.vector) == 1536 and result.model == intercepted.settings.model_embedding
     assert intercepted.received[-1]["dimensions"] == 1536
-    fake = embed(caller(app), EmbeddingInput(text="Synthetic embedding input"))
-    assert fake.model == "fake-model-embed@1"
+    scripted = embed(caller(app), EmbeddingInput(text="Synthetic embedding input"))
+    assert scripted.model == app.state.settings.model_embedding
 
 
 def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
@@ -401,7 +405,12 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
             ).scalars()
         ) == {"generated"}
     assert sum(row["model"] == configured.model_main for row in intercepted.received) == 1
-    local = msgspec.structs.replace(configured, model_main="fake")
+    local = msgspec.structs.replace(
+        configured,
+        model_endpoint=scripted_model.ENDPOINT,
+        model_key=scripted_model.KEY,
+        model_embedding="scripted-embedding",
+    )
     monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, env=None: local))
     main(["index", "--rebuild"])
     capsys.readouterr()
@@ -413,13 +422,13 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
                 )
             ).scalars()
         )
-    assert models == {"fake-embed@1"}
+    assert models == {"scripted-embedding"}
     with demo["sessions"].begin() as session:
         assert set(
             session.execute(
                 select(m.doc_versions.c.summary_kind).where(m.doc_versions.c.item.in_(items))
             ).scalars()
-        ) == {"extract"}
+        ) == {"generated"}
     # A query from another model must not score these deliberately matching vectors.
     from math import isclose
 
@@ -449,7 +458,7 @@ def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
         running.state.engine.dispose()
 
 
-def test_fake_framework_tool_invocation(settings):
+def test_scripted_framework_tool_invocation(settings):
     from agent_framework import tool
 
     calls = []
@@ -505,7 +514,7 @@ def test_model_stream_observation(app, intercepted):
     )
 
 
-def test_fake_summary_task(settings):
+def test_scripted_summary_task(settings):
     selected = model.client(settings)
     data = {
         "task": "summarize",

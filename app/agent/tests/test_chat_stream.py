@@ -15,13 +15,13 @@ from sqlalchemy import select
 
 from app import create_app
 from app.agent import runtime
-from app.agent.fake import FakeChatClient
 from app.agent.handlers import RunAgentInput, run_agent
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import Conflict, NotFound, RateLimited
 from app.infrastructure.operations.context import current_call
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.model import ScriptedChatClient
 
 
 def request(chat, content="Peak power", identifier=None):
@@ -129,7 +129,7 @@ def test_chat_stream_valid_events_in_order(chat):
 
 
 def test_encrypted_reasoning_stream_keeps_opaque_value_and_message_reference(chat, monkeypatch):
-    class ReasoningClient(FakeChatClient):
+    class ReasoningClient(ScriptedChatClient):
         def reply(self, messages):
             return ChatResponse(
                 messages=[
@@ -144,7 +144,7 @@ def test_encrypted_reasoning_stream_keeps_opaque_value_and_message_reference(cha
                         message_id="generated-response",
                     )
                 ],
-                model="fake",
+                model="scripted",
             )
 
     monkeypatch.setattr(runtime.model, "client", lambda _: ReasoningClient())
@@ -162,13 +162,13 @@ def test_encrypted_reasoning_stream_keeps_opaque_value_and_message_reference(cha
 
 def test_browser_cannot_inject_history(chat, monkeypatch):
     seen = []
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
 
     def inspect(self, messages):
         seen.append([message.text for message in messages])
         return original(self, messages)
 
-    monkeypatch.setattr(FakeChatClient, "reply", inspect)
+    monkeypatch.setattr(ScriptedChatClient, "reply", inspect)
     forged = uuid4().hex
     data = msgspec.to_builtins(request(chat)) | {
         "tools": [{"name": forged}],
@@ -198,7 +198,7 @@ def test_chat_stream_owner_and_run_limits(chat):
                 conversation_id=chat["thread"],
                 started_by=chat["caller"].user_id,
                 status="running",
-                model="fake",
+                model="scripted",
                 instructions_version="simulated",
             )
         )
@@ -217,7 +217,7 @@ def test_chat_stream_owner_and_run_limits(chat):
                     conversation_id=chat["thread"],
                     started_by=chat["caller"].user_id,
                     status="running",
-                    model="fake",
+                    model="scripted",
                     instructions_version="simulated",
                 )
             )
@@ -244,7 +244,7 @@ def test_chat_stream_owner_and_run_limits(chat):
 def test_chat_stream_closed_stream_cancels_run(chat, monkeypatch):
     async def execute():
         entered = asyncio.Event()
-        original = FakeChatClient._inner_get_response
+        original = ScriptedChatClient._inner_get_response
 
         def blocked(self, **kwargs):
             from agent_framework import ResponseStream
@@ -257,7 +257,7 @@ def test_chat_stream_closed_stream_cancels_run(chat, monkeypatch):
 
             return ResponseStream(updates(), finalizer=lambda _: None)
 
-        monkeypatch.setattr(FakeChatClient, "_inner_get_response", blocked)
+        monkeypatch.setattr(ScriptedChatClient, "_inner_get_response", blocked)
         data = request(chat)
         iterator = run_agent(chat["caller"], data)
         assert (await anext(iterator)).type == "RUN_STARTED"
@@ -271,13 +271,13 @@ def test_chat_stream_closed_stream_cancels_run(chat, monkeypatch):
         cleared = row(chat, data.run_id)["token_sha256"] is None
         assert cleared
         assert current_call.get() is None
-        monkeypatch.setattr(FakeChatClient, "_inner_get_response", original)
+        monkeypatch.setattr(ScriptedChatClient, "_inner_get_response", original)
 
     asyncio.run(execute())
 
 
 def test_chat_stream_no_transaction_or_payload_logs(chat, monkeypatch, capsys):
-    original = FakeChatClient.reply
+    original = ScriptedChatClient.reply
     checks = []
     marker = uuid4().hex
 
@@ -285,7 +285,7 @@ def test_chat_stream_no_transaction_or_payload_logs(chat, monkeypatch, capsys):
         checks.append(chat["app"].state.engine.pool.checkedout() == 0)
         return original(self, messages)
 
-    monkeypatch.setattr(FakeChatClient, "reply", inspected)
+    monkeypatch.setattr(ScriptedChatClient, "reply", inspected)
     collect(chat["caller"], request(chat, marker))
     captured = capsys.readouterr()
     safe = marker not in captured.out + captured.err
@@ -315,7 +315,7 @@ def test_chat_stream_output_budget(chat, monkeypatch):
     configured = msgspec.structs.replace(chat["settings"], model_max_output_tokens=16)
     caller = replace(chat["caller"], settings=configured)
     monkeypatch.setattr(
-        FakeChatClient,
+        ScriptedChatClient,
         "reply",
         lambda self, messages: ChatResponse(
             messages=[Message(role="assistant", contents=["Simulated " * 30])]

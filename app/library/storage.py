@@ -135,6 +135,7 @@ def facet_documents(session: Session, mission, items):
         for row in session.execute(
             select(
                 m.provider_items.c.item,
+                m.provider_items.c.title,
                 m.provider_items.c.silo,
                 m.provider_items.c.simulated,
                 m.doc_versions.c.summary,
@@ -257,9 +258,21 @@ def facet_vectors(session: Session, identifiers, model):
     }
 
 
-def candidates(
-    session: Session, caller: Caller, request, query_vector, model="fake-embed@1", *, items=None
-):
+def chunk_vectors(session: Session, identifiers, model):
+    return {
+        row["owner_id"]: [float(value) for value in row["embedding"]]
+        for row in session.execute(
+            select(m.vectors.c.owner_id, m.vectors.c.embedding).where(
+                m.vectors.c.owner_kind == "chunk",
+                m.vectors.c.owner_id.in_(identifiers),
+                m.vectors.c.model == model,
+                m.vectors.c.recipe == "chunk-v1",
+            )
+        ).mappings()
+    }
+
+
+def candidates(session: Session, caller: Caller, request, query_vector, model, *, items=None):
     session.execute(text("set local hnsw.iterative_scan = 'strict_order'"))
     latest = (
         select(m.doc_versions.c.item, func.max(m.doc_versions.c.version).label("version"))

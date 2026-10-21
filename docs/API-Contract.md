@@ -596,6 +596,6 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 2. Built route rows equal the app's method/path pairs in both directions. Tool rows equal the registry's tool names.
 3. Python forms match their TypeScript fields and required fields in the component contract checks.
 4. Every built JSON route names an example. Examples validate against compiled response schemas. File responses are checked by status and media type.
-5. Recorded and fake-model chat events validate against `@ag-ui/core`; `craft.answer` also validates against `AnswerMeta`.
+5. Recorded and scripted-model chat events validate against `@ag-ui/core`; `craft.answer` also validates against `AnswerMeta`.
 
 The two tables are checked by `test_contract_routes_match_app` and `test_contract_tools_match_registry` in `app/tests/test_contract.py`. The examples are checked by `test_contract_json_examples`. Any added or removed endpoint or tool requires a matching row in the same change.

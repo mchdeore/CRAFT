@@ -67,7 +67,7 @@ def test_library_teardown_preserves_unrelated_corpus(settings, owner_engine, tmp
                 facet="purpose",
                 text="Synthetic unrelated facet",
                 sources=[item],
-                model="fake",
+                model="scripted",
             )
         )
         for kind, identifier in [("chunk", chunk), ("facet_text", facet)]:
@@ -75,7 +75,7 @@ def test_library_teardown_preserves_unrelated_corpus(settings, owner_engine, tmp
                 m.vectors.insert().values(
                     owner_kind=kind,
                     owner_id=identifier,
-                    model="fake-embed@1",
+                    model="text-embedding-3-large",
                     recipe="sentinel",
                     embedding=[1.0] + [0.0] * 1535,
                 )

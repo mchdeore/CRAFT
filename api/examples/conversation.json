@@ -51,7 +51,7 @@
       "content": {
         "messageId": "0490f617-5a01-5afe-a8eb-8b2384905bb6",
         "runId": "887c9dbb-e979-48cb-979b-92ced1638fa5",
-        "model": "fake",
+        "model": "gpt-5.2",
         "instructionsVersion": "0000000000000000000000000000000000000000000000000000000000000000",
         "path": [
           {

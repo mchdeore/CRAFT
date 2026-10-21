@@ -21,16 +21,17 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
-    password_min_length: Annotated[int, msgspec.Meta(ge=12)] = 12
+    password_min_length: Annotated[int, msgspec.Meta(ge=1)] = 12
     allowed_origins: str = "http://localhost:8000"
     cross_origin_browser: bool = False
     dev_page: bool = False
-    model_main: str = "fake"
+    model_main: str = "gpt-5.2"
     model_check: str = "gpt-5.2"
     model_embedding: str = "text-embedding-3-large"
     model_endpoint: str = ""
     model_key: str = ""
-    model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=4000)] = 4000
+    model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=16000)] = 4000
+    agent_run_seconds: Annotated[int, msgspec.Meta(ge=30, le=900)] = 120
     wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"
     app_db_password: str
@@ -62,7 +63,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
                 not origin.startswith("https://") for origin in origins
             ):
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
-            validate_models(settings)
+            validate_models(settings, access=False)
             validate_mcp_url(settings.mcp_url)
             return settings
         except msgspec.ValidationError as error:
@@ -102,7 +103,11 @@ def validate_mcp_url(value: str) -> None:
         raise SystemExit("bad setting: mcp_url: invalid configuration")
 
 
-def validate_models(settings: Settings) -> None:
+def validate_models(settings: Settings, *, access: bool = True) -> None:
+    """Check model settings; with access, the endpoint and key must be configured.
+
+    Startup checks without access so a server with no model settings still serves
+    sign-in, documents and the datacube; any model call then refuses."""
     import os
     from urllib.parse import urlsplit
 
@@ -116,9 +121,9 @@ def validate_models(settings: Settings) -> None:
         ):
             fail(field)
     budget = settings.model_max_output_tokens
-    if not isinstance(budget, int) or isinstance(budget, bool) or not 16 <= budget <= 4000:
+    if not isinstance(budget, int) or isinstance(budget, bool) or not 16 <= budget <= 16000:
         fail("model_max_output_tokens")
-    if settings.model_main == "fake":
+    if not access and not settings.model_key and not settings.model_endpoint:
         return
     if os.environ.get("AZURE_AI_PROJECTS_CONSOLE_LOGGING", "false").lower() == "true":
         fail("model_logging")
