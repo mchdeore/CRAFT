@@ -13,6 +13,7 @@ import {
 export type DocumentPreview =
   | { type: "loading" }
   | { type: "ready"; format: DocumentFormat; blob: Blob }
+  | { type: "unsupported"; mediaType: string }
   | { type: "error"; message: string };
 
 const DOCX_MEDIA_TYPE =
@@ -55,13 +56,19 @@ export async function loadDocumentPreview(source: PreviewDocument, signal: Abort
     if ((!protectedURL && !workspaceURL) || signal.aborted) throw new Error();
     const request: typeof fetch = fetcher ?? apiFetch;
     const response = await request(source.previewURL, { credentials: "same-origin", cache: "no-store", signal });
-    const format = documentFormat((response.headers.get("Content-Type") ?? "").split(";", 1)[0]!.trim().toLowerCase());
+    const mediaType = (response.headers.get("Content-Type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    const format = documentFormat(mediaType);
     const contentLength = response.headers.get("Content-Length");
-    if (!response.ok || !format || signal.aborted || (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_PREVIEW_BYTES))) {
+    if (!response.ok || signal.aborted || (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_PREVIEW_BYTES))) {
       await response.body?.cancel();
       throw new Error();
     }
     if (!response.body) throw new Error();
+    if (!format) {
+      await response.body.cancel();
+      if (signal.aborted || !protectedURL) throw new Error();
+      return { type: "unsupported", mediaType };
+    }
     reader = response.body.getReader();
     const onAbort = () => { void reader?.cancel().catch(() => {}); };
     signal.addEventListener("abort", onAbort, { once: true });

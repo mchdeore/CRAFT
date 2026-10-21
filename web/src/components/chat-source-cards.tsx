@@ -8,11 +8,13 @@ import { useCitations } from "@/components/citations/citation-context";
 import { usePersonalChatWorkspace } from "@/components/personal-chat-workspace";
 import { useMissionTitles } from "@/hooks/use-mission-titles";
 import { documentLabel, documentScope } from "@/lib/document-labels";
+import { answerEvidence } from "@/lib/chat-evidence";
 
 const buttonClass = "rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50";
 
 // One turn can span several assistant messages, one per step. Its sources show
-// once, collapsed under the turn's last message, so the answer stays on top.
+// once under the turn's last message. Discovery choices open by default;
+// sources for a cited factual answer remain collapsed.
 export function ChatSourceCards() {
   const messages = useAuiState(state => state.thread.messages);
   const index = useAuiState(state => state.message.index);
@@ -21,12 +23,22 @@ export function ChatSourceCards() {
     if (next && next.role === "assistant") return null;
     let first = index;
     while (first > 0 && messages[first - 1]?.role === "assistant") first--;
-    return chatSourceResults(messages.slice(first, index + 1).flatMap(message => message.parts));
+    const parts = messages.slice(first, index + 1).flatMap(message => message.parts);
+    const citedAnswer = answerEvidence(parts).some(answer => answer.citations.length > 0) ||
+      parts.some(part => part.type === "text" && /\]\(\/sources\//.test(part.text));
+    const searched = parts.some(part => part.type === "tool-call" && part.toolName === "search" && part.status.type === "complete" && !part.isError);
+    const requester = messages[first - 1];
+    const requestText = requester?.role === "user" ? requester.parts.filter(part => part.type === "text").map(part => part.text).join("\n").slice(0, 4096) : "";
+    // Choice descriptions may have citations too. The owning request takes
+    // precedence without rewriting or removing any historical answer content.
+    const asksForChoices = /\b(?:find|show|list|locate|search(?: for)?|look for|suggest|recommend|browse)(?:\s+(?:me|us|a|an|the|some|all|at|most|up|to|one|two|three|four|five|six|seven|eight|\d+|original|source|relevant|available|other|more|best|complete|indexed|simulated)){0,12}\s+(?:documents?|files?|sources?|reports?|briefs?|papers?)\b/i.test(requestText) ||
+      /\b(?:(?:which|what)\s+(?:original\s+|source\s+)?documents?|help me choose|none of those|refine (?:the )?search)\b/i.test(requestText);
+    return { results: chatSourceResults(parts), discovery: searched && (asksForChoices || !citedAnswer) };
   }, [messages, index]);
-  return results ? <ChatSourceChoices results={results} /> : null;
+  return results ? <ChatSourceChoices results={results.results} expanded={results.discovery} /> : null;
 }
 
-export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
+export function ChatSourceChoices({ results, expanded = false }: { results: ChatSourceResults; expanded?: boolean }) {
   const workspace = usePersonalChatWorkspace();
   const { openSource } = useCitations();
   const { state: states, start } = useSourceImport(workspace?.configuration);
@@ -49,7 +61,7 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
   };
   if (!results.sources.length && !retained.length) return null;
   const titles = results.sources.map(source => documentLabel(source.title, source.tags, missions));
-  return <details className="group mt-3 rounded-xl border bg-muted/20 open:bg-muted/30">
+  return <details key={JSON.stringify(results.sources.map(sourceKey))} open={expanded} className="group mt-3 rounded-xl border bg-muted/20 open:bg-muted/30">
     <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
       <FilesIcon className="size-3.5 shrink-0" />
       <span className="shrink-0 font-medium text-foreground/80">{titles.length + retained.length} source {titles.length + retained.length === 1 ? "document" : "documents"}</span>
@@ -60,7 +72,7 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
     <p className="text-xs text-muted-foreground">Choose a document to preview it. Import a personal copy to edit and analyse it; the source stays unchanged.</p>
     {!configured && <p role="status" className="text-sm">Connect your personal workspace to import a copy.</p>}
     {results.truncated && <p className="text-xs text-muted-foreground">Source choices are bounded. Refine your search for more results.</p>}
-    <div className="grid gap-2 sm:grid-cols-2">
+    <div className={expanded ? "grid gap-3" : "grid gap-2 sm:grid-cols-2"}>
     {results.sources.map((source, index) => {
       const state = states.get(sourceKey(source)), finished = state && state.status !== "pending" && state.status !== "error";
       const label = state?.status === "pending" ? "Importing..." : state?.status === "done" ? "Copy imported" : state?.status === "partial" ? "Copy saved" : state?.status === "unknown" ? "Check import" : state?.status === "error" ? "Retry Import" : "Import copy";
@@ -68,9 +80,10 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
         <button type="button" className="flex items-start gap-2 break-words text-left text-sm font-medium text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => {
           const base = `/api/library/documents/${encodeURIComponent(source.item)}`;
           openSource({ title: source.title, classification: source.classification, sourceID: source.item, version: String(source.version), mediaType: "", previewURL: `${base}/preview?version=${source.version}`, downloadURL: `${base}/download?version=${source.version}` });
-        }}><FileTextIcon className="mt-0.5 size-4 shrink-0" /><span>{index + 1}. {documentLabel(source.title, source.tags, missions)}<span className="mt-1 block text-xs font-normal">Preview document →</span></span></button>
+        }}><FileTextIcon className="mt-0.5 size-4 shrink-0" /><span>{index + 1}. {documentLabel(source.title, source.tags, missions)}<span className="mt-1 block text-xs font-normal">Preview original →</span></span></button>
         <p className="text-xs text-muted-foreground">{documentScope(source.version, source.classification, source.simulated, source.tags)}</p>
-        <p className="line-clamp-3 break-words text-sm text-foreground/80" title={source.snippet.trim()}>{source.snippet.trim() || "No sentence preview is available."}</p>
+        {source.filename && <p className="break-words text-xs text-muted-foreground">{source.filename}{source.indexedAt && Number.isFinite(Date.parse(source.indexedAt)) && ` · Last indexed ${new Date(source.indexedAt).toLocaleDateString()}`}</p>}
+        <p className="line-clamp-6 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/80" title={source.snippet.trim()}>{source.snippet.trim() || "No sentence preview is available."}</p>
         <button type="button" className={buttonClass} aria-label={label + " for " + titles[index] + ", version " + source.version} disabled={!configured || pending || !!finished} onClick={() => void importCopy(source)}>{label}</button>
         {state && status(state)}
       </article>;

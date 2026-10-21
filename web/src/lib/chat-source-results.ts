@@ -77,7 +77,7 @@ export function documentSource(value: unknown): ChatSource | null {
 export function chatSourceResults(parts: readonly unknown[]): ChatSourceResults {
   const sources = new Map<string, ChatSource>(), conflicts = new Set<string>();
   let truncated = parts.length > 64;
-  for (const part of parts.slice(0, 64)) {
+  for (const part of parts.slice(-64)) {
     if (!record(part) || part.type !== "tool-call" || !record(part.status) || part.status.type !== "complete" ||
       part.isError !== undefined && part.isError !== false || (part.toolName !== "search" && part.toolName !== "get_document")) continue;
     try {
@@ -88,7 +88,10 @@ export function chatSourceResults(parts: readonly unknown[]): ChatSourceResults 
         if (!only(body, ["hits", "truncated"]) || !Array.isArray(body.hits) || body.hits.length > 8 || typeof body.truncated !== "boolean") continue;
         const hits = body.hits.map(searchHit);
         if (hits.some(hit => hit === null)) continue;
-        found = hits as ChatSource[]; truncated ||= body.truncated;
+        // A validated refinement replaces old choices, even when it has no hits.
+        // Malformed responses above leave the last validated choices intact.
+        sources.clear(); conflicts.clear();
+        found = hits as ChatSource[]; truncated = parts.length > 64 || body.truncated;
       } else {
         const source = documentSource(body);
         if (!source) continue;
@@ -100,6 +103,7 @@ export function chatSourceResults(parts: readonly unknown[]): ChatSourceResults 
         if (previous && (previous.title !== source.title || previous.classification !== source.classification || previous.simulated !== source.simulated || (["mission", "silo", "stage"] as const).some(tag => previous.tags?.[tag] !== source.tags?.[tag]))) {
           sources.delete(key); conflicts.add(key);
         } else if (!previous) sources.set(key, source);
+        else if (source.filename) sources.set(key, { ...previous, filename: source.filename, indexedAt: source.indexedAt });
       }
     } catch { /* Malformed tool JSON never creates an actionable source reference. */ }
   }

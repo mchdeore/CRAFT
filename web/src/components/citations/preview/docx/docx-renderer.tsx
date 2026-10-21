@@ -188,7 +188,7 @@ export function DocxRenderer({ blob, source }: DocumentRendererProps) {
           <StatusMessage
             kind="loading"
             title="Opening Word document…"
-            detail="You can use Open original or Download below while the preview opens."
+            detail="You can use Open original or Download while the preview opens."
           />
         </div>
       )}
@@ -197,7 +197,7 @@ export function DocxRenderer({ blob, source }: DocumentRendererProps) {
           <StatusMessage
             kind="error"
             title={error}
-            detail="Use Open original or Download below to view this document."
+            detail="Use Open original or Download to view this document."
           />
         </div>
       )}

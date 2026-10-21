@@ -124,14 +124,36 @@ export async function checkSource(citation: AnswerCitation, signal: AbortSignal,
   }
 }
 
+function codeExecutionFailed(value: unknown): boolean {
+  try {
+    // Workspace actions can be wrapped in nested MCP envelopes in live/history.
+    // Inspect only bounded results; never surface kernel error or output text.
+    for (let depth = 0; depth < 4; depth++) {
+      if (typeof value === "string") {
+        if (value.length > 131072) return false;
+        value = JSON.parse(value);
+      }
+      if (!record(value)) return false;
+      if (value.status === "error" && only(value, ["status", "outputs", "error", "truncated"]) &&
+        typeof value.truncated === "boolean" && (value.error === null || typeof value.error === "string" && value.error.length <= 131072) &&
+        Array.isArray(value.outputs) && value.outputs.length <= 1000 && value.outputs.every(output => typeof output === "string" && output.length <= 131072)) return true;
+      if (record(value.structuredContent)) value = value.structuredContent;
+      else if (Array.isArray(value.content) && value.content.length === 1 && record(value.content[0]) && value.content[0].type === "text") value = value.content[0].text;
+      else return false;
+    }
+  } catch { /* Malformed tool JSON supplies no execution-status claim. */ }
+  return false;
+}
+
 export function toolView(part: unknown): ToolView {
   const p = record(part) ? part : {};
   const name = typeof p.toolName === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(p.toolName) ? p.toolName : "Tool";
   const correlationId = typeof p.toolCallId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p.toolCallId) ? p.toolCallId : undefined;
   const status = record(p.status) ? p.status.type as ToolCallMessagePartStatus["type"] : undefined;
+  const failed = p.isError === true || name === "run_code" && codeExecutionFailed(p.result);
   return {
     name, correlationId,
-    status: status === "running" ? "Running" : status === "complete" ? (p.isError === true ? "Failed" : "Completed") : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
+    status: status === "running" ? "Running" : status === "complete" ? (failed ? "Failed" : "Completed") : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
   };
 }
 
