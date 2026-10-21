@@ -19,6 +19,15 @@ RUN uv sync --locked --extra lab --extra analysis --no-dev --group build --no-ed
         --no-install-project --no-build --no-cache \
     && uv sync --locked --extra lab --extra analysis --no-dev --group build --no-editable \
         --no-build-isolation-package craft-user-workspace --no-cache
+# Load the outbound guard at interpreter start; it installs only where CRAFT_GUARD=1,
+# which the kernel specification sets. The Jupyter server runs without it.
+RUN /opt/notebook/bin/python -c "import json, pathlib, site; \
+site_dir = pathlib.Path(site.getsitepackages()[0]); \
+(site_dir / 'craft-guard.pth').write_text('import craft_guard\n'); \
+spec = pathlib.Path('/opt/notebook/share/jupyter/kernels/python3/kernel.json'); \
+data = json.loads(spec.read_text()); data['env'] = {**data.get('env', {}), 'CRAFT_GUARD': '1'}; \
+spec.write_text(json.dumps(data, indent=1) + '\n')"
+COPY skills ./skills
 COPY jupyter_server_config.py ./jupyter_server_config.py
 
 ENV PATH=/opt/notebook/bin:$PATH \
@@ -26,7 +35,9 @@ ENV PATH=/opt/notebook/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     JUPYTER_RUNTIME_DIR=/tmp/jupyter-runtime \
     JUPYTER_CONFIG_DIR=/tmp/jupyter-config \
-    IPYTHONDIR=/tmp/ipython
+    IPYTHONDIR=/tmp/ipython \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    JUPYTER_DATA_DIR=/tmp/jupyter-data
 USER workspace:workspace
 WORKDIR /workspace
 EXPOSE 8888

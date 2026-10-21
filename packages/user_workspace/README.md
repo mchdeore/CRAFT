@@ -32,72 +32,67 @@ image installs the locked `analysis` extra for these additional imports:
 
 | Package | Use |
 | --- | --- |
-| Pandas | Clean, join and summarize CSV and Excel tables |
-| DuckDB | Query local tables with SQL |
-| NumPy and SciPy | Numerical analysis, statistics and optimization |
+| Pandas, DuckDB, PyArrow | Clean, join and query CSV, Excel and Parquet tables |
+| NumPy, SciPy, statsmodels | Numerical analysis, statistics and regression |
+| scikit-learn | Models such as regression and clustering |
+| SymPy, Pint | Symbolic mathematics and unit-aware numbers |
 | Matplotlib | Save charts for preview and export |
-| OpenPyXL | Read and write Excel workbooks |
-| python-docx | Edit personal Word copies and write Word outputs |
+| OpenPyXL, python-docx, python-pptx, pypdf | Read and write Excel, Word and PowerPoint; read PDF text |
 
-Other deployments may have fewer packages. Check imports before specialized
-handling: Pandas XLSX I/O needs an installed engine such as OpenPyXL.
-`python-docx` provides the installed image's high-level DOCX API. It does not
-guarantee lossless editing of every Word feature; verify changes to an owned copy.
-Simple bounded DOCX text inspection can use the standard library's ZIP/XML
-tools; state their coverage limits and verify edits to an owned copy. External
-network access and source writes are not granted by the Python package.
+python-docx does not guarantee lossless editing of every Word feature; verify
+changes to an owned copy. External network access and source writes are not
+granted by the Python package.
 
-Run analysis on uploaded or imported owned files. This standard-library example
-reads `sales.csv` with `region` and `amount` columns, saves a new output, verifies
-its contents and prints a chat link. Exclusive creation preserves existing
-outputs; choose a new output name if it already exists.
+Name files relative to `USER_ROOT`; the path chooses the folder:
 
 ```python
-import csv
-from collections import defaultdict
-from decimal import Decimal
-from urllib.parse import quote
+import craft
 
-from craft import USER_ROOT, owned_path
-
-totals = defaultdict(Decimal)
-with owned_path("sales.csv").open(encoding="utf-8", newline="") as stream:
-    for row in csv.DictReader(stream):
-        totals[row["region"]] += Decimal(row["amount"])
-
-output = owned_path("outputs/sales summary.csv")
-output.parent.mkdir(parents=True, exist_ok=True)
-rows = sorted(totals.items())
-with output.open("x", encoding="utf-8", newline="") as stream:
-    writer = csv.writer(stream)
-    writer.writerow(["region", "total"])
-    writer.writerows(rows)
-with output.open(encoding="utf-8", newline="") as stream:
-    saved = list(csv.DictReader(stream))
-assert saved == [{"region": region, "total": str(total)} for region, total in rows]
-href = "/workspace/" + quote(output.relative_to(USER_ROOT).as_posix(), safe="/")
-print(f"[{output.name}]({href})")
+sales = craft.read("data/sales.csv")
+summary = craft.sql(
+    "SELECT region, sum(amount) AS total FROM sales GROUP BY region", sales=sales
+)
+craft.save(summary, "outputs/sales-summary.xlsx")
+craft.docs.report("outputs/sales-summary.docx", "Sales", "# Totals", summary)
 ```
 
-With Pandas and OpenPyXL installed, convert that saved CSV to a new XLSX file
-and verify the round trip:
+`craft.read` and `craft.save` pick the format from the extension. `craft.ls`,
+`craft.find` and `craft.path` list and resolve owned names. `craft.docs` reads,
+edits and builds Word, PowerPoint, PDF and Excel files. The image copies the
+starter skills in `skills/` into `USER_ROOT/skills` on first start and never
+replaces an existing file.
+
+## CRAFT access points
+
+The access points send HTTP requests to the same `/api` routes the browser uses,
+with the account's workspace token. The server resolves the token to its account,
+applies mission and silo grants, permits only read-tool routes and logs each call
+with origin `workspace`:
 
 ```python
-from urllib.parse import quote
-
-import pandas as pd
-
-from craft import USER_ROOT, owned_path
-
-summary = pd.read_csv(owned_path("outputs/sales summary.csv"))
-workbook = owned_path("outputs/sales summary.xlsx")
-with workbook.open("xb") as stream:
-    summary.to_excel(stream, index=False, engine="openpyxl")
-saved = pd.read_excel(workbook, engine="openpyxl")
-pd.testing.assert_frame_equal(saved, summary, check_dtype=False)
-href = "/workspace/" + quote(workbook.relative_to(USER_ROOT).as_posix(), safe="/")
-print(f"[{workbook.name}]({href})")
+hits = craft.search("radiator margin", missions=["msn-sim-01"])
+light = craft.cube.find(("mass_dry", "le", 150, "kg"), stage="current")
+light.df, light.citations
+craft.cube.compare(["msn-sim-01", "msn-sim-02"], ["mass_dry", "power_peak"]).df
 ```
+
+Issue a token from a signed-in browser session with `POST /api/me/workspace-tokens`,
+or for provisioning:
+
+```sh
+uv run craft call accounts.create_workspace_token --as <username> '{"label": "workspace", "hours": 12}'
+```
+
+Give the workspace container `CRAFT_API_URL` (the server origin, such as
+`http://host.docker.internal:8000`) and mount the token read-only at
+`/run/craft/workspace-token`, outside `USER_ROOT`. In a kernel, `craft.login()`
+prompts for a token kept only in memory. `craft.whoami()` shows the account.
+Revoke a token with `DELETE /api/me/workspace-tokens/<id>`.
+
+Kernels and terminal shells set `CRAFT_GUARD=1`. The `craft_guard` audit hook then
+refuses Python connections, name lookups and program launches except to
+`CRAFT_API_URL` and an active run bridge. The network policy below remains the
+boundary; the guard is a second layer and not a sandbox.
 
 ## Build and owner provisioning
 
@@ -159,7 +154,7 @@ placeholders with each owner's configuration:
   "00000000-0000-0000-0000-000000000001": {
     "url": "http://127.0.0.1:4040/mcp",
     "headers": {"Authorization": "Bearer <owner-one-MCP_TOKEN>"},
-    "tools": ["list_files", "use_notebook", "read_notebook", "execute_code"],
+    "tools": ["list_files", "read_notebook"],
     "jupyter": {
       "url": "http://127.0.0.1:18881/",
       "token": "<owner-one-JUPYTER_TOKEN>",
@@ -170,7 +165,7 @@ placeholders with each owner's configuration:
   "00000000-0000-0000-0000-000000000002": {
     "url": "http://127.0.0.1:4041/mcp",
     "headers": {"Authorization": "Bearer <owner-two-MCP_TOKEN>"},
-    "tools": ["list_files", "use_notebook", "read_notebook", "execute_code"],
+    "tools": ["list_files", "read_notebook"],
     "jupyter": {
       "url": "http://127.0.0.1:18882/",
       "token": "<owner-two-JUPYTER_TOKEN>",
@@ -217,9 +212,10 @@ fallback. Open the selected workspace and enter that owner's Jupyter password.
 Jupyter login is separate from CRAFT login and is not SSO. XSRF protection stays
 enabled. The private Jupyter token serves the control connection.
 
-The agent receives only the configured tools, prefixed `workspace_`. The
-configured allowlist determines which read, create, edit and execute operations
-are available. Workspace calls
+The agent receives only the configured read tools (`list_files`, `list_notebooks`,
+`list_kernels`, `read_notebook`, `read_cell`), prefixed `workspace_`. Running code
+and changing files use the CRAFT operations `run_code`, `write_file` and
+`edit_notebook`, which wait for the requester's approval and dispatch once. Workspace calls
 share the CRAFT run's 20-tool-call and 120-second limits. The transport dispatches
 once; a lost response is an unknown outcome. Keep Markdown skill files under
 `/workspace/skills` and refer to exact owned paths. The agent reads these files
@@ -290,9 +286,8 @@ require repeated inventory calls.
 Root injects the ephemeral bridge capability through authenticated, silent
 Jupyter kernel execution with `store_history=False`. It stays in kernel memory.
 Native SDK calls borrow the agent's exact middleware, deadline, call budget,
-retrieval trace and trusted run identity. Workspace `execute_code` and
-`use_notebook` dispatches are pinned to the selected kernel; switching the active
-notebook path is rejected during the lease. An overlapping run for the same
+retrieval trace and trusted run identity. Approved `run_code` calls execute in
+the configured kernel. An overlapping run for the same
 owner is rejected, and an existing kernel binding cannot be overwritten.
 
 Finish, approval pause, error and cancellation withdraw the bridge before the
@@ -300,8 +295,8 @@ native transport closes and clear the same run's kernel binding. A lost kernel
 connection still leaves the bridge withdrawn; the memory binding expires at the
 run's original deadline. Unprovisioned kernels and standalone Python processes
 raise an explicit missing-binding error. Native SDK mutations remain unavailable
-until the CRAFT approval/resume path is integrated. `Craft(session)` and
-`connect(url, run_token=...)` still consume explicitly injected authentication;
+until the CRAFT approval/resume path is integrated. `craft.client.Craft(session)` and
+`craft.client.connect(url, run_token=...)` still consume explicitly injected authentication;
 they issue no credentials or persistent runs.
 
 ## Import source copies

@@ -99,3 +99,19 @@ stored, and replacement revokes the previous value. Expiry, pause, run end and
 disconnect stop later use. The browser never receives this credential. Tokens remain
 outside model arguments and server logs. Tool metadata cannot replace the trusted
 user, conversation, run or parent-call context.
+
+## 9.7 Workspace tokens
+
+A workspace token lets owned Python call the same HTTP routes as the browser, as its account. A signed-in browser session or the command line issues one with `POST /api/me/workspace-tokens`; `craft call accounts.create_workspace_token --as <username> '{"label": "notebook"}'` does the same for provisioning. The response shows the token once. It lasts 1 to 168 hours, 12 by default.
+
+| Rule | Behavior |
+|---|---|
+| Sending | `Authorization: Bearer <token>` on `/api` requests, without a session cookie. A request with both returns `401` |
+| Reach | Routes whose operation is a read tool in the agent catalog (effect `NONE`, not `ask_agent`) and `GET /api/me`. Every other route, including token management, writes, approvals and conversations, returns `403`. Operations called inside a permitted route are not checked again |
+| Identity | The token resolves to its enabled account and current roles on every request; mission and silo grants apply as for the browser |
+| Logging | Each call is logged with origin `workspace` and the token identifier, and no token value |
+| Ending | `DELETE /api/me/workspace-tokens/:id`, expiry or a disabled account stops later use with `401` |
+| Storage | 32 random bytes, stored only as a SHA-256 digest with label, creation, expiry, last use (updated at most once a minute) and revocation times |
+
+The workspace image reads the token from `CRAFT_TOKEN_FILE` (default `/run/craft/workspace-token`), a private file outside `USER_ROOT`, or from `craft.login()` for the current kernel only. `CRAFT_API_URL` names the server origin.
+

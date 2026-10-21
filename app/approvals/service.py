@@ -162,8 +162,8 @@ def require_approved(caller, operation, value):
         or caller.conversation_id is None
         or caller.sessions is None
         or caller.user_id is None
-        or operation.effects not in {"DATA", "DOCUMENT"}
-        or inspect.iscoroutinefunction(operation.function)
+        or operation.effects not in {"DATA", "DOCUMENT", "EXTERNAL"}
+        or (operation.effects != "EXTERNAL" and inspect.iscoroutinefunction(operation.function))
     ):
         raise ApprovalRequired()
     approved_request_id(caller, operation.name, value)
@@ -302,6 +302,41 @@ def execute_approved(caller, operation, value, invoke):
     if failure is not None:
         raise failure
     return result
+
+
+def claim_external_approved(caller, operation, value) -> UUID:
+    """Consume one approved external call before its single dispatch.
+
+    An external effect cannot share a database transaction, so its executed event
+    records the dispatch; the outcome is in the call log. A second claim fails.
+    """
+    from app.infrastructure.operations.pipeline import ApprovalRequired
+
+    if (
+        caller.origin != "mcp"
+        or operation.effects != "EXTERNAL"
+        or caller.sessions is None
+        or caller.user_id is None
+        or caller.run_id is None
+        or caller.conversation_id is None
+        or has_ambient_transaction()
+    ):
+        raise ApprovalRequired()
+    with unit_of_work(_sessions(caller)) as session:
+        storage.require_run(session, caller.user_id, caller.run_id, caller.conversation_id)
+        row = storage.approved_call(
+            session,
+            caller.user_id,
+            caller.run_id,
+            caller.conversation_id,
+            operation.name,
+            _call_digest(value),
+            caller.tool_call_id,
+        )
+        if row is None:
+            raise ApprovalRequired()
+        storage.append_event(session, row["id"], "executed", caller.user_id, None)
+        return row["id"]
 
 
 def status_expression():

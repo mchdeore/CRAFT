@@ -19,6 +19,7 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 | Prefix | `/api`. Health checks are outside it. There is no generic run-any-operation route. |
 | Format | JSON, `camelCase` field names, UUID identifiers, ISO 8601 UTC times |
 | Sign-in | Cookie `__Host-craft_session` (`Secure`, `HttpOnly`, `SameSite=Lax` by default, `Path=/`), set by `POST /api/session`. Send requests with `credentials: "include"`. No tokens in browser storage |
+| Workspace token | `Authorization: Bearer <token>` from `POST /api/me/workspace-tokens`, shown once, 1 to 168 hours (default 12). It signs in as its account on the read routes whose operation is a read tool (section 6) and on `GET /api/me`; every other route returns `403`. A request with both a token and a session cookie returns `401`. Calls are logged with origin `workspace` and the token's identifier. Revoked, expired or disabled-account tokens return `401` |
 | Writes | Ordinary `/api` requests using `POST`, `PUT`, `PATCH` and `DELETE` must carry an `Origin` header from the allowed list |
 | Request ID | Every response has `X-Request-Id`. The same value appears in error bodies and server logs |
 | Unreadable records | `404`, the same as a missing record |
@@ -97,6 +98,12 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/session` | `SignIn` | `Me` | public | — |
 | `DELETE /api/session` | — | `void` | signed in; live resource access | — |
 | `GET /api/me` | — | `Me` | signed in; live resource access | — |
+| `POST /api/me/workspace-tokens` | `NewWorkspaceToken` | `IssuedWorkspaceToken` | signed-in browser session or command line | — |
+| `GET /api/me/workspace-tokens` | — | `WorkspaceToken[]` | signed-in browser session or command line | — |
+| `DELETE /api/me/workspace-tokens/:id` | — | `void` | signed-in browser session or command line | — |
+| `POST /api/workspace/run` | `RunCode` | `CodeResult` | signed in; own workspace; requester approval when called by the agent | `run_code` |
+| `PUT /api/workspace/files` | `WriteFile` | `SavedFile` | signed in; own workspace; requester approval when called by the agent | `write_file` |
+| `POST /api/workspace/notebooks/edit` | `EditNotebook` | `EditedNotebook` | signed in; own workspace; requester approval when called by the agent | `edit_notebook` |
 | `GET /api/cube/missions` | —; query `{query?: string; limit?: number}` | `Mission[]` | signed in; live resource access | `list_missions` |
 | `GET /api/cube/parameters` | — | `Parameter[]` | signed in; live resource access | `list_parameters` |
 | `POST /api/cube/find` | `FindMissions` | `FoundMissions` | signed in; live resource access | `find_missions` |
@@ -142,7 +149,7 @@ Document catalogs recheck live provider grants and indexed current version hashe
 
 ## 6. Agent tools
 
-Input types include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The runtime calls them through native HTTP MCP. Read tools declare `NONE`. Note changes and value submission declare `DATA` and require requester approval when called by the agent.
+Input types include path fields; ordinary GET routes carry the other fields as query parameters. Every tool is also an ordinary route and a checked Python operation. The runtime calls them through native HTTP MCP. Read tools declare `NONE`. Note changes and value submission declare `DATA`; workspace code runs and file changes declare `EXTERNAL`. Both require requester approval when called by the agent. An approved `EXTERNAL` call is recorded as executed when it is dispatched, once; its outcome is in the call log.
 
 | Tool | Route | Input type | Effects |
 |---|---|---|---|
@@ -152,6 +159,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `NONE` |
 | `compare_versions` | `GET /api/library/documents/:item/compare` | `CompareVersions` | `NONE` |
 | `delete_note` | `DELETE /api/notes/:id` | `NoteRef` | `DATA` |
+| `edit_notebook` | `POST /api/workspace/notebooks/edit` | `EditNotebook` | `EXTERNAL` |
 | `explain_similarity` | `POST /api/cube/similar/explain` | `ExplainSimilarity` | `NONE` |
 | `explore` | `POST /api/library/explore` | `ExploreInput` | `NONE` |
 | `find_missions` | `POST /api/cube/find` | `FindMissions` | `NONE` |
@@ -170,8 +178,10 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
 | `read_skill_version` | `GET /api/skills/:id/versions` | `SkillVersionRef` | `NONE` |
+| `run_code` | `POST /api/workspace/run` | `RunCode` | `EXTERNAL` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
+| `write_file` | `PUT /api/workspace/files` | `WriteFile` | `EXTERNAL` |
 | `write_note` | `PUT /api/notes` | `WriteNote` | `DATA` |
 
 `/mcp` is a stateless JSON MCP mount outside the ordinary route map. It reuses the same registry server as standard input and output and lists every `tool=True` operation. Root runs offer read tools and approval-required writes; the single-call query helper offers read tools only. Private handlers and observations are absent. Unapproved or unsupported effectful calls return `approval_required`; a run credential alone grants no approval.
@@ -289,6 +299,15 @@ export type Id = string;
 export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
 export interface Me { id: Id; username: string; displayName: string; roles: Role[] }
+export interface NewWorkspaceToken { label: string; hours?: number }
+export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
+export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
+export interface RunCode { code: string }
+export interface CodeResult { status: "ok" | "error"; outputs: string[]; error: string | null; truncated: boolean }
+export interface WriteFile { path: string; content: string }
+export interface SavedFile { path: string; size: number }
+export interface EditNotebook { path: string; action: "insert" | "replace" | "delete"; index: number; source?: string; cellType?: "code" | "markdown" }
+export interface EditedNotebook { path: string; cells: number }
 export interface Mission { key: string; title: string; currentStage: string; aliases: string[]; simulated: boolean }
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }
@@ -471,6 +490,12 @@ export interface Routes {
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
+  "POST /api/me/workspace-tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
+  "GET /api/me/workspace-tokens": { response: T.WorkspaceToken[] };
+  "DELETE /api/me/workspace-tokens/:id": { response: void };
+  "POST /api/workspace/run": { body: T.RunCode; response: T.CodeResult };
+  "PUT /api/workspace/files": { body: T.WriteFile; response: T.SavedFile };
+  "POST /api/workspace/notebooks/edit": { body: T.EditNotebook; response: T.EditedNotebook };
   "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
   "GET /api/cube/parameters": { response: T.Parameter[] };
   "POST /api/cube/find": { body: T.FindMissions; response: T.FoundMissions };
@@ -530,6 +555,11 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/library/explore` | `ChunkPage` | `api/examples/explore.json` |
 | `POST /api/session` | `Me` | `api/examples/session.json` |
 | `GET /api/me` | `Me` | `api/examples/me.json` |
+| `POST /api/me/workspace-tokens` | `IssuedWorkspaceToken` | `api/examples/workspace-token.json` |
+| `GET /api/me/workspace-tokens` | `WorkspaceToken[]` | `api/examples/workspace-tokens.json` |
+| `POST /api/workspace/run` | `CodeResult` | `api/examples/code-result.json` |
+| `PUT /api/workspace/files` | `SavedFile` | `api/examples/saved-file.json` |
+| `POST /api/workspace/notebooks/edit` | `EditedNotebook` | `api/examples/edited-notebook.json` |
 | `GET /api/cube/missions` | `Mission[]` | `api/examples/missions.json` |
 | `GET /api/cube/parameters` | `Parameter[]` | `api/examples/parameters.json` |
 | `POST /api/cube/find` | `FoundMissions` | `api/examples/found-missions.json` |

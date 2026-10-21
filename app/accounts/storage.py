@@ -52,6 +52,19 @@ auth_sessions = Table(
     Column("revoked_at", DateTime(timezone=True)),
     Column("revoked_reason", Text),
 )
+workspace_tokens = Table(
+    "workspace_tokens",
+    metadata,
+    Column("id", UUID, primary_key=True, server_default=text("uuidv7()")),
+    Column("user_id", UUID, ForeignKey("users.id"), nullable=False, index=True),
+    Column("token_sha256", LargeBinary, nullable=False, unique=True),
+    Column("label", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("last_used_at", DateTime(timezone=True)),
+    Column("revoked_at", DateTime(timezone=True)),
+    CheckConstraint("octet_length(token_sha256) = 32", name="token_sha256"),
+)
 
 
 def account(session, username: str, lock: bool = False):

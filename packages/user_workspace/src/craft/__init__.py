@@ -1,37 +1,66 @@
-"""Notebook-friendly access to an owned root and the existing CRAFT MCP tools."""
+"""The CRAFT workspace package: your files, document helpers and CRAFT access points.
 
-import os
-from pathlib import Path
+Files are named relative to ``USER_ROOT``::
 
-from craft.client import Craft, connect, native
+    import craft
 
-USER_ROOT = Path(os.environ.get("USER_ROOT", "/workspace"))
-if not USER_ROOT.is_absolute():
-    raise ValueError("USER_ROOT must be an absolute owned mount")
+    sales = craft.read("data/sales.xlsx")
+    craft.save(sales.describe(), "results/summary.csv")
 
+The access points are the only way user code reaches CRAFT, and they work
+during an agent run that has bound this kernel::
 
-def owned_path(relative: str, *, root: Path = USER_ROOT) -> Path:
-    """Resolve a relative owned path, rejecting traversal and every existing symlink.
+    hits = craft.search("radiator margin", missions=["msn-sim-01"])
+    light = craft.cube.find(("mass_dry", "le", 150, "kg"), stage="current")
+    light.df, light.citations
 
-    This is a path convenience, not a Python sandbox. The container mount and
-    operating-system boundary must confine kernels and terminals.
-    """
-    if (
-        not relative
-        or "\\" in relative
-        or any(ord(value) < 32 for value in relative)
-        or Path(relative).is_absolute()
-        or any(value in {"", ".", ".."} for value in relative.split("/"))
-    ):
-        raise ValueError("Expected a relative owned path")
-    if not root.is_absolute() or root.resolve() != root or not root.is_dir():
-        raise ValueError("Expected an existing owned root without symlinks")
-    path = root
-    for part in relative.split("/"):
-        path = path / part
-        if path.is_symlink():
-            raise ValueError("Symlinks are outside the owned path boundary")
-    return path
+Other network access and program launches are refused in the kernel.
+"""
 
+from craft import docs
+from craft._root import USER_ROOT, owned_path
+from craft.access import (
+    CraftError,
+    Result,
+    capabilities,
+    check_citation,
+    chunks,
+    compare_versions,
+    cube,
+    document,
+    documents,
+    explore,
+    login,
+    search,
+    whoami,
+)
+from craft.client import Craft, native
+from craft.files import excel, find, ls, path, read, save, sql
 
-__all__ = ["USER_ROOT", "Craft", "connect", "native", "owned_path"]
+__all__ = [
+    "USER_ROOT",
+    "Craft",
+    "CraftError",
+    "Result",
+    "capabilities",
+    "check_citation",
+    "chunks",
+    "compare_versions",
+    "cube",
+    "docs",
+    "document",
+    "documents",
+    "excel",
+    "explore",
+    "find",
+    "login",
+    "ls",
+    "native",
+    "owned_path",
+    "path",
+    "read",
+    "save",
+    "search",
+    "sql",
+    "whoami",
+]
