@@ -45,7 +45,7 @@ Application programming interface (API), Hypertext Transfer Protocol (HTTP), Jav
 
 The production lifecycle package is version `0.1.0`; its process-control backend is pinned to `4.3.0`. Its declarations live in `packages/process_manager/pyproject.toml`.
 
-The root development group also installs the standalone runtime, Python workspace, document and fleet packages. The application image installs production dependencies and copies the lifecycle package; it omits those four prototypes.
+The root development group also installs the standalone runtime and Python workspace packages. The application image installs production dependencies and copies the lifecycle package; it omits those prototypes.
 
 The Python workspace prototype builds separately from `packages/python_workspace/Dockerfile` and its own lock. Its pins are ipykernel `6.29.5`, kernel transport `8.6.3`, NumPy `2.3.4`, pandas `2.3.3`, statsmodels `0.14.5` and vl-convert-python `1.9.0.post1`. The optional Wolfram transport uses httpx `0.28.1`; its build backend is setuptools `80.9.0`.
 
@@ -146,7 +146,7 @@ The production image runs as numeric user `10001` and omits uv, development pack
 
 The application agent uses PostgreSQL conversations and sessions with native HTTP MCP. Its `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local effects consume their matching approval in the write transaction. The separate runtime prototype's `SingleAttemptMCP` suppresses tool-call replay; the application does not import it.
 
-The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding. The runtime, Python workspace, document graph and fleet queue prototypes remain separate from application chat.
+The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding. The runtime and Python workspace prototypes remain separate from application chat.
 
 ## 4. Provider, retrieval and generated data
 
