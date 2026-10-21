@@ -30,7 +30,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     model_embedding: str = "text-embedding-3-large"
     model_endpoint: str = ""
     model_key: str = ""
-    model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=4000)] = 4000
+    model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=16000)] = 4000
     wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"
     app_db_password: str
@@ -120,7 +120,7 @@ def validate_models(settings: Settings, *, access: bool = True) -> None:
         ):
             fail(field)
     budget = settings.model_max_output_tokens
-    if not isinstance(budget, int) or isinstance(budget, bool) or not 16 <= budget <= 4000:
+    if not isinstance(budget, int) or isinstance(budget, bool) or not 16 <= budget <= 16000:
         fail("model_max_output_tokens")
     if not access and not settings.model_key and not settings.model_endpoint:
         return
