@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api-client";
 import { resolveWorkspaceURL, type WorkspaceConfiguration } from "@/components/workspace-url";
-import type { LibraryHit, LibrarySearch } from "craft-api/api/types";
+import type { LibraryHit } from "craft-api/api/types";
 
 export type SourceResult = Pick<LibraryHit, "title" | "classification"> & {
   item: string; version: number; snippet: string;
@@ -39,36 +39,6 @@ const positiveVersion = (value: unknown): value is number => typeof value === "n
 const classification = (value: unknown) => value === "unclassified" || value === "protected-a" || value === "protected-b";
 const hasControl = (value: string) => [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 const cancelled = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException("Request cancelled", "AbortError"); };
-
-export async function searchSources(query: string, signal: AbortSignal): Promise<{ results: SourceResult[]; truncated: boolean }> {
-  if (!query.trim() || query.length > 500 || hasControl(query)) throw new SourceImportFailure("invalid_query");
-  cancelled(signal);
-  const request: LibrarySearch = { query: query.trim(), kinds: ["document"], limit: 6 };
-  try {
-    const response = await apiFetch("/api/library/search", {
-      method: "POST", credentials: "same-origin", redirect: "error", cache: "no-store", signal,
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
-    });
-    cancelled(signal);
-    if (response.status === 401) throw new SourceImportFailure("craft_auth");
-    if (!response.ok) throw new SourceImportFailure("search_unavailable");
-    const body: unknown = await response.json();
-    cancelled(signal);
-    if (!record(body) || !Array.isArray(body.hits) || body.hits.length > 6 || typeof body.truncated !== "boolean") throw new SourceImportFailure("invalid_response");
-    const results: SourceResult[] = [];
-    for (const hit of body.hits) {
-      if (!record(hit) || hit.kind !== "document" || !record(hit.handle) || !safeItem(hit.handle.item) || !positiveVersion(hit.handle.version)
-        || typeof hit.title !== "string" || typeof hit.text !== "string" || !classification(hit.classification)) throw new SourceImportFailure("invalid_response");
-      const item = hit.handle.item, version = hit.handle.version;
-      if (results.some(result => result.item === item && result.version === version)) continue;
-      results.push({ item, version, title: hit.title.slice(0, 400), snippet: hit.text.slice(0, 640), classification: hit.classification as LibraryHit["classification"] });
-    }
-    return { results, truncated: body.truncated };
-  } catch (error) {
-    cancelled(signal);
-    throw error instanceof SourceImportFailure ? error : new SourceImportFailure("search_unavailable");
-  }
-}
 
 function workspaceOrigin(configuration: WorkspaceConfiguration): string {
   try {
@@ -143,7 +113,7 @@ function base64(bytes: Uint8Array): string {
   return chunks.join("");
 }
 function safePersonalPath(value: unknown): value is string {
-  return typeof value === "string" && /^imports\/[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(value) && !value.includes("..");
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(value) && !value.includes("..");
 }
 const safeMetadataPath = (value: unknown): value is string => typeof value === "string" && /^imports\/source-metadata\/[A-Za-z0-9][A-Za-z0-9_.-]{0,114}\.json$/.test(value) && !value.includes("..");
 async function fileModel(response: Response, signal: AbortSignal, metadata = false): Promise<string> {
@@ -172,12 +142,6 @@ export async function importSource(source: SourceResult, configuration: Workspac
     return response;
   };
   try {
-    const directory = await contents("imports?content=0", "GET");
-    if (directory.status !== 404) {
-      if (!directory.ok) throw new SourceImportFailure("import_unavailable");
-      const model: unknown = await directory.json(); cancelled(signal);
-      if (!record(model) || model.type !== "directory" || model.path !== "imports") throw new SourceImportFailure("invalid_response");
-    }
     const original = await apiFetch(`/api/library/documents/${encodeURIComponent(source.item)}/download?version=${source.version}`, {
       method: "GET", credentials: "same-origin", redirect: "error", cache: "no-store", signal,
     });
@@ -193,22 +157,16 @@ export async function importSource(source: SourceResult, configuration: Workspac
       await original.body?.cancel().catch(() => undefined);
     }
     cancelled(signal);
-    if (directory.status === 404) {
-      const created = await contents("imports", "PUT", { type: "directory" });
-      if (!created.ok) throw new SourceImportFailure("import_unavailable");
-      const model: unknown = await created.json(); cancelled(signal);
-      if (!record(model) || model.type !== "directory" || model.path !== "imports") throw new SourceImportFailure("invalid_response");
-    }
     // POST creates a fresh server-selected file; PATCH refuses an existing destination.
     personalMutationStarted = true;
-    const created = await contents("imports", "POST", { type: "file", ext: name.slice(name.lastIndexOf(".")) });
+    const created = await contents("", "POST", { type: "file", ext: name.slice(name.lastIndexOf(".")) });
     if (created.status !== 201) throw new SourceImportFailure("import_unavailable");
     const fresh = await fileModel(created, signal);
     possiblePath = fresh;
     let target: string | undefined;
     const extensionAt = name.lastIndexOf(".");
     for (let attempt = 0; attempt < 20; attempt++) {
-      const candidate = `imports/${attempt === 0 ? name : `${name.slice(0, extensionAt)}-${attempt + 1}${name.slice(extensionAt)}`}`;
+      const candidate = attempt === 0 ? name : `${name.slice(0, extensionAt)}-${attempt + 1}${name.slice(extensionAt)}`;
       try {
         possiblePath = candidate;
         const renamed = await contents(fresh, "PATCH", { path: candidate });
@@ -233,6 +191,18 @@ export async function importSource(source: SourceResult, configuration: Workspac
       copy: { path: target, sha256, sizeBytes: bytes.byteLength },
     });
     if (new TextEncoder().encode(metadata).byteLength > 4096) throw new SourceImportFailure("metadata_unavailable");
+    const directory = await contents("imports?content=0", "GET");
+    if (directory.status !== 404) {
+      if (!directory.ok) throw new SourceImportFailure("metadata_unavailable");
+      const model: unknown = await directory.json(); cancelled(signal);
+      if (!record(model) || model.type !== "directory" || model.path !== "imports") throw new SourceImportFailure("invalid_response");
+    }
+    if (directory.status === 404) {
+      const created = await contents("imports", "PUT", { type: "directory" });
+      if (!created.ok) throw new SourceImportFailure("import_unavailable");
+      const model: unknown = await created.json(); cancelled(signal);
+      if (!record(model) || model.type !== "directory" || model.path !== "imports") throw new SourceImportFailure("invalid_response");
+    }
     const metadataDirectory = await contents("imports/source-metadata?content=0", "GET");
     if (metadataDirectory.status === 404) {
       const created = await contents("imports/source-metadata", "PUT", { type: "directory" });

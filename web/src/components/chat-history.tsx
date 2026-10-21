@@ -14,15 +14,13 @@ interface ChatHistoryProps {
   onReset: () => void;
 }
 
-/** Labels that tell chats apart: repeated or default titles gain their time, then an ordinal. */
+/** Default titles gain their time; repeated labels gain an ordinal. */
 function chatLabels(chats: ConversationSummary[]): string[] {
   const titles = chats.map(chat => chat.title.trim() || "Untitled chat");
-  const titleCounts = new Map<string, number>();
-  for (const title of titles) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
   const labels = chats.map((chat, index) => {
     const title = titles[index];
-    return title === "New conversation" || (titleCounts.get(title) ?? 0) > 1
+    return title === "New conversation" || title === "New chat"
       ? `${title} · ${dateFormat.format(new Date(chat.updatedAt))}` : title;
   });
   const labelCounts = new Map<string, number>();

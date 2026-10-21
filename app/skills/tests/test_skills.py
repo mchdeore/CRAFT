@@ -369,7 +369,7 @@ def test_catalog_lists_owned_definitions_for_native_skill_execution(http):
     assert response.status_code == 200
     assert response.json()["skills"] == ["Engineering comparison"]
     assert response.json()["skillsStatus"] == "installed"
-    from app.agent.fake import catalog_summary
+    from app.tests.support.model import catalog_summary
     from app.tools.handlers import CapabilityCatalog
 
     summary = catalog_summary(msgspec.convert(response.json(), CapabilityCatalog), "skills")

@@ -430,4 +430,4 @@ def test_private_workspace_env_is_outside_public_settings_schema():
             "USER_WORKSPACES_FILE": "/generated/private-workspaces.json",
         }
     )
-    assert settings.model_main == "fake"
+    assert settings.model_main == "gpt-5.2"

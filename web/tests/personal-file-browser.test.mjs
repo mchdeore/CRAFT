@@ -32,6 +32,7 @@ function interactiveHost() {
 }
 
 const buttonAt = (host, label) => host.elements("button").find(row => row.getAttribute("aria-label") === label || row.textContent === label);
+const folderAt = host => host.elements("p").find(row => row.getAttribute("aria-label") === "Current folder")?.textContent;
 async function click(host, label) { const button = buttonAt(host, label); assert.ok(button, label); await React.act(async () => { button.dispatchEvent({ type: "click", bubbles: true, button: 0 }); await tick(); }); }
 async function filter(host, value) { const input = host.elements("input").find(row => row.getAttribute("aria-label") === "Filter personal files"); assert.ok(input); await React.act(async () => { input.value = value; input.dispatchEvent({ type: "input", bubbles: true }); }); return input; }
 
@@ -42,23 +43,23 @@ test("folder navigation and filtering retain exact file selection and distinguis
   const { createRoot } = await import("react-dom/client"), root = createRoot(host.container);
   try {
     await React.act(async () => { root.render(React.createElement(view.PersonalFileBrowser, { configuration: configured, onOpenFile: path => selected.push(path) })); await tick(); });
-    assert.match(host.container.textContent, /USER_ROOT/);
+    assert.equal(folderAt(host), "Workspace root");
     await click(host, "Open folder imports");
-    assert.match(host.container.textContent, /\/workspace\/imports/);
+    assert.equal(folderAt(host), "imports");
     await filter(host, " REPORT ");
     assert.equal(buttonAt(host, "Open folder nested"), undefined);
     await click(host, "Preview report.xlsx"); assert.deepEqual(selected, ["imports/report.xlsx"]);
     assert.equal(buttonAt(host, "Preview report.xlsx").getAttribute("aria-current"), "true");
     await filter(host, "missing");
-    assert.match(host.container.textContent, /No .*match/i); assert.doesNotMatch(host.container.textContent, /This folder is empty/);
+    assert.match(host.container.textContent, /No .*match/i); assert.doesNotMatch(host.container.textContent, /No files yet/);
     await click(host, "Clear filter");
     assert.equal(host.elements("input")[0].value, "");
     await click(host, "Open folder nested");
-    assert.match(host.container.textContent, /\/workspace\/imports\/nested/);
+    assert.equal(folderAt(host), "imports/nested");
     await click(host, "Back to parent folder");
     assert.ok(buttonAt(host, "Preview report.xlsx"));
     await click(host, "Go to workspace root");
-    assert.ok(buttonAt(host, "Open folder imports")); assert.doesNotMatch(host.container.textContent, /\/workspace\/imports\/nested/);
+    assert.ok(buttonAt(host, "Open folder imports")); assert.equal(folderAt(host), "Workspace root");
   } finally { try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = oldFetch; host.restore(); } }
 });
 
@@ -69,9 +70,9 @@ test("empty folders stay distinct from a filter miss and refresh reveals newly s
   try {
     await React.act(async () => { root.render(React.createElement(view.PersonalFileBrowser, { configuration: configured, onOpenFile() {} })); await tick(); });
     await filter(host, "missing");
-    assert.match(host.container.textContent, /This folder is empty/); assert.doesNotMatch(host.container.textContent, /No .*match/i);
+    assert.match(host.container.textContent, /No files yet/); assert.doesNotMatch(host.container.textContent, /No .*match/i);
     files = [entry("new.txt")]; await click(host, "Refresh");
-    assert.doesNotMatch(host.container.textContent, /This folder is empty/); assert.match(host.container.textContent, /No .*match/i);
+    assert.doesNotMatch(host.container.textContent, /No files yet/); assert.match(host.container.textContent, /No .*match/i);
     await click(host, "Clear filter"); assert.ok(buttonAt(host, "Preview new.txt"));
   } finally { try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = oldFetch; host.restore(); } }
 });
@@ -103,7 +104,7 @@ test("an import reveal aborts stale navigation and opens the actual containing f
     await render({}); await render({ revealFile: "imports/deep/copy.csv", refreshToken: 1 });
     assert.equal(requests[0].signal.aborted, true);
     finishRoot(json({ type: "directory", path: "", content: [entry("stale.txt")] })); await React.act(async () => { await tick(); });
-    assert.doesNotMatch(host.container.textContent, /stale.txt/); assert.match(host.container.textContent, /\/workspace\/imports\/deep/);
+    assert.doesNotMatch(host.container.textContent, /stale.txt/); assert.equal(folderAt(host), "imports/deep");
     assert.equal(buttonAt(host, "Preview copy.csv").getAttribute("aria-current"), "true");
     await click(host, "Back to parent folder");
     await render({ revealFile: "imports/deep/copy.csv", refreshToken: 2 });

@@ -24,6 +24,7 @@ from app.library.handlers import (
     index_provider,
     read_chunks,
 )
+from app.tests.support import model as scripted_model
 from app.tests.support.demo import demo as demo
 
 
@@ -170,13 +171,13 @@ def test_ground_truth_versions(demo):
     import subprocess
 
     result = subprocess.run(
-        ["uv", "run", "craft", "index", "--rebuild"],
+        [*scripted_model.COMMAND, "index", "--rebuild"],
         env=os.environ
+        | scripted_model.ENVIRONMENT
         | {
             "CRAFT_PROVIDER_ROOT": str(demo["one"]),
             "CRAFT_DATABASE_PORT": str(demo["settings"].database_port),
             "CRAFT_DATABASE_NAME": "craft_test",
-            "CRAFT_MODEL_MAIN": "fake",
             "CRAFT_LOG_LEVEL": "WARNING",
         },
         capture_output=True,

@@ -139,7 +139,6 @@ def test_mcp_reads_owned_notes_but_unapproved_writes_are_refused(chat):
             "CRAFT_DATABASE_NAME": "craft_test",
             "CRAFT_PROVIDER_ROOT": chat["settings"].provider_root,
             "CRAFT_MCP_URL": chat["settings"].mcp_url,
-            "CRAFT_MODEL_MAIN": "fake",
         },
     )
 

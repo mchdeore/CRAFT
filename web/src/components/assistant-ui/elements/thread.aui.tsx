@@ -9,6 +9,7 @@ import { File } from "@/components/assistant-ui/elements/file";
 import { CitationList } from "@/components/citations/citation-list";
 import { ChatTool } from "@/components/chat-tool";
 import { ChatSourceCards } from "@/components/chat-source-cards";
+import { toolLabel } from "@/lib/chat-evidence";
 import { PersonalReferenceControl, PersonalReferencePickers } from "@/components/personal-reference-pickers";
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/elements/follow-up-suggestions.aui";
@@ -248,9 +249,8 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; workspace?: Workspa
             <ThreadFollowupSuggestions />
             {beforeComposer}
             <Composer autoFocus={autoFocus} workspace={workspace} />
-            <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
-              <ThreadStarters />
-              <ThreadSuggestions />
+            <AuiIf condition={isNewChatView}>
+              <ThreadStarterArea />
             </AuiIf>
           </ThreadPrimitive.ViewportFooter>
         </div>
@@ -377,10 +377,10 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const STARTERS = [
-  { title: "Find missions", prompt: "Which missions have a dry mass under 150 kg? Cite the values." },
-  { title: "Compare missions", prompt: "Compare peak power and dry mass for msn-sim-01 and msn-sim-02." },
-  { title: "Search documents", prompt: "Which documents mention the radiator margin, and what do they say?" },
-  { title: "Summarize a document", prompt: "Summarize the thermal design document for msn-sim-01." },
+  { title: "Find missions", prompt: "What is the radiator margin for msn-sim-04, and where is it stated?" },
+  { title: "Compare missions", prompt: "Which missions are most like msn-sim-04?" },
+  { title: "Search documents", prompt: "Find documents about thermal design reviews" },
+  { title: "Summarize a document", prompt: "Summarise the power budget assumptions for msn-sim-02" },
 ];
 
 const ThreadWelcome: FC = () => {
@@ -396,10 +396,21 @@ const ThreadWelcome: FC = () => {
   );
 };
 
+// Starters keep their space while the person types, so the composer doesn't jump.
+const ThreadStarterArea: FC = () => {
+  const typing = useAuiState((s) => !s.composer.isEmpty);
+  return (
+    <div aria-hidden={typing} className={cn("flex flex-col gap-4 transition-opacity", typing && "pointer-events-none invisible opacity-0")}>
+      <ThreadStarters />
+      <ThreadSuggestions />
+    </div>
+  );
+};
+
 const ThreadStarters: FC = () => (
   <div className="grid w-full gap-2 sm:grid-cols-2">
     {STARTERS.map(starter => (
-      <ThreadPrimitive.Suggestion key={starter.title} prompt={starter.prompt} send={false} render={<button type="button" className="fade-in animate-in fill-mode-both flex flex-col items-start gap-0.5 rounded-xl border px-3.5 py-2.5 text-start text-sm transition-colors duration-200 hover:bg-foreground/[0.03]" />}>
+      <ThreadPrimitive.Suggestion key={starter.title} prompt={starter.prompt} send render={<button type="button" className="fade-in animate-in fill-mode-both flex flex-col items-start gap-0.5 rounded-xl border px-3.5 py-2.5 text-start text-sm transition-colors duration-200 hover:bg-foreground/[0.03]" />}>
         <span className="font-medium">{starter.title}</span>
         <span className="line-clamp-1 text-muted-foreground">{starter.prompt}</span>
       </ThreadPrimitive.Suggestion>
@@ -446,6 +457,9 @@ const Composer: FC<{ autoFocus: boolean; workspace?: WorkspaceConfiguration }> =
                       autoFocus={autoFocus}
                       enterKeyHint="send"
                       aria-label="Message input"
+                      onKeyDownCapture={event => {
+                        if (event.key === "Enter" && !event.shiftKey && ["", "@", "/"].includes(event.currentTarget.value.trim())) { event.preventDefault(); event.stopPropagation(); }
+                      }}
                       ref={inputRef}
                     /><ComposerAction workspace={workspace} inputRef={inputRef} /></ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
@@ -454,6 +468,8 @@ const Composer: FC<{ autoFocus: boolean; workspace?: WorkspaceConfiguration }> =
 };
 
 const ComposerAction: FC<{ workspace?: WorkspaceConfiguration; inputRef: RefObject<HTMLTextAreaElement | null> }> = ({ workspace, inputRef }) => {
+  const text = useAuiState(state => state.composer.text).trim();
+  const cannotSend = !text || text === "@" || text === "/";
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
       <div className="flex items-center gap-1"><ComposerAddAttachment />{workspace && <PersonalReferenceControl configuration={workspace} inputRef={inputRef} />}</div>
@@ -469,7 +485,7 @@ const ComposerAction: FC<{ workspace?: WorkspaceConfiguration; inputRef: RefObje
         <AuiIf
           condition={(s) => !s.thread.isRunning || s.thread.voice !== undefined}
         >
-          <ComposerPrimitive.Send render={<TooltipIconButton tooltip="Send message" side="bottom" type="button" variant="default" size="icon" className="aui-composer-send size-7 rounded-full" aria-label="Send message" />}><ArrowUpIcon className="aui-composer-send-icon size-4" /></ComposerPrimitive.Send>
+          <ComposerPrimitive.Send disabled={cannotSend} render={<TooltipIconButton tooltip="Send message" side="bottom" type="button" variant="default" size="icon" className="aui-composer-send size-7 rounded-full" aria-label="Send message" />}><ArrowUpIcon className="aui-composer-send-icon size-4" /></ComposerPrimitive.Send>
         </AuiIf>
         <AuiIf
           condition={(s) => s.thread.isRunning && s.thread.voice === undefined}
@@ -498,6 +514,7 @@ const AssistantMessage: FC = () => {
     TaskGroup: TaskGroupComponent,
   } = useContext(ThreadComponentsContext);
   const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
+  const parts = useAuiState((s) => s.message.parts);
 
   const ACTION_BAR_PT = "pt-1.5";
   // Keep the action bar inside the contained root's paint box, then cancel its reserved space in flow.
@@ -530,6 +547,7 @@ const AssistantMessage: FC = () => {
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
                       count={part.indices.length}
+                      label={toolLabel(part.indices.map(index => { const tool = parts[index]; return tool?.type === "tool-call" ? tool.toolName : ""; }).filter(Boolean))}
                       active={part.status.type === "running"}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>

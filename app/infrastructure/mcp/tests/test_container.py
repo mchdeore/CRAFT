@@ -14,6 +14,7 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from app.infrastructure.config.env import read_env
 from app.infrastructure.paths import ROOT
 
 
@@ -27,9 +28,13 @@ def container_provider():
         yield provider
 
 
+@pytest.mark.live
 def test_mcp_container_lists_and_answers(container_provider):
     if shutil.which("docker") is None:
         pytest.skip("Docker is missing")
+    configured = read_env()
+    if not configured.get("CRAFT_MODEL_KEY") or not configured.get("CRAFT_MODEL_ENDPOINT"):
+        pytest.skip("The model endpoint and key are not configured")
     provider = container_provider
     with socket.socket() as port:
         port.bind(("127.0.0.1", 0))
@@ -39,9 +44,6 @@ def test_mcp_container_lists_and_answers(container_provider):
         "CRAFT_DATABASE_HOST": "localhost",
         "CRAFT_DATABASE_PORT": str(database_port),
         "CRAFT_MCP_URL": "http://127.0.0.1:8000/mcp",
-        "CRAFT_MODEL_MAIN": "fake",
-        "CRAFT_MODEL_KEY": "",
-        "CRAFT_MODEL_ENDPOINT": "",
         "CRAFT_PROVIDER_ROOT": str(provider),
     }
     with TemporaryDirectory(prefix="craft-B22-", dir="/tmp") as temporary:

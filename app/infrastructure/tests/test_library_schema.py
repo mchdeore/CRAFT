@@ -113,7 +113,7 @@ def test_owner_writes_library_and_cascades(owner_engine: Engine) -> None:
                 m.vectors.insert().values(
                     owner_kind="chunk",
                     owner_id=chunk,
-                    model="fake",
+                    model="scripted",
                     recipe="chunk-v1",
                     embedding=[1.0] + [0.0] * 1535,
                 )
@@ -177,7 +177,7 @@ def test_vector_cosine_search(owner_engine: Engine) -> None:
                     .values(
                         owner_kind="chunk",
                         owner_id=uuid4(),
-                        model="fake",
+                        model="scripted",
                         recipe="chunk-v1",
                         embedding=[first, second] + [0.0] * 1534,
                     )

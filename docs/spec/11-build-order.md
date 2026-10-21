@@ -17,7 +17,7 @@ The following order describes the implemented component dependencies.
 | 7 | Working notes, saved skills, chart and calculation tools | Owned records, exact skill revisions and existing operations |
 | 8 | Base and generated demo sets, document summary and browser shells | Checked handlers, provider data and the API contract |
 
-Notes use migration 0012 and skills use migration 0013. Seed commands run separately from migrations. The optional lifecycle package attaches to the application lifespan. Standalone runtime, workspace, document and fleet packages have their own component boundaries.
+Notes use migration 0012 and skills use migration 0013. Seed commands run separately from migrations. The optional lifecycle package attaches to the application lifespan. Standalone runtime and workspace packages have their own component boundaries.
 
 ## 11.2 Running the application
 

@@ -45,7 +45,7 @@ Application programming interface (API), Hypertext Transfer Protocol (HTTP), Jav
 
 The production lifecycle package is version `0.1.0`; its process-control backend is pinned to `4.3.0`. Its declarations live in `packages/process_manager/pyproject.toml`.
 
-The root development group also installs the standalone runtime, Python workspace, document and fleet packages. The application image installs production dependencies and copies the lifecycle package; it omits those four prototypes.
+The root development group also installs the standalone runtime and Python workspace packages. The application image installs production dependencies and copies the lifecycle package; it omits those prototypes.
 
 The Python workspace prototype builds separately from `packages/python_workspace/Dockerfile` and its own lock. Its pins are ipykernel `6.29.5`, kernel transport `8.6.3`, NumPy `2.3.4`, pandas `2.3.3`, statsmodels `0.14.5` and vl-convert-python `1.9.0.post1`. The optional Wolfram transport uses httpx `0.28.1`; its build backend is setuptools `80.9.0`.
 
@@ -118,11 +118,13 @@ CRAFT_BACKEND_URL=http://127.0.0.1:8000 npm run dev
 
 The development proxy forwards `/api`, `/health` and `/mcp` to the selected loopback backend. `CRAFT_BACKEND_URL` must be a single HTTP or HTTPS loopback origin without credentials, a path, query or fragment. The backend must allow the frontend Origin. Live mode is the default and uses authenticated sessions.
 
-For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least 12 characters and is never stored in the repository:
+For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and is never stored in the repository:
 
 ```bash
 SEED_DEMO_PASSWORD='choose-a-local-password' uv run craft seed demo
 ```
+
+`scripts/demo go` runs the whole local demo on the configured models: it wipes the demo database and workspace, builds the workspace image, migrates and seeds the database, starts one demo workspace, the backend and the frontend, then opens `http://localhost:5200`. `scripts/demo stop` stops them. Model settings come from the checkout's `.env`; generated database passwords and the demo password live in the ignored `var/demo/`.
 
 The production build ignores environment files and includes only curated public assets. Serve its `web/dist/` output with the authenticated backend from the same origin and its `/api/` routes; the development proxy does not configure production serving. Return to the repository root for the following backend commands.
 
@@ -146,13 +148,13 @@ The production image runs as numeric user `10001` and omits uv, development pack
 
 The application agent uses PostgreSQL conversations and sessions with native HTTP MCP. Its `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local effects consume their matching approval in the write transaction. The separate runtime prototype's `SingleAttemptMCP` suppresses tool-call replay; the application does not import it.
 
-The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding. The runtime, Python workspace, document graph and fleet queue prototypes remain separate from application chat.
+The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding. The runtime and Python workspace prototypes remain separate from application chat.
 
 ## 4. Provider, retrieval and generated data
 
 `CRAFT_PROVIDER_ROOT` defaults to `var/provider` on the host. Compose mounts it read-only at `/provider`. It stores generated originals and immutable versions outside PostgreSQL. The database keeps derived chunks, summaries, vectors, differences and approved cube values.
 
-Indexing converts sources and makes model/embedding requests before short writes. Fake mode uses extract summaries and deterministic vectors. Configured mode records the selected model. `craft index --rebuild` rebuilds representations when that model changes. Source availability and mission/silo grants constrain search and evidence reads.
+Indexing converts sources and makes model/embedding requests before short writes. Summaries and vectors come from the configured models, and each row records the model that made it. `craft index --rebuild` rebuilds representations when that model changes. Source availability and mission/silo grants constrain search and evidence reads.
 
 Search combines keyword and vector candidates with normalized 0.7 semantic and 0.3 lexical weights. Ranking scores order hits; answer confidence stays zero and low. Exact citation handles and source checks are described in the specification.
 
@@ -179,18 +181,18 @@ uv run pytest
 | Area | Targeted command | Assertions |
 |---|---|---|
 | Registry and logging | `uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture.py` | Checked boundaries, short transactions and metadata-only logs |
-| Contract | `CRAFT_MODEL_MAIN=fake uv run pytest -q app/tests/test_contract.py` | Built routes/tools, Python/TypeScript shapes, examples and stream schemas |
+| Contract | `uv run pytest -q app/tests/test_contract.py` | Built routes/tools, Python/TypeScript shapes, examples and stream schemas |
 | Sessions | `uv run pytest -q app/accounts/tests` | Cookie, Origin, expiry, revocation and account ownership |
 | Sources and retrieval | `uv run pytest -q app/infrastructure/provider/tests app/library/tests` | Immutable versions, conversion, current access, ranking and citations |
 | Cube | `uv run pytest -q app/cube/tests` | Units, dated values, comparisons, candidate evidence and approved publication |
 | Generated data | `uv run pytest -q app/seed/tests/test_demo.py` | Reproducible bytes, ground truth, versions and withdrawals |
-| Chat and recovery | `CRAFT_MODEL_MAIN=fake uv run pytest -q app/agent/tests` | Events, owned history, limits, cancellation and persisted approval resume |
+| Chat and recovery | `uv run pytest -q app/agent/tests` | Events, owned history, limits, cancellation and persisted approval resume |
 | Native MCP | `uv run pytest -q app/infrastructure/mcp/tests` | Transport parity, run-token checks, tool links and effect refusal |
 | Conversations/files | `uv run pytest -q app/conversations/tests` | Nonblank titles, list order, archive behavior and bounded exact files |
 | Skills and notes | `uv run pytest -q app/skills/tests app/notes/tests` | Owner scope, immutable revisions, save conflicts and mutation replay |
 | Tools and summary | `uv run pytest -q app/tools/tests app/summarize/tests` | Chart/expression bounds, source extracts and confidence behavior |
 
-Fakes replace outside services; deterministic checks use real application handlers and isolated PostgreSQL. Database setup failures and missing live prerequisites are recorded separately from assertion failures. A source review or synthetic test does not establish live model quality or browser acceptance.
+Tests install the scripted model from `app/tests/support/model.py` in place of the configured provider and nothing outside tests uses it. Deterministic checks use real application handlers and isolated PostgreSQL. Database setup failures and missing live prerequisites are recorded separately from assertion failures. A source review or synthetic test does not establish live model quality or browser acceptance.
 
 After installing the API and frontend npm dependencies, run the frontend checks from `web/`:
 
@@ -204,7 +206,7 @@ npm run build
 
 ## 6. Continuous integration
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. It installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the fake-model contract/stream suites.
+`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. It installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the contract and stream suites.
 
 The full-stack gate builds Compose, checks readiness and request IDs, verifies the non-root app and its password-variable boundary, then removes the disposable project volume. A local repeat needs free application/database ports and its own Compose project; never reset an existing corpus to reproduce that check.
 

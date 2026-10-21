@@ -30,7 +30,7 @@ Root runs review one effectful call at a time. Parallel proposals stop before an
 
 ## 3. Standalone runtime
 
-`packages/runtime/` is a separate runner with local run-state and memory interfaces. Its `SingleAttemptMCP` transport sends a tool call once and fails on a lost response. The application does not use that class. The [Python workspace prototype](python.md) and [model job queue](jobs.md) are also standalone prototypes.
+`packages/runtime/` is a separate runner with local run-state and memory interfaces. Its `SingleAttemptMCP` transport sends a tool call once and fails on a lost response. The application does not use that class. The [Python workspace prototype](python.md) is also a standalone prototype.
 
 ## 4. Related topics
 

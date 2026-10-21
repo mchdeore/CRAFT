@@ -122,7 +122,7 @@ def test_index_office_files(library) -> None:
         for row in rows:
             assert (
                 row.simulated
-                and row.summary_kind == "extract"
+                and row.summary_kind == "generated"
                 and 0 < len(row.summary.split()) <= 150
             )
             assert session.execute(

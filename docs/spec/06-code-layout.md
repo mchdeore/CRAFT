@@ -34,7 +34,7 @@ compose.yaml  Dockerfile  docker/initdb.sh  .env.example  pyproject.toml  uv.loc
 
 Handlers expose operations. Services coordinate a use case and select short transactions. Storage receives an explicit Session and never commits independently. The optional lifecycle attachment belongs to the application lifespan; it exposes no process-creation route.
 
-The runtime, Python workspace, document and fleet packages are standalone development prototypes. The production application uses its own agent and provider implementations and includes the lifecycle package. The dependency reference owns package and image pins.
+The runtime and Python workspace packages are standalone development prototypes. The production application uses its own agent and provider implementations and includes the lifecycle package. The dependency reference owns package and image pins.
 
 ## 6.2 Conventions
 

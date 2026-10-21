@@ -2,7 +2,9 @@
 
 import hashlib
 import mimetypes
+import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -12,13 +14,19 @@ from app.infrastructure.config.settings import Settings
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
 from app.infrastructure.database.unit_of_work import unit_of_work
+from app.infrastructure.errors import ApiError
 from app.infrastructure.provider import get_provider
 from app.library import storage
 from app.library.convert import convert
 from app.library.diff import compare
-from app.library.embed import embed, model_name
+from app.library.embed import embed_many, model_name
 from app.library.facets import build as build_facets
 from app.library.summaries import make as make_summary
+
+# Documents summarized and embedded at once during a build.
+WORKERS = 8
+# Model calls for one document are tried this often, waiting 2, 4 then 8 seconds between.
+ATTEMPTS = 4
 
 
 def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
@@ -94,7 +102,8 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                         index_elements=[m.provider_items.c.item], set_=columns
                     )
                 )
-        # File conversion and embeddings are outside database transactions.
+        # File conversion and model calls are outside database transactions.
+        pending = []
         for item in records.values():
             for version in item["versions"]:
                 with unit_of_work(sessions, read_only=True) as session:
@@ -114,89 +123,109 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 except (ValueError, UnicodeDecodeError):
                     counts["unsupported"] += 1
                     continue
-                dirty.add(item["mission_key"])
-                summary, summary_kind = make_summary(caller, blocks)
-                doc_vector = embed(item["title"] + " " + summary, caller=caller)
-                chunk_vectors = [
-                    embed(item["title"] + " " + b.heading_path + " " + b.text, caller=caller)
-                    for b in blocks
-                ]
-                with unit_of_work(sessions) as session:
-                    document = session.execute(
-                        m.doc_versions.insert()
+                pending.append((item, version, blocks))
+
+        def represent(job):
+            item, _, blocks = job
+            attempt = 0
+            while True:
+                try:
+                    summary, summary_kind = make_summary(caller, blocks)
+                    vectors = embed_many(
+                        [item["title"] + " " + summary]
+                        + [item["title"] + " " + b.heading_path + " " + b.text for b in blocks],
+                        caller=caller,
+                    )
+                    return summary, summary_kind, vectors[0], vectors[1:]
+                except ApiError:
+                    # One failed call would otherwise discard the whole build.
+                    attempt += 1
+                    if attempt == ATTEMPTS:
+                        raise
+                    time.sleep(2**attempt)
+
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            represented = list(pool.map(represent, pending))
+        for (item, version, blocks), (summary, summary_kind, doc_vector, chunk_vectors) in zip(
+            pending, represented, strict=True
+        ):
+            dirty.add(item["mission_key"])
+            with unit_of_work(sessions) as session:
+                document = session.execute(
+                    m.doc_versions.insert()
+                    .values(
+                        item=item["item"],
+                        version=version["version"],
+                        sha256=bytes.fromhex(version["sha256"]),
+                        media_type=version.get("media_type")
+                        or mimetypes.guess_type(item["path"])[0]
+                        or "text/plain",
+                        summary=summary,
+                        summary_kind=summary_kind,
+                    )
+                    .returning(m.doc_versions.c.id)
+                ).scalar_one()
+                session.execute(
+                    m.vectors.insert().values(
+                        owner_kind="doc_version",
+                        owner_id=document,
+                        model=model_name(settings),
+                        recipe="doc-v1",
+                        embedding=doc_vector,
+                    )
+                )
+                for block, vector in zip(blocks, chunk_vectors, strict=True):
+                    chunk = session.execute(
+                        m.chunks.insert()
                         .values(
-                            item=item["item"],
-                            version=version["version"],
-                            sha256=bytes.fromhex(version["sha256"]),
-                            media_type=version.get("media_type")
-                            or mimetypes.guess_type(item["path"])[0]
-                            or "text/plain",
-                            summary=summary,
-                            summary_kind=summary_kind,
+                            doc_version_id=document,
+                            block=block.block,
+                            kind=block.kind,
+                            heading_path=block.heading_path,
+                            locator=block.locator,
+                            text=block.text,
+                            text_sha256=hashlib.sha256(block.text.encode()).digest(),
                         )
-                        .returning(m.doc_versions.c.id)
+                        .returning(m.chunks.c.id)
                     ).scalar_one()
                     session.execute(
                         m.vectors.insert().values(
-                            owner_kind="doc_version",
-                            owner_id=document,
+                            owner_kind="chunk",
+                            owner_id=chunk,
                             model=model_name(settings),
-                            recipe="doc-v1",
-                            embedding=doc_vector,
+                            recipe="chunk-v1",
+                            embedding=vector,
                         )
                     )
-                    for block, vector in zip(blocks, chunk_vectors, strict=True):
-                        chunk = session.execute(
-                            m.chunks.insert()
-                            .values(
-                                doc_version_id=document,
-                                block=block.block,
-                                kind=block.kind,
-                                heading_path=block.heading_path,
-                                locator=block.locator,
-                                text=block.text,
-                                text_sha256=hashlib.sha256(block.text.encode()).digest(),
+                    counts["chunks"] += 1
+                previous = session.execute(
+                    select(m.doc_versions.c.id).where(
+                        m.doc_versions.c.item == item["item"],
+                        m.doc_versions.c.version == version["version"] - 1,
+                    )
+                ).scalar_one_or_none()
+                if previous is not None:
+                    old = {
+                        int(position): bytes(value)
+                        for position, value in session.execute(
+                            select(m.chunks.c.block, m.chunks.c.text_sha256).where(
+                                m.chunks.c.doc_version_id == previous
                             )
-                            .returning(m.chunks.c.id)
-                        ).scalar_one()
+                        )
+                    }
+                    new = {b.block: hashlib.sha256(b.text.encode()).digest() for b in blocks}
+                    differences = compare(old, new)
+                    for seq, difference in enumerate(differences, 1):
                         session.execute(
-                            m.vectors.insert().values(
-                                owner_kind="chunk",
-                                owner_id=chunk,
-                                model=model_name(settings),
-                                recipe="chunk-v1",
-                                embedding=vector,
+                            m.version_diffs.insert().values(
+                                from_version=previous,
+                                to_version=document,
+                                seq=seq,
+                                **difference,
                             )
                         )
-                        counts["chunks"] += 1
-                    previous = session.execute(
-                        select(m.doc_versions.c.id).where(
-                            m.doc_versions.c.item == item["item"],
-                            m.doc_versions.c.version == version["version"] - 1,
-                        )
-                    ).scalar_one_or_none()
-                    if previous is not None:
-                        old = {
-                            int(position): bytes(value)
-                            for position, value in session.execute(
-                                select(m.chunks.c.block, m.chunks.c.text_sha256).where(
-                                    m.chunks.c.doc_version_id == previous
-                                )
-                            )
-                        }
-                        new = {b.block: hashlib.sha256(b.text.encode()).digest() for b in blocks}
-                        differences = compare(old, new)
-                        for seq, difference in enumerate(differences, 1):
-                            session.execute(
-                                m.version_diffs.insert().values(
-                                    from_version=previous,
-                                    to_version=document,
-                                    seq=seq,
-                                    **difference,
-                                )
-                            )
-                        counts["differences"] += len(differences)
-                    counts["versions"] += 1
+                    counts["differences"] += len(differences)
+                counts["versions"] += 1
         dirty.discard(None)
         counts.update(build_facets(caller, dirty, set(records)))
         with unit_of_work(sessions) as session:

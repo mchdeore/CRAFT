@@ -22,4 +22,4 @@ Container lifecycle uses the Docker SDK. A container requires a pinned digest or
 
 Backend refusal, failed startup, unsupported limits and incomplete cleanup return fixed error codes. They never report a healthy service or expose backend diagnostics. Original lifecycle ownership remains available when cleanup fails.
 
-Related interfaces: [components](components.md), [runtime](runtime.md), [Python workspace](python.md), [model jobs](jobs.md) and [code layout](../spec/06-code-layout.md).
+Related interfaces: [components](components.md), [runtime](runtime.md), [Python workspace](python.md) and [code layout](../spec/06-code-layout.md).

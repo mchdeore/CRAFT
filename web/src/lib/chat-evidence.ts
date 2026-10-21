@@ -124,13 +124,58 @@ export async function checkSource(citation: AnswerCitation, signal: AbortSignal,
   }
 }
 
+type CodeExecutionStatus = "ok" | "error" | "unknown";
+// Allows escaped 64 KiB output in paired text/structured MCP envelopes.
+const MAX_CODE_RESULT_CHARACTERS = 2 * 1024 * 1024;
+
+function codeExecutionStatus(value: unknown): CodeExecutionStatus {
+  try {
+    // Workspace actions can be wrapped in nested MCP envelopes in live/history.
+    // Inspect only bounded results; never surface kernel error or output text.
+    for (let depth = 0; depth < 4; depth++) {
+      if (typeof value === "string") {
+        if (value.length > MAX_CODE_RESULT_CHARACTERS) return "unknown";
+        value = JSON.parse(value);
+      }
+      if (!record(value)) return "unknown";
+      if (value.isError === true) return "error";
+      if ((value.status === "ok" || value.status === "error") && only(value, ["status", "outputs", "error", "truncated"]) &&
+        typeof value.truncated === "boolean" && (value.error === null || typeof value.error === "string" && value.error.length <= MAX_CODE_RESULT_CHARACTERS) &&
+        Array.isArray(value.outputs)) return value.status;
+      if (record(value.structuredContent)) value = value.structuredContent;
+      else if (Array.isArray(value.content) && value.content.length === 1 && record(value.content[0]) && value.content[0].type === "text") value = value.content[0].text;
+      else return "unknown";
+    }
+  } catch { /* Malformed tool JSON supplies no execution-status claim. */ }
+  return "unknown";
+}
+
 export function toolView(part: unknown): ToolView {
   const p = record(part) ? part : {};
   const name = typeof p.toolName === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(p.toolName) ? p.toolName : "Tool";
   const correlationId = typeof p.toolCallId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(p.toolCallId) ? p.toolCallId : undefined;
   const status = record(p.status) ? p.status.type as ToolCallMessagePartStatus["type"] : undefined;
+  const execution = status === "complete" && name === "run_code" && p.isError !== true ? codeExecutionStatus(p.result) : undefined;
+  const completed = p.isError === true || execution === "error" ? "Failed" : execution === "unknown" ? "Unavailable" : "Completed";
   return {
     name, correlationId,
-    status: status === "running" ? "Running" : status === "complete" ? (p.isError === true ? "Failed" : "Completed") : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
+    status: status === "running" ? "Running" : status === "complete" ? completed : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
   };
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  search: "Searched the library", get_document: "Opened a document", read_chunks: "Read passages", explore: "Read around a passage",
+  compare_versions: "Compared versions", list_documents: "Listed documents", check_citation: "Checked a citation",
+  list_missions: "Listed missions", list_parameters: "Listed parameters", find_missions: "Found missions", get_mission: "Read mission values",
+  compare_missions: "Compared missions", similar_missions: "Found similar missions", explain_similarity: "Explained a similarity",
+  read_facets: "Read mission profiles", list_capabilities: "Listed tools", check_calculation: "Checked a calculation",
+  list_files: "Listed your files", list_notebooks: "Listed your notebooks", read_notebook: "Read a notebook",
+  run_code: "Ran code in your workspace", write_file: "Wrote a file", edit_notebook: "Edited a notebook",
+};
+
+/** A plain-language label for one or more tool calls. */
+export function toolLabel(names: readonly string[]): string {
+  const short = names.map(name => name.slice(name.lastIndexOf(".") + 1));
+  const labels = [...new Set(short.map(name => TOOL_LABELS[name] ?? "Used " + name.replaceAll("_", " ")))];
+  return labels.length ? labels.join(" · ") : "Worked";
 }

@@ -20,9 +20,13 @@ export function resolveWorkspaceURL(value: string | undefined, craftOrigin: stri
   if (!value?.trim()) return { status: "missing" };
   try {
     const url = new URL(value.trim());
+    const craftURL = new URL(craftOrigin);
     if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
       || url.username || url.password || url.search || url.hash || url.pathname !== "/"
-      || url.origin === new URL(craftOrigin).origin) return { status: "invalid" };
+      || url.origin === craftURL.origin) return { status: "invalid" };
+    const craftHost = craftURL.hostname;
+    if (["localhost", "127.0.0.1", "[::1]"].includes(craftHost)) url.hostname = craftHost;
+    if (url.origin === craftURL.origin) return { status: "invalid" };
     url.pathname = "/lab";
     return { status: "configured", url: url.href };
   } catch {

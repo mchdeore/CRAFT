@@ -561,11 +561,21 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         {key: field for key, field in message.items() if not key.startswith("_")}
                         for message in value["messages"]
                     ]
+                    # The framework re-identifies replayed history, so only messages after the
+                    # newest user turn belong to this run; earlier ones come from stored history.
+                    latest = max(
+                        (i for i, message in enumerate(snapshot) if message.get("role") == "user"),
+                        default=-1,
+                    )
+                    snapshot = snapshot[latest + 1 :]
                     for message in snapshot:
                         if message.get("id"):
                             message["id"] = mapped(message["id"])
                     value["messages"] = list(
-                        {message["id"]: message for message in snapshot + output}.values()
+                        {
+                            message["id"]: message
+                            for message in history + ([user] if user else []) + snapshot + output
+                        }.values()
                     )
                 if kind == "RUN_ERROR":
                     status = "failed"

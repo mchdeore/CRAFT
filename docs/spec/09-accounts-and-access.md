@@ -6,7 +6,7 @@ The command-line interface (CLI) creates local accounts. Agent-User Interaction 
 
 | Item | Now | Deferred |
 |---|---|---|
-| Sign-in | Local accounts with Argon2id password hashes, passwords of at least 12 characters and creation through the CLI. No sign-up, default account or email recovery | Microsoft Entra ID |
+| Sign-in | Local accounts with Argon2id password hashes, passwords of at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and creation through the CLI. No sign-up, default account or email recovery | Microsoft Entra ID |
 | Roles | `member` uses CRAFT; `admin` also manages accounts through `craft users promote`. Operation and resource permissions apply to both | Expanded role mapping and Entra group grants. New values in a database check constraint (`CHECK`) require a migration |
 | Approvals | The requester decides an effectful action under section 3.4. The agent cannot decide | Expanded decision policy in section 12 |
 
@@ -114,4 +114,6 @@ A workspace token lets owned Python call the same HTTP routes as the browser, as
 | Storage | 32 random bytes, stored only as a SHA-256 digest with label, creation, expiry, last use (updated at most once a minute) and revocation times |
 
 The workspace image reads the token from `CRAFT_TOKEN_FILE` (default `/run/craft/workspace-token`), a private file outside `USER_ROOT`, or from `craft.login()` for the current kernel only. `CRAFT_API_URL` names the server origin.
+
+[Identity and workspace ownership](../wiki/identity.md) records the stable ownership decision, separate credential lifecycles and migration/test gates. The [table reference](../wiki/identity-tables.md) distinguishes SQL conversation attachments from personal Jupyter files.
 

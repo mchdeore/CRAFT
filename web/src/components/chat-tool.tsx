@@ -1,16 +1,17 @@
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { toolView } from "@/lib/chat-evidence";
+import { toolLabel, toolView } from "@/lib/chat-evidence";
+
+const dot = { Running: "bg-sky-500 animate-pulse", Completed: "bg-emerald-500", Failed: "bg-destructive", "Awaiting review": "bg-amber-500", Unavailable: "bg-muted-foreground/40" };
 
 export function ChatTool(props: ToolCallMessagePartProps) {
   const view = toolView(props);
   return (
-    <div className="bg-muted/25 my-2 rounded-lg border px-3 py-2 text-sm" role="status" aria-busy={view.status === "Running"}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="font-medium">{view.name}</span>
-        <span className="text-muted-foreground text-xs">{view.status}</span>
-      </div>
-      {view.correlationId && <p className="text-muted-foreground mt-1 truncate text-xs">Call {view.correlationId}</p>}
-      {view.status === "Awaiting review" && <p className="text-muted-foreground mt-1 text-xs">This tool is waiting for review.</p>}
+    <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground" role="status" aria-busy={view.status === "Running"} title={view.name}>
+      <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${dot[view.status]}`} />
+      <span className="text-foreground/80">{toolLabel([view.name])}</span>
+      <span className="sr-only">{view.name}</span>
+      <span className="ml-auto">{view.status}</span>
+      {view.status === "Awaiting review" && <span>· waiting for your review</span>}
     </div>
   );
 }

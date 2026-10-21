@@ -58,8 +58,10 @@ craft.save(summary, "outputs/sales-summary.xlsx")
 craft.docs.report("outputs/sales-summary.docx", "Sales", "# Totals", summary)
 ```
 
-`craft.read` and `craft.save` pick the format from the extension. `craft.ls`,
-`craft.find` and `craft.path` list and resolve owned names. `craft.docs` reads,
+`craft.read` and `craft.save` pick the format from the extension. `craft.table`
+reads a spreadsheet or CSV whose header sits below title rows and converts
+numeric columns. `craft.ls`, `craft.find` and `craft.path` list and resolve
+owned names; `craft.path` also accepts a path it returned. `craft.docs` reads,
 edits and builds Word, PowerPoint, PDF and Excel files. The image copies the
 starter skills in `skills/` into `USER_ROOT/skills` on first start and never
 replaces an existing file.
@@ -308,7 +310,7 @@ they issue no credentials or persistent runs.
 ## Import source copies
 
 In Workspace, sign in to JupyterLab, search sources and select Import to copy an
-original version into `USER_ROOT/imports`. Files up to 16 MB receive readable names
+original version into the workspace root (`USER_ROOT`). Files up to 16 MB receive readable names
 such as `report.xlsx`. If a name is taken, Import tries numeric alternatives such
 as `report-2.xlsx`, up to 20 names, without overwriting existing files.
 

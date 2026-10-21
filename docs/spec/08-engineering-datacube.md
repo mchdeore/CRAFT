@@ -90,7 +90,7 @@ Tables use pipe-delimited rows with repeated headers. Cell line breaks become sp
 
 Each chunk keeps three text fields: `text` (the words exactly as in the source), `heading_path` (the headings above it, such as `2 Power > 2.3 Margins`, or the slide title, or the sheet name) and `locator`.
 
-Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. With the fake model (section 4), the summary is the first 150 words of the document, labelled `extract`.
+Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. The summary says what the document is and which mission, subsystem, review or decision it concerns, and gives its key requirements, findings, figures with units and open issues. Indexing summarizes and embeds up to eight documents at once and writes them in source order.
 
 A citation handle names everything needed to show and re-check a quote. It survives a rebuild of the library; chunk identifiers do not.
 
@@ -117,7 +117,7 @@ Thick blue arrows go into `vectors`: chunks, document versions and facet texts a
 | Mission | Simulated; current stage | None; its facet texts carry its vectors | |
 | Cube value | Mission, silo, stage | None; found by filters and by the chunk it cites | |
 
-Vectors have 1536 dimensions and use cosine distance. The embedding model is the one in section 4. With the fake model, vectors are the deterministic fake embeddings.
+Vectors have 1536 dimensions and use cosine distance. The embedding model is the one in section 4.
 
 Section 7 defines the library tables in migration 0006: `provider_items`, `doc_versions`, `chunks`, `vectors`, `version_diffs`, `index_cursor` and `mission_grants`. The cube tables follow.
 
@@ -204,8 +204,6 @@ A facet is one way of describing a mission. Each mission has at most one facet t
 | `cost_and_risk` | Estimates, contingency and risks | budget, reviews |
 
 One model call per mission reads the summaries of the mission's documents and writes the facet texts. Each sentence ends with the item it came from in square brackets, such as `[itm_4f9c2a0b1c2d]`. A validator removes any sentence that names no item or names an item outside the mission. A facet with no remaining sentence has no row and counts as missing, never as zero. `sources` lists the items the facet text names.
-
-With the fake model, each facet text is the first sentence of each document summary whose silo feeds that facet first in the table above: requirements feeds `purpose`, engineering and quality feed `design`, launch feeds `operations`, reviews feeds `program` and budget feeds `cost_and_risk`.
 
 Facet texts use active sources and their latest indexed summaries, with at most 80 words per facet. Changed versions, moves and withdrawals rebuild the affected missions. Each text has a `facet-v1` vector labeled with the embedding model. Reads recheck every cited source against indexed and live mission and silo grants. A withdrawn source, changed mission or missing current-model vector cannot contribute to a similarity score. Read operations make no conversational model call.
 
