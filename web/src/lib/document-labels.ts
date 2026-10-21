@@ -5,7 +5,7 @@ const sentence = (value: string) => value.charAt(0).toUpperCase() + value.slice(
 
 export function documentLabel(title: string, tags?: Tags, missions?: ReadonlyMap<string, string>) {
   const name = title.trim() || "Untitled document";
-  const mission = tags?.mission && (missions?.get(tags.mission) ?? tags.mission);
+  const mission = tags?.mission && (missions?.get(tags.mission) ?? `Mission title ${missions ? "unavailable" : "loading"} (${tags.mission})`);
   return mission ? `${name} — ${mission}` : name;
 }
 

@@ -126,7 +126,8 @@ function PreviewContent({
         )}
         {source.sourceID && <p className="text-muted-foreground text-xs">Source preview · Read only{source.locationLabel && ` · ${source.locationLabel}`}</p>}
         {details.source?.filename && <p className="text-muted-foreground break-words text-xs">{details.source.filename}{details.source.indexedAt && Number.isFinite(Date.parse(details.source.indexedAt)) && ` · Last indexed ${new Date(details.source.indexedAt).toLocaleDateString()}`}</p>}
-        {source.sourceID && source.version && workspace?.configuration.status === "configured" && <PreviewImport key={JSON.stringify([source.sourceID, source.version])} verified={details.source} error={details.error} />}
+        {details.error && <p role="alert" className="text-destructive text-xs">{details.error}</p>}
+        {source.sourceID && source.version && workspace?.configuration.status === "configured" && <PreviewImport key={JSON.stringify([source.sourceID, source.version])} verified={details.source} />}
         <Button
           type="button"
           variant="ghost"
@@ -228,7 +229,7 @@ function usePreviewSource(source: PreviewDocument) {
   return details;
 }
 
-function PreviewImport({ verified, error }: { verified?: SourceResult; error?: string }) {
+function PreviewImport({ verified }: { verified?: SourceResult }) {
   const workspace = usePersonalChatWorkspace();
   const { state, start, reset } = useSourceImport(workspace?.configuration);
   const configuration = workspace?.configuration;
@@ -242,7 +243,7 @@ function PreviewImport({ verified, error }: { verified?: SourceResult; error?: s
   </div>;
   return <div className="mt-2 space-y-1 text-xs">
     <Button size="sm" variant="outline" disabled={!verified || current?.status === "pending" || current?.status === "unknown"} onClick={() => verified && void start(verified)}><FolderInputIcon />{current?.status === "pending" ? "Importing…" : "Import to workspace"}</Button>
-    {(error || current?.message) && <p role="alert">{error ?? current?.message}{current?.path && ` Check ${current.path}.`}</p>}
+    {current?.message && <p role="alert">{current.message}{current?.path && ` Check ${current.path}.`}</p>}
     {current?.signIn && <a className="underline" href={configuration.url} target="_blank" rel="noopener noreferrer">Sign in to workspace</a>}
   </div>;
 }

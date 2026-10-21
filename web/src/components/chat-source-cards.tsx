@@ -30,8 +30,10 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
   const workspace = usePersonalChatWorkspace();
   const { openSource } = useCitations();
   const { state: states, start } = useSourceImport(workspace?.configuration);
-  const missions = useMissionTitles(results.sources.map(source => source.tags?.mission));
   const [initiated, setInitiated] = useState<ReadonlySet<string>>(() => new Set());
+  const visible = new Set(results.sources.map(sourceKey));
+  const retained = [...states.values()].filter(state => initiated.has(sourceKey(state.source)) && !visible.has(sourceKey(state.source))).map(state => ({ ...state, tags: (state.source as Partial<ChatSource>).tags }));
+  const missions = useMissionTitles([...results.sources.map(source => source.tags?.mission), ...retained.map(state => state.tags?.mission)]);
   const configured = workspace?.configuration.status === "configured" ? workspace.configuration : undefined;
   const pending = [...states.values()].some(state => state.status === "pending");
   const importCopy = async (source: ChatSource) => {
@@ -45,8 +47,6 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
     if (state.status === "unknown") return <div role="alert" className="space-y-1 text-sm"><p>{state.message}{state.path && <> Check <span className="break-all">{state.path}</span>.</>}</p>{configured && <a href={personalJupyterURL(configured, state.path ?? "imports")} target="_blank" rel="noopener noreferrer" className="underline">Check in JupyterLab</a>}</div>;
     return <div role={state.status === "partial" ? "alert" : "status"} className="space-y-1 text-sm"><p>{state.status === "partial" ? "Personal copy saved at " : "Imported to "}<span className="break-all">{state.path}</span>. {state.message}</p>{state.path && workspace && configured && <div className="flex flex-wrap gap-3"><button type="button" className="underline" onClick={() => workspace.open(state.path!)}>Open copy</button><a href={personalJupyterURL(configured, state.path)} target="_blank" rel="noopener noreferrer" className="underline">Open in JupyterLab</a></div>}</div>;
   };
-  const visible = new Set(results.sources.map(sourceKey));
-  const retained = [...states.values()].filter(state => initiated.has(sourceKey(state.source)) && !visible.has(sourceKey(state.source)));
   if (!results.sources.length && !retained.length) return null;
   const titles = results.sources.map(source => documentLabel(source.title, source.tags, missions));
   return <details className="group mt-3 rounded-xl border bg-muted/20 open:bg-muted/30">
@@ -76,7 +76,7 @@ export function ChatSourceChoices({ results }: { results: ChatSourceResults }) {
       </article>;
     })}
     </div>
-    {retained.map(state => <article key={sourceKey(state.source)} className="space-y-2 rounded-md border p-3"><p className="text-sm font-medium">{state.source.title.trim() || "Untitled document"}</p><p className="break-words text-xs text-muted-foreground">Source {state.source.item} · Version {state.source.version} · {state.source.classification}{state.source.simulated && " · Simulated"}</p>{status(state)}</article>)}
+    {retained.map(state => <article key={sourceKey(state.source)} className="space-y-2 rounded-md border p-3"><p className="text-sm font-medium">{documentLabel(state.source.title, state.tags, missions)}</p><p className="break-words text-xs text-muted-foreground">{documentScope(state.source.version, state.source.classification, state.source.simulated, state.tags)}</p>{status(state)}</article>)}
   </section>
   </details>;
 }
