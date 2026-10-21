@@ -50,8 +50,8 @@ export function WorkspaceShell({ chat, files, skills, chats, account }: Workspac
       {page === "workspace" && <nav aria-label="Workspace sections" className="mt-1 ml-5 flex shrink-0 flex-col gap-0.5 border-l pr-2 pl-2">
         {sections.map(section => <button key={section.id} type="button" aria-pressed={active === section.id} aria-controls={`craft-workspace-${section.id}`} className={`${navClass} ${active === section.id ? activeClass : ""}`} onClick={() => select(section.id)}><section.icon className="size-4" />{section.label}</button>)}
       </nav>}
-      <div className={`${page === "chat" ? "flex" : "hidden"} mt-3 min-h-0 flex-1 flex-col`}>{chats}</div>
-      {page !== "chat" && <div className="flex-1" />}
+      {/* Chats stay listed on every page; choosing one returns to the chat. */}
+      <div className="mt-3 flex min-h-0 flex-1 flex-col" onClickCapture={event => { if ((event.target as HTMLElement).closest("button")) setPage("chat"); }}>{chats}</div>
       {account && <div className="shrink-0 border-t p-2">{account}</div>}
     </aside>
     <section id="craft-chat" aria-label="Agent chat" hidden={page !== "chat"} className={`${page === "chat" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col`}>

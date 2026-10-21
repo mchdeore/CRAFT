@@ -1,5 +1,5 @@
 import { ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverScopeContext, unstable_useTriggerPopoverTriggers } from "@assistant-ui/react";
-import { useCallback, useEffect, useId, useMemo, useState, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
 import { listPersonalFiles, listPersonalSkills, PersonalWorkspaceError, type PersonalEntry } from "@/lib/personal-workspace";
@@ -19,6 +19,15 @@ export function PersonalReferenceControl({ configuration, inputRef }: { configur
   const disabled = useAuiState(state => state.thread.isDisabled);
   const [open, setOpen] = useState(false);
   const id = useId();
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close); document.addEventListener("keydown", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
+  }, [open]);
   const choose = (kind: PersonalReferenceKind) => {
     const text = aui.composer.getState().text, input = inputRef.current;
     const start = input?.value === text ? input.selectionStart : text.length;
@@ -30,12 +39,11 @@ export function PersonalReferenceControl({ configuration, inputRef }: { configur
     input?.focus({ preventScroll: true });
     input?.setSelectionRange(next.caret, next.caret);
   };
-  return <div className="relative" onKeyDown={event => { if (event.key === "Escape" && open) { event.preventDefault(); setOpen(false); inputRef.current?.focus({ preventScroll: true }); } }}>
+  return <div ref={container} className="relative" onKeyDown={event => { if (event.key === "Escape" && open) { event.preventDefault(); setOpen(false); inputRef.current?.focus({ preventScroll: true }); } }}>
     <button type="button" disabled={disabled || configuration.status !== "configured"} aria-expanded={open} aria-controls={id} title={configuration.status === "configured" ? "Add a personal file or Markdown skill" : "Connect your personal workspace to add references"} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50" onMouseDown={event => event.preventDefault()} onClick={() => setOpen(value => !value)}>Add references</button>
     {open && <div id={id} role="group" aria-label="Add personal references" className="absolute bottom-full left-0 z-40 mb-2 w-56 rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg">
       <button type="button" aria-label="Add workspace file" className="block w-full rounded-lg p-2 text-left text-sm hover:bg-muted" onMouseDown={event => event.preventDefault()} onClick={() => choose("files")}>Files <span className="float-right font-mono text-xs">@</span></button>
       <button type="button" aria-label="Add Markdown skill" className="block w-full rounded-lg p-2 text-left text-sm hover:bg-muted" onMouseDown={event => event.preventDefault()} onClick={() => choose("skills")}>Markdown skills <span className="float-right font-mono text-xs">/</span></button>
-      <p className="px-2 pt-1 text-xs text-muted-foreground">You can also type @ or / in your message.</p>
     </div>}
   </div>;
 }

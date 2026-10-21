@@ -134,3 +134,20 @@ export function toolView(part: unknown): ToolView {
     status: status === "running" ? "Running" : status === "complete" ? (p.isError === true ? "Failed" : "Completed") : status === "incomplete" ? "Failed" : status === "requires-action" ? "Awaiting review" : "Unavailable",
   };
 }
+
+const TOOL_LABELS: Record<string, string> = {
+  search: "Searched the library", get_document: "Opened a document", read_chunks: "Read passages", explore: "Read around a passage",
+  compare_versions: "Compared versions", list_documents: "Listed documents", check_citation: "Checked a citation",
+  list_missions: "Listed missions", list_parameters: "Listed parameters", find_missions: "Found missions", get_mission: "Read mission values",
+  compare_missions: "Compared missions", similar_missions: "Found similar missions", explain_similarity: "Explained a similarity",
+  read_facets: "Read mission profiles", list_capabilities: "Listed tools", check_calculation: "Checked a calculation",
+  list_files: "Listed your files", list_notebooks: "Listed your notebooks", read_notebook: "Read a notebook",
+  run_code: "Ran code in your workspace", write_file: "Wrote a file", edit_notebook: "Edited a notebook",
+};
+
+/** A plain-language label for one or more tool calls. */
+export function toolLabel(names: readonly string[]): string {
+  const short = names.map(name => name.slice(name.lastIndexOf(".") + 1));
+  const labels = [...new Set(short.map(name => TOOL_LABELS[name] ?? "Used " + name.replaceAll("_", " ")))];
+  return labels.length ? labels.join(" · ") : "Worked";
+}

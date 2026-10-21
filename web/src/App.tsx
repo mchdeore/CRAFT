@@ -8,7 +8,7 @@ import { useAgentSession } from "@/hooks/use-agent-session";
 import { useAuthSession } from "@/hooks/use-auth-session";
 import type { Me } from "craft-api/api/types";
 import { LogOutIcon, SparklesIcon } from "lucide-react";
-import { useMemo, useRef, type FormEvent } from "react";
+import { useCallback, useMemo, useRef, type FormEvent } from "react";
 
 export default function App() {
   const auth = useAuthSession();
@@ -76,6 +76,12 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
     selectChat,
     refreshHistory,
   } = useAgentSession(owner, onAuthInvalid);
+  // An empty chat is reused instead of stacking more empty chats in history.
+  const empty = useRef(false);
+  const changed = useCallback(({ empty: isEmpty, renamed }: { empty: boolean; renamed: boolean }) => {
+    empty.current = isEmpty;
+    if (renamed) void refreshHistory();
+  }, [refreshHistory]);
 
   return (
     <WorkspaceShell
@@ -89,7 +95,7 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
         historyPending={historyPending}
         historyError={historyError}
         historyLimited={historyLimited}
-        onNewChat={() => void newChat()}
+        onNewChat={() => { if (!empty.current) void newChat(); }}
         onSelectChat={id => void selectChat(id)}
         onRefreshHistory={() => void refreshHistory()}
         onReset={() => void resetSession()}
@@ -111,6 +117,7 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
           selectedSkill={selectedSkill}
           onSessionInvalid={renewSession}
           onAuthInvalid={onAuthInvalid}
+          onChanged={changed}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">

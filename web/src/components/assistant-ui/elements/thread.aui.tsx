@@ -9,6 +9,7 @@ import { File } from "@/components/assistant-ui/elements/file";
 import { CitationList } from "@/components/citations/citation-list";
 import { ChatTool } from "@/components/chat-tool";
 import { ChatSourceCards } from "@/components/chat-source-cards";
+import { toolLabel } from "@/lib/chat-evidence";
 import { PersonalReferenceControl, PersonalReferencePickers } from "@/components/personal-reference-pickers";
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/elements/follow-up-suggestions.aui";
@@ -248,9 +249,8 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; workspace?: Workspa
             <ThreadFollowupSuggestions />
             {beforeComposer}
             <Composer autoFocus={autoFocus} workspace={workspace} />
-            <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
-              <ThreadStarters />
-              <ThreadSuggestions />
+            <AuiIf condition={isNewChatView}>
+              <ThreadStarterArea />
             </AuiIf>
           </ThreadPrimitive.ViewportFooter>
         </div>
@@ -396,6 +396,17 @@ const ThreadWelcome: FC = () => {
   );
 };
 
+// Starters keep their space while the person types, so the composer doesn't jump.
+const ThreadStarterArea: FC = () => {
+  const typing = useAuiState((s) => !s.composer.isEmpty);
+  return (
+    <div aria-hidden={typing} className={cn("flex flex-col gap-4 transition-opacity", typing && "pointer-events-none invisible opacity-0")}>
+      <ThreadStarters />
+      <ThreadSuggestions />
+    </div>
+  );
+};
+
 const ThreadStarters: FC = () => (
   <div className="grid w-full gap-2 sm:grid-cols-2">
     {STARTERS.map(starter => (
@@ -498,6 +509,7 @@ const AssistantMessage: FC = () => {
     TaskGroup: TaskGroupComponent,
   } = useContext(ThreadComponentsContext);
   const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
+  const parts = useAuiState((s) => s.message.parts);
 
   const ACTION_BAR_PT = "pt-1.5";
   // Keep the action bar inside the contained root's paint box, then cancel its reserved space in flow.
@@ -530,6 +542,7 @@ const AssistantMessage: FC = () => {
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
                       count={part.indices.length}
+                      label={toolLabel(part.indices.map(index => { const tool = parts[index]; return tool?.type === "tool-call" ? tool.toolName : ""; }).filter(Boolean))}
                       active={part.status.type === "running"}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
