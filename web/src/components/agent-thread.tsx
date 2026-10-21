@@ -89,15 +89,13 @@ export const AgentThread = memo(function AgentThread({ sessionId, title = "New c
   );
 });
 
-// A recorded run that failed before answering leaves the question unanswered;
-// say so in the thread and offer to ask again.
+// A failed or stopped run leaves its question unfinished; offer to ask again.
 function RunFailed({ view }: { view: RunRecoveryView }) {
   const aui = useAui();
   const running = useAuiState(state => state.thread.isRunning);
   const question = useAuiState(state => {
-    const last = state.thread.messages.at(-1);
-    if (last?.role !== "user") return null;
-    return last.content.map(part => part.type === "text" ? part.text : "").join("").trim() || null;
+    const last = state.thread.messages.findLast(message => message.role === "user");
+    return last?.content.map(part => part.type === "text" ? part.text : "").join("").trim() || null;
   });
   const status = view.phase === "ready" ? view.data?.status : undefined;
   if (running || !question || (status !== "failed" && status !== "cancelled")) return null;
@@ -105,8 +103,8 @@ function RunFailed({ view }: { view: RunRecoveryView }) {
   return <div role="alert" className="flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm">
     <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
     <div className="min-w-0 flex-1">
-      <p className="font-medium">{status === "failed" ? "This answer didn't finish" : "This run was stopped"}</p>
-      <p className="text-muted-foreground">{status === "failed" ? "The agent stopped before writing an answer, usually because it ran out of steps or time. Asking a narrower question often helps." : "No answer was written."}</p>
+      <p className="font-medium">This answer didn't finish</p>
+      <p className="text-muted-foreground">{status === "failed" ? "The agent stopped before finishing the answer. Asking a narrower question often helps." : "The run was stopped. Review any partial output before trying again."}</p>
     </div>
     <button type="button" onClick={retry} className="flex shrink-0 items-center gap-1.5 rounded-lg border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted"><RotateCcwIcon className="size-3.5" />Try again</button>
   </div>;
