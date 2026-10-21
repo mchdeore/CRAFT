@@ -1,0 +1,20 @@
+flowchart LR
+    P[provider_items] -->|item| V[doc_versions]
+    V -->|doc_version_id| C[chunks]
+    V -->|from_version + to_version| D[version_diffs]
+    T[stages] -->|current_stage| M[missions]
+    M -->|mission_key| A[mission_aliases]
+    M -->|mission_key| E[elements]
+    S[silos] -->|silo| E
+    E -->|parent_id| E
+    M -->|mission_key| Q[cube_values]
+    S -->|silo| Q
+    T -->|stage| Q
+    E -->|element_id| Q
+    N[parameters] -->|parameter| Q
+    N -->|parameter| U[unit_conversions]
+    N -->|parameter| H[header_synonyms]
+    AP[approval_requests] -->|approval_request_id| Q
+    M -->|mission_key| F[facet_texts]
+    X["vectors<br/>polymorphic owner · no FK"]
+    K["index_cursor<br/>provider key · no FK"]
