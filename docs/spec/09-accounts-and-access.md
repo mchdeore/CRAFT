@@ -115,3 +115,5 @@ A workspace token lets owned Python call the same HTTP routes as the browser, as
 
 The workspace image reads the token from `CRAFT_TOKEN_FILE` (default `/run/craft/workspace-token`), a private file outside `USER_ROOT`, or from `craft.login()` for the current kernel only. `CRAFT_API_URL` names the server origin.
 
+[Identity and workspace ownership](../wiki/identity.md) records the stable ownership decision, separate credential lifecycles and migration/test gates. The [table reference](../wiki/identity-tables.md) distinguishes SQL conversation attachments from personal Jupyter files.
+
