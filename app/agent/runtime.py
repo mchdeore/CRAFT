@@ -60,9 +60,20 @@ def read_only_query():
 
 def _workspace_for_caller(caller):
     """Only a private server file and trusted owner can select an external endpoint."""
+    if _read_only_query.get():
+        return (
+            None,
+            "\nWorkspace tools are unavailable in this read-only query. "
+            "Do not claim workspace access or propose workspace actions.",
+            None,
+        )
     path = os.environ.get("USER_WORKSPACES_FILE")
-    if not path or _read_only_query.get():
-        return None, "", None
+    if not path:
+        return (
+            None,
+            "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
+            None,
+        )
     endpoints = json.loads(Path(path).read_text())
     if not isinstance(endpoints, dict):
         raise ValueError("Invalid private workspace configuration")
@@ -102,15 +113,23 @@ def _workspace_for_caller(caller):
         )
     endpoint = WorkspaceEndpoint(entry["url"], entry["headers"], tuple(entry["tools"]))
     selected = WorkspaceToolsets({str(caller.user_id): endpoint}).for_caller(caller)
-    return (
-        selected,
-        "\nUSER_ROOT=/workspace. Workspace tools list and read this owner's files. "
-        "Run Python with run_code and change files with write_file or edit_notebook; "
-        "each call waits for the requester's approval, so propose one at a time. "
-        "Source originals are read-only until imported into the workspace. "
-        "Read owned Markdown skill files using the workspace tools and follow their instructions.",
-        jupyter,
+    guidance = (
+        "\nUSER_ROOT=/workspace. Only the supplied workspace_ list/notebook read tools "
+        "are available; use their advertised schemas. "
     )
+    if jupyter is None:
+        guidance += (
+            "Workspace actions are unavailable: run_code, write_file and edit_notebook "
+            "cannot execute without a configured Jupyter kernel. native() is unavailable. "
+            "These list/notebook tools cannot read plain files or Markdown skill contents."
+        )
+    else:
+        guidance += (
+            "A Jupyter kernel is configured. run_code, write_file and edit_notebook require "
+            "the requester's approval. Read plain files and selected Markdown skills with "
+            "small approved run_code calls."
+        )
+    return selected, guidance, jupyter
 
 
 def fault(code):
