@@ -127,7 +127,8 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
 
         def represent(job):
             item, _, blocks = job
-            for attempt in range(ATTEMPTS):
+            attempt = 0
+            while True:
                 try:
                     summary, summary_kind = make_summary(caller, blocks)
                     vectors = embed_many(
@@ -138,9 +139,10 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                     return summary, summary_kind, vectors[0], vectors[1:]
                 except ApiError:
                     # One failed call would otherwise discard the whole build.
-                    if attempt == ATTEMPTS - 1:
+                    attempt += 1
+                    if attempt == ATTEMPTS:
                         raise
-                    time.sleep(2 ** (attempt + 1))
+                    time.sleep(2**attempt)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             represented = list(pool.map(represent, pending))

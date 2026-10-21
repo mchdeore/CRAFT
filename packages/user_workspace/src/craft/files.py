@@ -116,7 +116,7 @@ def table(name: str | Path, sheet: str | int = 0) -> Any:
         for number, value in enumerate(raw.loc[header], start=1)
     ]
     for column in frame.columns:
-        numbers = pd.to_numeric(frame[column], errors="coerce")
+        numbers = pd.Series(pd.to_numeric(frame[column], errors="coerce"), index=frame.index)
         if numbers.notna().sum() == frame[column].notna().sum():
             frame[column] = numbers
     return frame.reset_index(drop=True)
