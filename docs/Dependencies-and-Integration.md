@@ -206,11 +206,11 @@ npm run build
 
 ## 6. Continuous integration
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. It installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the contract and stream suites.
+`.github/workflows/ci.yml` runs on pull requests and pushes to main using Ubuntu `24.04` and a disposable database. A draft pull request runs only the quick checks: lock, Ruff, format and Pyright. Marking it ready for review runs the full set, and pushes to main always do. Pull requests that change only `docs/`, `mkdocs.yml` or root Markdown files skip this workflow. A commit whose message contains `[skip ci]` skips every workflow for that push. The full set installs the lock, checks Ruff/format/Pyright, initializes and migrates the database, installs contract dependencies, builds the restricted workspace test image and runs pytest plus the contract and stream suites.
 
 The full-stack gate builds Compose, checks readiness and request IDs, verifies the non-root app and its password-variable boundary, then removes the disposable project volume. A local repeat needs free application/database ports and its own Compose project; never reset an existing corpus to reproduce that check.
 
-`.github/workflows/frontend.yml` runs on pull requests and main pushes using Ubuntu `24.04` and Node.js `24`. It installs API dependencies with `npm ci --prefix api --ignore-scripts --no-audit --no-fund` and frontend dependencies with `npm ci --prefix web --no-audit --no-fund`, then runs `npm test`, `npm run lint` and `npm run build` from `web/`. It grants only `contents: read`, disables persisted checkout credentials and does not deploy the application. These checks complement the backend, contract and package workflow.
+`.github/workflows/frontend.yml` runs on pull requests that change `web/`, `api/` or the workflow itself, and on main pushes, using Ubuntu `24.04` and Node.js `24`. It installs API dependencies with `npm ci --prefix api --ignore-scripts --no-audit --no-fund` and frontend dependencies with `npm ci --prefix web --no-audit --no-fund`, then runs `npm test`, `npm run lint` and `npm run build` from `web/`. It grants only `contents: read`, disables persisted checkout credentials and does not deploy the application. These checks complement the backend, contract and package workflow.
 
 ## 7. Documentation build
 
@@ -233,6 +233,6 @@ docs/tools/diagrams.sh
 
 ## 8. Public documentation
 
-`.github/workflows/docs.yml` builds on pull requests, main pushes and manual dispatch. Pull requests verify on Linux; other events use macOS. Only a non-pull-request event in a public repository uploads an artifact, and deployment additionally requires main.
+`.github/workflows/docs.yml` builds on ready (non-draft) pull requests, main pushes and manual dispatch. Pull requests verify on Linux; other events use macOS. Only a non-pull-request event in a public repository uploads an artifact, and deployment additionally requires main.
 
 Pages contains documentation and downloads. It does not build or publish the authenticated application, local prototypes, original documents, runtime configuration or private records. New public topics must be tracked and included in navigation before a complete site build.
