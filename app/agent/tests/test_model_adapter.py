@@ -93,7 +93,10 @@ class Intercept:
                     "object": "list",
                     "model": body["model"],
                     "data": [
-                        {"object": "embedding", "embedding": [1.0] + [0.0] * 1535, "index": 0}
+                        {"object": "embedding", "embedding": [1.0] + [0.0] * 1535, "index": index}
+                        for index, _ in enumerate(
+                            body["input"] if isinstance(body["input"], list) else [body["input"]]
+                        )
                     ],
                     "usage": {"prompt_tokens": 4, "total_tokens": 4},
                 },
@@ -340,7 +343,7 @@ def test_model_adapter_settings_fail_safe(settings, intercepted, monkeypatch):
         ("MODEL_KEY", ""),
         ("MODEL_ENDPOINT", "not-an-endpoint"),
         ("MODEL_MAX_OUTPUT_TOKENS", "0"),
-        ("MODEL_MAX_OUTPUT_TOKENS", "4001"),
+        ("MODEL_MAX_OUTPUT_TOKENS", "16001"),
         ("MODEL_CHECK", ""),
         ("MODEL_EMBEDDING", ""),
     ]:
