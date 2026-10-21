@@ -2,7 +2,8 @@
 # Local demo on real models and a freshly built workspace image.
 #   demo go    wipe the demo database and workspace, seed them, start everything, open Chrome
 #   demo stop  stop the backend, frontend, workspace and database
-# State and secrets live in var/demo (ignored by git); nothing secret is printed.
+# Accounts sign in with password 1 unless DEMO_PASSWORD is set. Generated database
+# passwords live in var/demo (ignored by git); nothing secret is printed.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -25,12 +26,10 @@ load_env() {
       echo "$name=$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
     done > "$secrets")
   fi
-  if ! grep -q '^DEMO_PASSWORD=' "$secrets"; then
-    read -rsp "Demo password for demo, restricted and admin: " password; echo
-    printf 'DEMO_PASSWORD=%s\n' "$password" >> "$secrets"
-  fi
   set -a
   . "$secrets"
+  # demo, restricted and admin sign in to CRAFT and JupyterLab with this local password.
+  DEMO_PASSWORD=${DEMO_PASSWORD:-1}
   # Model settings come from the main checkout's .env.
   local main_env
   main_env=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)/../.env
@@ -114,7 +113,7 @@ go() {
   wait_for "$UI"
 
   open -a "Google Chrome" "$UI" 2>/dev/null || open "$UI"
-  say "Demo running at $UI (sign in as demo). Logs: $STATE. Stop with: demo stop"
+  say "Demo running at $UI (sign in as demo, password $DEMO_PASSWORD). Logs: $STATE. Stop with: demo stop"
 }
 
 # One Jupyter container with one kernel, its MCP control server and the private workspace map.
