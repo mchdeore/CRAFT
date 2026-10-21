@@ -19,7 +19,7 @@ import { AlertCircleIcon, RotateCcwIcon } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import type { RunRecoveryView } from "@/lib/run-recovery";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
-import { memo, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 interface AgentThreadProps {
   sessionId: string;
@@ -33,7 +33,15 @@ interface AgentThreadProps {
   onChanged?: (state: { empty: boolean; renamed: boolean }) => void;
 }
 
-export const AgentThread = memo(function AgentThread({ sessionId, title = "New chat", selectedSkill, workspace, onSessionInvalid, onAuthInvalid, onChanged }: AgentThreadProps) {
+export const AgentThread = memo(function AgentThread(props: AgentThreadProps) {
+  // An approved run finishes outside the live runtime, so its answer is shown by
+  // reloading the thread from recorded history, as a page reload would.
+  const [reloads, setReloads] = useState(0);
+  const reload = useCallback(() => setReloads(count => count + 1), []);
+  return <ThreadSession key={reloads} {...props} onReload={reload} />;
+});
+
+function ThreadSession({ sessionId, title = "New chat", selectedSkill, workspace, onSessionInvalid, onAuthInvalid, onChanged, onReload }: AgentThreadProps & { onReload: () => void }) {
   const [error, setError] = useState<string>();
   const recovery = useMemo(() => new RunRecoveryController(sessionId, { onSessionInvalid, onAuthInvalid }), [sessionId, onSessionInvalid, onAuthInvalid]);
   const recoveryView = useSyncExternalStore(recovery.subscribe, recovery.getSnapshot, recovery.getSnapshot);
@@ -48,8 +56,8 @@ export const AgentThread = memo(function AgentThread({ sessionId, title = "New c
   });
   const approval = useMemo(() => new RunApprovalController(sessionId, {
     onAuthInvalid, onRecoveryRefresh: recovery.refresh,
-    onResume: (runId, approvalId) => resources.resumeApproval(runId, approvalId, repository => runtime.thread.import(repository)),
-  }), [sessionId, onAuthInvalid, recovery, resources, runtime]);
+    onResume: (runId, approvalId) => resources.resumeApproval(runId, approvalId, onReload),
+  }), [sessionId, onAuthInvalid, recovery, resources, onReload]);
   const approvalView = useSyncExternalStore(approval.subscribe, approval.getSnapshot, approval.getSnapshot);
   useEffect(() => {
     resources.activate();
@@ -87,7 +95,7 @@ export const AgentThread = memo(function AgentThread({ sessionId, title = "New c
       </CitationProvider>
     </AssistantRuntimeProvider>
   );
-});
+}
 
 // A failed or stopped run leaves its question unfinished; offer to ask again.
 function RunFailed({ view }: { view: RunRecoveryView }) {
