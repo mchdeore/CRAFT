@@ -13,8 +13,14 @@ from craft import _root
 
 
 def path(name: str | Path) -> Path:
-    """The owned path for a relative name, refusing traversal and symlinks."""
-    return _root.owned_path(Path(name).as_posix(), root=_root.USER_ROOT)
+    """The owned path for a relative name, refusing traversal and symlinks.
+
+    A path this returned is accepted again, so ``save(df, path("a.csv"))`` works.
+    """
+    name = Path(name)
+    if name.is_absolute() and name.is_relative_to(_root.USER_ROOT):
+        name = name.relative_to(_root.USER_ROOT)
+    return _root.owned_path(name.as_posix(), root=_root.USER_ROOT)
 
 
 def ls(folder: str = "", pattern: str = "*") -> list[str]:
@@ -78,6 +84,42 @@ def read(name: str | Path, **options: Any) -> Any:
 
         return docs.read_pdf(name)
     return target.read_text(encoding=options.get("encoding", "utf-8"))
+
+
+def table(name: str | Path, sheet: str | int = 0) -> Any:
+    """A spreadsheet or CSV table as a DataFrame, its header found below any title rows.
+
+    The header is the first row as wide as the widest row and made only of text.
+    Empty rows and columns are dropped and fully numeric columns become numbers.
+    """
+    import pandas as pd
+
+    target = path(name)
+    suffix = target.suffix.lower()
+    if suffix in {".csv", ".tsv"}:
+        raw = pd.read_csv(target, sep="\t" if suffix == ".tsv" else ",", header=None, dtype=object)
+    else:
+        raw = pd.read_excel(target, sheet_name=sheet, header=None, dtype=object)
+    raw = raw.dropna(how="all").dropna(axis=1, how="all")
+    filled = raw.notna().sum(axis=1)
+    header = next(
+        (
+            index
+            for index, row in raw.iterrows()
+            if filled[index] == filled.max() and all(isinstance(v, str) for v in row.dropna())
+        ),
+        filled.idxmax(),
+    )
+    frame = raw.loc[header:].iloc[1:].copy()
+    frame.columns = [
+        str(value).strip() if pd.notna(value) else f"column {number}"
+        for number, value in enumerate(raw.loc[header], start=1)
+    ]
+    for column in frame.columns:
+        numbers = pd.to_numeric(frame[column], errors="coerce")
+        if numbers.notna().sum() == frame[column].notna().sum():
+            frame[column] = numbers
+    return frame.reset_index(drop=True)
 
 
 def save(value: Any, name: str | Path, **options: Any) -> str:

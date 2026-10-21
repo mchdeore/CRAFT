@@ -35,7 +35,7 @@ from craft.access import (
     whoami,
 )
 from craft.client import Craft, native
-from craft.files import excel, find, ls, path, read, save, sql
+from craft.files import excel, find, ls, path, read, save, sql, table
 
 __all__ = [
     "USER_ROOT",
@@ -62,5 +62,6 @@ __all__ = [
     "save",
     "search",
     "sql",
+    "table",
     "whoami",
 ]
