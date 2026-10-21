@@ -90,30 +90,30 @@ test('local filters match names, descriptions and declared channels without muta
 
 test('schema and description markup is rendered as text with meaningful labels', () => {
   const html = render({ tools: [tool('search', { description: '<img src=x onerror=alert(1)>', inputSchema: { example: '<script>alert(1)</script>' } })] });
-  assert.match(html, /Input schema/); assert.match(html, /Output schema/); assert.match(html, /Declared channels/);
+  assert.match(html, /Parameters/);
   assert.match(html, /&lt;img/); assert.match(html, /&lt;script/); assert.doesNotMatch(html, /<img|<script/);
-  assert.match(html, /Filter tools/); assert.match(html, /Channel/);
+  assert.match(html, /Search tools/);
 });
 
-test('null schemas and approval-required tools are described without readiness claims', () => {
-  const html = render({ tools: [tool('delete_note', { effects: 'DATA', needsApproval: true, outputSchema: null, availableIn: ['api', 'mcp', 'chat'] })] });
-  assert.match(html, /Native JSON schema unavailable/); assert.match(html, /Agent approval required/);
+test('approval-required and chat-unavailable tools are described without readiness claims', () => {
+  const html = render({ tools: [tool('delete_note', { effects: 'DATA', needsApproval: true, outputSchema: null, availableIn: ['api', 'mcp'] })] });
+  assert.match(html, /Approval required/); assert.match(html, /Not available in chat/);
   assert.doesNotMatch(html, /service is healthy|service is running|skill installed/i);
 });
 
 test('empty catalogs and unmatched filters remain distinguishable', () => {
-  assert.match(render({ tools: [] }), /No tools were returned/);
+  assert.match(render({ tools: [] }), /No tools available/);
   assert.match(render({ tools: [tool()], query: 'missing' }), /No matching tools/);
 });
 
 test('load failures present an alert and retry without claiming an empty catalog', () => {
   const html = render({ tools: [], status: 'error', onRetry: () => {} });
   assert.match(html, /role="alert"/); assert.match(html, /Retry/);
-  assert.doesNotMatch(html, /No tools were returned|No matching tools/);
+  assert.doesNotMatch(html, /No tools available|No matching tools/);
 });
 
 test('reference starts with a loading state and is absent while signed out', () => {
   assert.equal(typeof view.ToolsReference, 'function');
-  assert.match(renderToStaticMarkup(React.createElement(view.ToolsReference, { onAuthInvalid: () => {} })), /Loading tool reference/);
+  assert.match(renderToStaticMarkup(React.createElement(view.ToolsReference, { onAuthInvalid: () => {} })), /Loading tools/);
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(App)), /Tools reference/);
 });

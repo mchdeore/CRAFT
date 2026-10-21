@@ -184,9 +184,12 @@ test('existing protected conversation workspace content remains previewable', as
 });
 test('preview refuses HTML unknown MIME external URLs and response failures safely', async () => {
   const load = required(preview, 'loadDocumentPreview');
-  for (const response of [new Response('RAW_BODY', { headers: { 'content-type': 'text/html' } }), new Response('RAW_BODY', { headers: { 'content-type': 'application/octet-stream' } }), new Response('RAW_BODY', { status: 403, headers: { 'content-type': 'text/plain' } })]) {
-    const result = await load(source, signal(), async () => response); assert.equal(result.type, 'error'); assert.doesNotMatch(result.message, /RAW_BODY|403/);
+  // Protected CRAFT originals of other types fall back to a download link without reading the body.
+  for (const response of [new Response('RAW_BODY', { headers: { 'content-type': 'text/html' } }), new Response('RAW_BODY', { headers: { 'content-type': 'application/octet-stream' } })]) {
+    const result = await load(source, signal(), async () => response); assert.equal(result.type, 'unsupported'); assert.doesNotMatch(JSON.stringify(result), /RAW_BODY/);
   }
+  const refused = await load(source, signal(), async () => new Response('RAW_BODY', { status: 403, headers: { 'content-type': 'text/plain' } }));
+  assert.equal(refused.type, 'error'); assert.doesNotMatch(refused.message, /RAW_BODY|403/);
   let calls = 0; const result = await load({ ...source, previewURL: 'https://example.invalid/preview' }, signal(), async () => { calls++; return new Response(); }); assert.equal(result.type, 'error'); assert.equal(calls, 0);
 });
 test('preview Content-Length rejects oversized response before consuming its stream', async () => {

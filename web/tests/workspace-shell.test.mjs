@@ -73,11 +73,11 @@ test("authenticated app routes two owners and leaves missing or malformed mappin
       for (const [owner, expected] of [[ownerA, "http://127.0.0.1:58101/lab"], [ownerB, "http://127.0.0.1:58102/lab"], [ownerC, undefined]]) {
         currentOwner = owner;
         await React.act(async () => root.render(React.createElement(App, { key: `${index}:${owner.id}` })));
-        assert.equal(host.elements("a").some(element => element.textContent.includes("Open JupyterLab")), false, "The initial Chat view does not mount an owner workspace");
+        assert.equal(host.elements("a").some(element => element.textContent.includes("Open in JupyterLab")), false, "The initial Chat view does not mount an owner workspace");
         const open = host.elements("button").find(element => element.textContent === "Workspace");
         assert.ok(open);
         await React.act(async () => open.dispatchEvent({ type: "click", button: 0, bubbles: true }));
-        const launches = host.elements("a").filter(element => element.textContent.includes("Open JupyterLab"));
+        const launches = host.elements("a").filter(element => element.textContent.includes("Open in JupyterLab"));
         assert.equal(host.elements("iframe").length, 0, "JupyterLab is launch-only");
         if (index === 0 && expected) {
           assert.equal(launches.length, 1);
@@ -85,7 +85,7 @@ test("authenticated app routes two owners and leaves missing or malformed mappin
           assert.equal(launches[0].getAttribute("target"), "_blank");
         } else {
           assert.equal(launches.length, 0);
-          assert.match(host.container.textContent, /Workspace service is not connected/);
+          assert.match(host.container.textContent, /workspace is not connected/);
         }
       }
     }
@@ -94,10 +94,12 @@ test("authenticated app routes two owners and leaves missing or malformed mappin
   }
 });
 
-test("workspace accepts a separate loopback HTTP server root and opens standard JupyterLab", () => {
+test("workspace accepts a separate loopback HTTP server root and opens standard JupyterLab on the CRAFT host", () => {
   assert.deepEqual(resolveURL("http://127.0.0.1:53522/"), { status: "configured", url: "http://127.0.0.1:53522/lab" });
-  assert.deepEqual(resolveURL("http://localhost:53522"), { status: "configured", url: "http://localhost:53522/lab" });
-  assert.deepEqual(resolveURL("http://[::1]:53522"), { status: "configured", url: "http://[::1]:53522/lab" });
+  // The loopback host follows the CRAFT page so the Jupyter sign-in cookie reaches the file browser.
+  assert.deepEqual(resolveURL("http://localhost:53522"), { status: "configured", url: "http://127.0.0.1:53522/lab" });
+  assert.deepEqual(resolveURL("http://[::1]:53522"), { status: "configured", url: "http://127.0.0.1:53522/lab" });
+  assert.deepEqual(resolveURL("http://127.0.0.1:53522", "http://localhost:5200"), { status: "configured", url: "http://localhost:53522/lab" });
 });
 
 test("workspace refuses secrets, nonlocal services and the CRAFT origin without echoing values", () => {
@@ -114,17 +116,17 @@ test("workspace refuses secrets, nonlocal services and the CRAFT origin without 
 test("missing workspace renders an honest service state with no frame or run substitute", () => {
   assert.equal(typeof workspace.JupyterWorkspace, "function");
   const html = renderToStaticMarkup(React.createElement(workspace.JupyterWorkspace, { configuration: { status: "missing" } }));
-  assert.match(html, /Workspace service is not connected/);
-  assert.match(html, /personal files and Markdown skills/);
+  assert.match(html, /workspace is not connected/);
+  assert.match(html, /Chat is still available/);
   assert.doesNotMatch(html, /<iframe|>Run</);
 });
 
-test("configured workspace launches JupyterLab separately with honest sign-in guidance", () => {
+test("configured workspace launches JupyterLab separately", () => {
   assert.equal(typeof workspace.JupyterWorkspace, "function");
   const html = renderToStaticMarkup(React.createElement(workspace.JupyterWorkspace, { configuration: { status: "configured", url: "http://127.0.0.1:53522/lab" } }));
   assert.doesNotMatch(html, /<iframe/);
   assert.match(html, /href="http:\/\/127\.0\.0\.1:53522\/lab"[^>]+target="_blank"[^>]+rel="noopener noreferrer"/);
-  assert.match(html, /sign in/i);
+  assert.match(html, /Open in JupyterLab/);
   assert.doesNotMatch(html, /Workspace connected/);
 });
 
