@@ -41,5 +41,5 @@ Build the wiki and PDF downloads with `docs/tools/build.sh`.
 
 ## Contributing
 
-Fork the repository, create a branch, run the checks in `.github/workflows/ci.yml` and `.github/workflows/frontend.yml`, and open a pull request. Only the maintainer merges.
+Fork the repository, create a branch, run the checks in `.github/workflows/ci.yml` and `.github/workflows/frontend.yml`, and open a pull request. Open it as a draft while work is in progress for quick checks only; mark it ready for review to run the full checks. Only the maintainer merges.
 

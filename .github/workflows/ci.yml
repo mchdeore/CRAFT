@@ -1,8 +1,11 @@
-# Every PR and every push to main. Any failure blocks the merge.
+# Ready PRs and pushes to main run everything; any failure blocks the merge.
+# Draft PRs run only the quick checks (lock, lint, format, types); marking a PR
+# ready for review runs the full set.
 name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -29,6 +32,7 @@ jobs:
     env:
       CRAFT_DATABASE_HOST: localhost
       CRAFT_DATABASE_PORT: "5432"
+      QUICK: ${{ github.event.pull_request.draft == true }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -50,16 +54,21 @@ jobs:
       - name: Types
         run: uv run pyright
       - name: Database init
+        if: env.QUICK != 'true'
         run: bash docker/initdb.sh
         env:
           PGHOST: localhost
       - name: Migrations
+        if: env.QUICK != 'true'
         run: uv run alembic upgrade head && uv run alembic check
       - name: Contract dependencies
+        if: env.QUICK != 'true'
         run: npm ci --prefix api --ignore-scripts --no-audit --no-fund
       - name: Worker test image
+        if: env.QUICK != 'true'
         run: docker build --tag craft-python-workspace:local-pilot packages/python_workspace
       - name: User workspace image
+        if: env.QUICK != 'true'
         run: |
           docker build --tag craft-user-workspace:local-pilot packages/user_workspace
           docker run --rm --network none --read-only --cap-drop ALL \
@@ -68,8 +77,10 @@ jobs:
             -c 'import os, craft, jupyterlab, pandas, duckdb, numpy, scipy, matplotlib, openpyxl; assert os.getuid() == 1000; assert str(craft.USER_ROOT) == "/workspace"'
       # The full suite includes the contract and chat stream tests; the slowest tests are listed.
       - name: Tests
+        if: env.QUICK != 'true'
         run: uv run pytest --durations=15
       - name: Full stack
+        if: env.QUICK != 'true'
         env:
           CRAFT_DATABASE_PORT: "5433"  # the CI service holds 5432
         run: |
