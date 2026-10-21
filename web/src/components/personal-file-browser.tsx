@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, File, FileCode, FileSpreadsheet, FileText, Folder, Notebook } from "lucide-react";
+import { StatusMessage } from "@/components/ui/status-message";
 import { DocumentRenderer } from "@/components/citations/preview/document-renderer";
 import type { DocumentFormat } from "@/components/citations/preview/renderer-contract";
 import type { WorkspaceConfiguration } from "@/components/workspace-url";
@@ -8,7 +9,7 @@ import { personalFileFormat, personalJupyterURL } from "@/lib/personal-preview";
 
 const buttonClass = "rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50";
 export function PersonalFileBrowser({ configuration, onOpenFile, refreshToken = 0, revealFile }: { configuration: WorkspaceConfiguration; onOpenFile: (path: string) => void; refreshToken?: number; revealFile?: string }) {
-  if (configuration.status !== "configured") return <div className="p-4 text-sm">Connect your personal workspace to browse files.</div>;
+  if (configuration.status !== "configured") return <div className="p-4"><StatusMessage kind="signin" detail="Sign in to your workspace to browse files." /></div>;
   return <ConnectedBrowser key={`${configuration.url}:${revealFile ? `${refreshToken}:${revealFile}` : "browse"}`} configuration={configuration} onOpenFile={onOpenFile} refreshToken={refreshToken} revealFile={revealFile} />;
 }
 function ConnectedBrowser({ configuration, onOpenFile, refreshToken, revealFile }: { configuration: WorkspaceConfiguration & { status: "configured" }; onOpenFile: (path: string) => void; refreshToken: number; revealFile?: string }) {
@@ -28,15 +29,14 @@ function ConnectedBrowser({ configuration, onOpenFile, refreshToken, revealFile 
   const navigate = (next: string) => { setPath(next); setQuery(""); setSelectedPath(undefined); };
   return <aside aria-label="Personal files" className="flex min-h-0 min-w-0 w-64 max-w-[42%] shrink-0 flex-col border-r bg-muted/10 lg:w-72 xl:w-80">
     <div className="shrink-0 space-y-3 p-3">
-      <div className="flex items-center justify-between gap-2"><h2 className="text-sm font-medium">Personal files</h2><button type="button" className={buttonClass} onClick={() => setRefresh(value => value + 1)} disabled={!current}>Refresh</button></div>
-      <p className="text-xs text-muted-foreground">USER_ROOT <code>/workspace</code></p>
-      <nav aria-label="Personal folder" className="flex flex-wrap items-center gap-2"><button type="button" aria-label="Go to workspace root" className={buttonClass} onClick={() => navigate("")}>/workspace</button>{path && <button type="button" aria-label="Back to parent folder" className={`${buttonClass} inline-flex items-center gap-1`} onClick={() => navigate(path.split("/").slice(0, -1).join("/"))}><ChevronLeft aria-hidden="true" className="size-3" />Back</button>}</nav>
-      <p aria-label="Current folder" className="break-words font-mono text-xs">{path ? personalAbsolutePath(path) : "/workspace"}</p>
+      <div className="flex items-center justify-between gap-2"><h2 className="text-sm font-medium">Files</h2><button type="button" className={buttonClass} onClick={() => setRefresh(value => value + 1)} disabled={!current}>Refresh</button></div>
+      <nav aria-label="Personal folder" className="flex flex-wrap items-center gap-2"><button type="button" aria-label="Go to workspace root" className={buttonClass} onClick={() => navigate("")}>All files</button>{path && <button type="button" aria-label="Back to parent folder" className={`${buttonClass} inline-flex items-center gap-1`} onClick={() => navigate(path.split("/").slice(0, -1).join("/"))}><ChevronLeft aria-hidden="true" className="size-3" />Back</button>}</nav>
+      <p aria-label="Current folder" className="break-words font-mono text-xs">{path || "Workspace root"}</p>
       <input ref={filterInput} aria-label="Filter personal files" type="search" className="w-full min-w-0 rounded border bg-background p-2 text-sm" value={query} onInput={event => setQuery(event.currentTarget.value)} placeholder="Filter this folder" />
     </div>
     <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-      {!current && <p role="status" className="text-sm">Reading personal files…</p>}
-      {current?.error && <div className="space-y-2"><p role="alert" className="text-sm">{current.error}</p><div className="flex flex-wrap items-center gap-2"><button type="button" className={buttonClass} onClick={() => setRefresh(value => value + 1)}>Retry</button>{current.signIn && <a href={configuration.url} target="_blank" rel="noopener noreferrer" className="text-xs underline">Sign in to JupyterLab ↗</a>}</div></div>}
+      {!current && <StatusMessage kind="loading" title="Loading files…" />}
+      {current?.error && <StatusMessage kind={current.signIn ? "signin" : "error"} title={current.signIn ? undefined : "Could not load files"} detail={current.signIn ? "Sign in to your workspace, then try again." : current.error} workspaceURL={configuration.url} action={<button type="button" className={buttonClass} onClick={() => setRefresh(value => value + 1)}>Retry</button>} />}
       {files.length > 0 && <ul className="space-y-1">{files.map(file => {
         const format = personalFileFormat(file.name);
         const opensInJupyter = file.type === "notebook" || file.name.toLowerCase().endsWith(".py") || !format;
@@ -45,10 +45,10 @@ function ConnectedBrowser({ configuration, onOpenFile, refreshToken, revealFile 
         const rowClass = `flex w-full items-start gap-2 rounded-md px-2 py-3 text-left text-sm hover:bg-muted ${selectedPath === file.path ? "bg-muted" : ""}`;
         return <li key={file.path}>{file.type === "directory" ? <button type="button" aria-label={`Open folder ${file.name}`} className={rowClass} onClick={() => navigate(file.path)}>{content}</button> : opensInJupyter ? <a href={personalJupyterURL(configuration, file.path)} target="_blank" rel="noopener noreferrer" aria-current={selectedPath === file.path ? "true" : undefined} className={rowClass} onClick={() => setSelectedPath(file.path)}>{content}</a> : <button type="button" aria-label={`Preview ${file.name}`} aria-current={selectedPath === file.path ? "true" : undefined} className={rowClass} onClick={() => { setSelectedPath(file.path); onOpenFile(file.path); }}>{content}</button>}</li>;
       })}</ul>}
-      {current?.files?.length === 0 && <p className="text-sm text-muted-foreground">This folder is empty.</p>}
+      {current?.files?.length === 0 && <StatusMessage kind="empty" title="No files yet. Import a source from a chat answer to add one." />}
       {!!current?.files?.length && files.length === 0 && <div className="space-y-2"><p role="status" className="break-words text-sm text-muted-foreground">No files or folders match “{query.trim()}”.</p><button type="button" className={buttonClass} onClick={() => { setQuery(""); filterInput.current?.focus(); }}>Clear filter</button></div>}
     </div>
-    <p className="shrink-0 border-t p-3 text-xs text-muted-foreground">Preview and download personal copies here. Edit scripts and notebooks in JupyterLab.</p>
+    <p className="shrink-0 border-t p-3 text-xs text-muted-foreground">Preview files here; edit and export them in JupyterLab.</p>
   </aside>;
 }
 

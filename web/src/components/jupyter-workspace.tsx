@@ -7,11 +7,9 @@ import { PersonalFileBrowser, PersonalFilePreview } from "./personal-file-browse
 
 export function JupyterWorkspace({ configuration }: { configuration: WorkspaceConfiguration }) {
   if (configuration.status !== "configured") return <section aria-label="Files and notebooks" className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
-    <div className="max-w-md space-y-3 rounded-lg border bg-muted/30 p-6">
-      <StatusMessage kind="signin" detail="Sign in to your workspace to attach files and skills." />
-      <p className="text-sm text-muted-foreground">Your chat stays available. Connect the local JupyterLab workspace to use personal files and Markdown skills.</p>
-      {configuration.status === "invalid" && <p role="alert" className="text-sm">The workspace address must be a separate local HTTP server root without credentials, a query or a fragment.</p>}
-      <p className="text-sm text-muted-foreground">JupyterLab provides files, notebooks, Python editing, terminals and downloads. USER_ROOT and agent file access require the workspace service binding.</p>
+    <div className="max-w-md space-y-3">
+      <PageHeader title="Files" description="Documents you imported and files you created in your workspace." />
+      <StatusMessage kind="signin" detail="Your workspace is not connected. Chat is still available." />
     </div>
   </section>;
 
@@ -32,17 +30,14 @@ function ConnectedWorkspace({ configuration }: { configuration: WorkspaceConfigu
     setSelection({ path });
   };
   return <section aria-label="Files and notebooks" className="relative flex min-h-0 flex-1 flex-col">
-    <PageHeader title="Workspace" />
+    <PageHeader title="Files" description="Documents you imported and files you created in your workspace." actions={<a href={configuration.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Open in JupyterLab<ExternalLink aria-hidden="true" className="size-4" /></a>} />
     <div inert={!!selection} className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1">
         <PersonalFileBrowser configuration={configuration} onOpenFile={openCopy} />
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-6 sm:p-10">
           <div className="w-full max-w-lg space-y-5 rounded-xl border bg-muted/20 p-6 sm:p-8">
             <Notebook aria-hidden="true" className="size-8 text-muted-foreground" />
-            <div className="space-y-2"><h3 className="text-xl font-medium">Work in JupyterLab</h3><p className="text-sm text-muted-foreground">Edit files, run notebooks and use terminals in a separate tab. Sign in there if needed.</p></div>
-            <a href={configuration.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">Open JupyterLab<ExternalLink aria-hidden="true" className="size-4" /></a>
-            <p className="text-sm text-muted-foreground">Your files and running kernels stay in JupyterLab while you browse here.</p>
-            <p className="break-words text-xs text-muted-foreground">Mention a personal path such as <code>/workspace/scripts/analysis.py</code> in chat for the agent to read, edit or run. Import source originals to make personal copies first.</p>
+            <p className="text-sm text-muted-foreground">Open JupyterLab to edit files and run notebooks, then use @ files and / skills to work with the assistant in chat.</p>
           </div>
         </div>
       </div>
