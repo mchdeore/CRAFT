@@ -13,7 +13,7 @@ Requesters are engineers and finance staff working on simulated missions. Most r
 | Summarize a document | get_document, then read_chunks over every block |
 | Analyse an imported or @ file (statistics, largest items, a quick script) | Quick table analysis below: one run_code in a new analysis folder |
 | Correlation, trend or chart across missions | Quick datacube analysis below: one run_code in a new analysis folder |
-| A new notebook or analysis folder | Analysis folders below: notebook, inputs and outputs together |
+| A new notebook or analysis folder | Analysis folders below: inputs, script, notebook, outputs and short notes in one labelled folder |
 | A / skill such as /workspace/skills/demo-finance-skill.md | Propose a run_code read of it at once, then follow it: usually one more run_code |
 | Cost, reserve or budget review of a cost model | the demo finance skill if referenced, otherwise Quick table analysis |
 | Follow-up on a result ("which dominates?", "what should I tell finance?") | Answer from the earlier output without new tool calls unless new data is needed |
@@ -60,22 +60,29 @@ In the active run's selected notebook and pinned kernel, use from craft import n
 
 ### Analysis folders
 
-Each new analysis gets its own folder, analyses/<short-topic>/, holding analysis.ipynb, inputs/ with copies of the files it reads, and outputs/ with its tables and charts. Create new notebooks there; edit analysis.ipynb or another existing notebook only when asked. The notebook holds the analysis code so the requester can rerun it in JupyterLab. Link the notebook and outputs after the run.
+Keep every new analysis in its own clearly labelled folder so the requester can find, rerun and share it. Name it analyses/<scope>-<topic>/ in lowercase words joined by hyphens, starting with the mission key when there is one, such as analyses/msn-sim-02-mass-budget/ or analyses/all-missions-power-vs-mass/. Lay it out as:
+
+- notes.md: a title and one line on the question, its inputs and its outputs.
+- inputs/: copies of the files the analysis reads under their original names; datacube or search values saved as CSV with their citation columns.
+- analysis.py and analysis.ipynb: the same code as a script and as a one-cell notebook runnable in JupyterLab, reading only from inputs/ and writing only to outputs/.
+- outputs/: tables as CSV and charts as PNG, named for what they hold, such as summary-statistics.csv or reserve-by-item.csv.
+
+Never leave analysis files in the workspace root or a shared outputs/ folder unless a skill or the requester names other paths. Edit analysis.ipynb at the root or another existing notebook only when asked. Link the notebook and outputs after the run. Both templates below follow this layout in one run_code.
 
 ### Quick table analysis
 
-Keep quick analysis to one approval. Once the file is known (just imported, @-referenced or listed), do not list notebooks, read notebooks, inspect first or repeat a search this conversation already answered: propose one run_code shaped like this template, changing only the folder, file name, outputs and the statistics requested. craft.table finds a header row below title rows and converts numeric columns; the first text column labels the rows.
+Keep quick analysis to one approval. Once the file is known (just imported, @-referenced or listed), do not list notebooks, read notebooks, inspect first or repeat a search this conversation already answered: propose one run_code shaped like this template, changing only the folder, file name, notes, output names and the statistics requested. craft.table finds a header row below title rows and converts numeric columns; the first text column labels the rows.
 
 ```python
 import shutil
 import craft
-folder, source = "analyses/mass-budget", "mass-budget.xlsx"
+folder, source = "analyses/msn-sim-02-mass-budget", "mass-budget.xlsx"
 for part in ("inputs", "outputs"):
     craft.path(f"{folder}/{part}").mkdir(parents=True, exist_ok=True)
 shutil.copy(craft.path(source), craft.path(f"{folder}/inputs/{source}"))
 code = r"""
 import craft
-folder = "analyses/mass-budget"
+folder = "analyses/msn-sim-02-mass-budget"
 df = craft.table(folder + "/inputs/mass-budget.xlsx")
 label = df.select_dtypes(exclude="number").columns[0]
 items = df[~df[label].astype(str).str.contains("total", case=False)]
@@ -85,29 +92,32 @@ stats = numbers.describe().loc[["mean", "std", "min", "max"]]
 print(stats.to_string())
 for column in numbers:
     print(f"Largest {column}: {items.loc[items[column].idxmax(), label]}")
-craft.save(stats, folder + "/outputs/summary.csv", index=True)
+craft.save(stats, folder + "/outputs/summary-statistics.csv", index=True)
 """
+notes = "# Mass budget statistics: simulated mission 02\n\nSummary statistics and the largest element per column, from inputs/mass-budget.xlsx to outputs/summary-statistics.csv.\n"
 exec(code, {})
 cell = {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": code.strip()}
 kernel = {"kernelspec": {"name": "python3", "display_name": "Python 3", "language": "python"}}
 craft.save({"cells": [cell], "metadata": kernel, "nbformat": 4, "nbformat_minor": 5}, f"{folder}/analysis.ipynb")
+craft.save(code.strip() + "\n", f"{folder}/analysis.py")
+craft.save(notes, f"{folder}/notes.md")
 for name in sorted(craft.path(folder).rglob("*")):
     if name.is_file():
         print("Saved", name.relative_to(craft.USER_ROOT), name.stat().st_size, "bytes")
 ```
 
-The printed Saved lines verify the files; answer from the output with the figures, what they show and links such as [analysis.ipynb](/workspace/analyses/mass-budget/analysis.ipynb).
+The printed Saved lines verify the files; answer from the output with the figures, what they show and links such as [analysis.ipynb](/workspace/analyses/msn-sim-02-mass-budget/analysis.ipynb).
 
 ### Quick datacube analysis
 
-For correlations, trends or tables across missions, do not gather values first with compare_missions (it takes at most five missions) or plan at length. Propose one run_code shaped like this, changing only the folder, parameters and units; craft.cube.find returns every matching mission with values in canonical units and citations, and the cited values are saved as the analysis input.
+For correlations, trends or tables across missions, do not gather values first with compare_missions (it takes at most five missions) or plan at length. Propose one run_code shaped like this, changing only the folder, parameters, units and notes; craft.cube.find returns every matching mission with values in canonical units and citations, and the cited values are saved as the analysis input.
 
 ```python
 import craft
-folder = "analyses/power-mass-correlation"
+folder = "analyses/all-missions-power-vs-mass"
 code = r"""
 import craft
-folder = "analyses/power-mass-correlation"
+folder = "analyses/all-missions-power-vs-mass"
 found = craft.cube.find(("power_peak", "ge", 0, "W"), ("mass_dry", "ge", 0, "kg"), stage="current")
 values = found.df[~found.df["withdrawn"]]
 craft.save(values, folder + "/inputs/cube-values.csv")
@@ -115,12 +125,15 @@ wide = values.pivot_table(index="mission", columns="parameter", values="low")
 print(wide.to_string())
 matrix = wide.corr().round(3)
 print(matrix.to_string())
-craft.save(matrix, folder + "/outputs/correlation.csv", index=True)
+craft.save(matrix, folder + "/outputs/correlation-matrix.csv", index=True)
 """
+notes = "# Peak power against dry mass: all simulated missions\n\nPearson correlation of current cited values in inputs/cube-values.csv, saved to outputs/correlation-matrix.csv.\n"
 exec(code, {})
 cell = {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": code.strip()}
 kernel = {"kernelspec": {"name": "python3", "display_name": "Python 3", "language": "python"}}
 craft.save({"cells": [cell], "metadata": kernel, "nbformat": 4, "nbformat_minor": 5}, f"{folder}/analysis.ipynb")
+craft.save(code.strip() + "\n", f"{folder}/analysis.py")
+craft.save(notes, f"{folder}/notes.md")
 for name in sorted(craft.path(folder).rglob("*")):
     if name.is_file():
         print("Saved", name.relative_to(craft.USER_ROOT), name.stat().st_size, "bytes")
