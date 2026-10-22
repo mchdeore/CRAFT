@@ -36,7 +36,7 @@ const D = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const owner = "11111111-1111-4111-8111-111111111111";
 const stamp = "2026-10-18T00:00:00Z";
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const summary = id => ({ id, title: "Generated conversation", updatedAt: stamp, archived: false, pendingApprovals: 0 });
+const summary = id => ({ id, title: "Generated conversation", groupName: null, updatedAt: stamp, archived: false, pendingApprovals: 0 });
 const idle = () => ({ status: "none", runId: null, startedAt: null, endedAt: null, approvalId: null, approvalStatus: null, canResume: false });
 const paused = () => ({ status: "paused", runId: B, startedAt: stamp, endedAt: stamp, approvalId: C, approvalStatus: "pending", canResume: false });
 const approvalSummary = status => ({ id: C, conversationId: A, runId: B, tool: "WriteClient", summary: "Generated proposal", status, requestedAt: stamp });

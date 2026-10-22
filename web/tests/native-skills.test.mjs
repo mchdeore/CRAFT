@@ -12,7 +12,7 @@ const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const selection = () => ({ id: C, revision: 2, name: "Engineering" });
-const summary = id => ({ id, title: "Generated chat", updatedAt: "2026-10-18T00:00:00Z", archived: false, pendingApprovals: 0 });
+const summary = id => ({ id, title: "Generated chat", groupName: null, updatedAt: "2026-10-18T00:00:00Z", archived: false, pendingApprovals: 0 });
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 async function conversation(fetcher, body) {
@@ -119,7 +119,7 @@ test("Fresh owned activation clears prior transient selection", async () => {
 
 test("Successful archive followed by failed replacement clears the old skill", async () => {
   let created = 0;
-  await conversation(async (url, init) => init?.method === "PATCH" ? json(summary(B)) : ++created < 3 ? json(summary(created === 1 ? A : B)) : json({ code: "unavailable" }, 503), async session => {
+  await conversation(async (url, init) => init?.method === "PATCH" ? json({ ...summary(B), archived: true }) : ++created < 3 ? json(summary(created === 1 ? A : B)) : json({ code: "unavailable" }, 503), async session => {
     await session.newChat(selection()); await session.reset();
     assert.equal(session.getSnapshot().sessionID, ""); assert.equal(session.getSnapshot().selectedSkill, undefined);
   });

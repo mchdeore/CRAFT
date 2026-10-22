@@ -40,21 +40,25 @@ def append_for_run(caller: Caller, request: AppendMessages) -> None:
 
 
 ConversationTitle = Annotated[str, msgspec.Meta(min_length=1, max_length=200, pattern=r"\S")]
+ConversationGroup = Annotated[str, msgspec.Meta(min_length=1, max_length=80, pattern=r"\S")]
 
 
 class NewConversation(Shape):
     title: ConversationTitle = "New conversation"
+    group_name: ConversationGroup | None = None
 
 
 class ConversationUpdate(Shape):
     id: UUID
     title: ConversationTitle | None = None
-    archived: bool | None = None
+    group_name: ConversationGroup | None | msgspec.UnsetType = msgspec.UNSET
+    archived: bool | msgspec.UnsetType = msgspec.UNSET
 
 
 class ConversationSummary(Shape):
     id: UUID
     title: str
+    group_name: str | None
     updated_at: str
     archived: bool
     pending_approvals: int
@@ -98,7 +102,7 @@ def list_conversations(caller: Caller) -> list[ConversationSummary]:
 @operation(SIGNED_IN, post="/conversations")
 def create_conversation(caller: Caller, request: NewConversation) -> ConversationSummary:
     """Create one owned conversation with a bounded title."""
-    return ConversationSummary(**service.create(caller, request.title))
+    return ConversationSummary(**service.create(caller, request.title, request.group_name))
 
 
 @operation(SIGNED_IN, get="/conversations/{id}")
@@ -109,7 +113,7 @@ def read_conversation(caller: Caller, request: ConversationRef) -> Conversation:
 
 @operation(SIGNED_IN, patch="/conversations/{id}")
 def update_conversation(caller: Caller, request: ConversationUpdate) -> ConversationSummary:
-    """Rename or archive an owned conversation; archive deletes its workspace."""
+    """Rename, regroup, archive, or restore one owned conversation."""
     return ConversationSummary(**service.update(caller, request))
 
 

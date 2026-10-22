@@ -172,3 +172,40 @@ def test_conversations_owner_and_titles(chat, foreign_http):
         read_conversation(
             replace(chat["caller"], user_id=uuid4()), ConversationRef(id=chat["thread"])
         )
+
+
+def test_conversations_group_assignment_and_restore(chat, foreign_http):
+    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
+        assert chat["sign_in"](http).status_code == 200
+        headers = {"Origin": "https://testserver"}
+        path = "/api/conversations/" + str(chat["thread"])
+        grouped = http.patch(path, json={"groupName": "Planning"}, headers=headers)
+        assert grouped.status_code == 200 and grouped.json()["groupName"] == "Planning"
+        listed = http.get("/api/conversations").json()
+        own = next(row for row in listed if row["id"] == str(chat["thread"]))
+        assert own["groupName"] == "Planning"
+        assert own["archived"] is False
+        cleared = http.patch(path, json={"groupName": None}, headers=headers)
+        assert cleared.status_code == 200 and cleared.json()["groupName"] is None
+        archived = http.patch(path, json={"archived": True}, headers=headers)
+        assert archived.status_code == 200 and archived.json()["archived"] is True
+        assert http.get(path).status_code == 200
+        restored = http.patch(path, json={"archived": False}, headers=headers)
+        assert restored.status_code == 200 and restored.json()["archived"] is False
+        assert http.get(path).status_code == 200
+        created = http.post(
+            "/api/conversations",
+            json={"title": "Grouped from create", "groupName": "Inbox"},
+            headers=headers,
+        )
+        assert created.status_code == 200 and created.json()["groupName"] == "Inbox"
+        for group in ["", "   ", "x" * 81]:
+            assert http.patch(path, json={"groupName": group}, headers=headers).status_code == 400
+    assert (
+        foreign_http.patch(
+            "/api/conversations/" + str(chat["thread"]),
+            json={"groupName": "Foreign"},
+            headers={"Origin": "https://testserver"},
+        ).status_code
+        == 404
+    )

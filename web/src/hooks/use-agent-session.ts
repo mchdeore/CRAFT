@@ -11,11 +11,11 @@ export function clearConversationPointer(owner: string) {
 }
 interface SessionState {
   sessionID: string; selectedSkill?: SkillSelection; error?: string; notice?: string; pending: boolean;
-  history: ConversationSummary[]; historyPending: boolean; historyError?: string; historyLimited: boolean;
+  history: ConversationSummary[]; archivedHistory: ConversationSummary[]; historyPending: boolean; historyError?: string; historyLimited: boolean;
 }
 class ConversationError extends Error {}
-const emptyState = (): SessionState => ({ sessionID: "", selectedSkill: undefined, pending: false, history: [], historyPending: false, historyLimited: false });
-const summaryOnly = ({ id, title, updatedAt, archived, pendingApprovals }: ConversationSummary): ConversationSummary => ({ id, title, updatedAt, archived, pendingApprovals });
+const emptyState = (): SessionState => ({ sessionID: "", selectedSkill: undefined, pending: false, history: [], archivedHistory: [], historyPending: false, historyLimited: false });
+const summaryOnly = ({ id, title, groupName, updatedAt, archived, pendingApprovals }: ConversationSummary): ConversationSummary => ({ id, title, groupName, updatedAt, archived, pendingApprovals });
 const newest = (entries: ConversationSummary[]) => [...entries].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
 
 // Only an ID is kept in tab storage. Every restored ID is checked through an
@@ -29,7 +29,7 @@ export class ConversationSession {
   private sequence = 0;
   private listSequence = 0;
   private active = true;
-  private action?: "start" | "create" | "select" | "replace";
+  private action?: "start" | "create" | "select" | "replace" | "update";
   private verified?: ConversationSummary;
   onAuthInvalid: () => void = () => {};
   constructor(owner: string, onAuthInvalid: () => void = () => {}) { this.owner = owner; this.onAuthInvalid = onAuthInvalid; }
@@ -49,11 +49,19 @@ export class ConversationSession {
     if (response.status === 401) throw new AuthenticationRequiredError();
     return response;
   }
+  private mergeHistory(conversation: ConversationSummary) {
+    const withoutActive = this.state.history.filter(entry => entry.id !== conversation.id);
+    const withoutArchived = this.state.archivedHistory.filter(entry => entry.id !== conversation.id);
+    if (conversation.archived) {
+      return { history: newest(withoutActive).slice(0, 100), archivedHistory: newest([summaryOnly(conversation), ...withoutArchived]).slice(0, 100) };
+    }
+    return { history: newest([summaryOnly(conversation), ...withoutActive]).slice(0, 100), archivedHistory: newest(withoutArchived).slice(0, 100) };
+  }
   private accept(conversation: ConversationSummary, notice?: string, writePointer = true, selectedSkill?: SkillSelection) {
     this.verified = summaryOnly(conversation);
     if (writePointer) { try { sessionStorage.setItem(pointerKey(this.owner), conversation.id); } catch { /* Storage is optional. */ } }
-    const history = newest([this.verified, ...this.state.history.filter(entry => entry.id !== conversation.id)]).slice(0, 100);
-    this.action = undefined; this.update({ sessionID: conversation.id, selectedSkill, pending: false, historyPending: false, history, notice });
+    const { history, archivedHistory } = this.mergeHistory(conversation);
+    this.action = undefined; this.update({ sessionID: conversation.id, selectedSkill, pending: false, historyPending: false, history, archivedHistory, notice });
   }
   private async create(sequence: number, signal: AbortSignal): Promise<ConversationSummary> {
     const response = await this.request("/api/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal }, sequence);
@@ -71,6 +79,40 @@ export class ConversationSession {
     if (error instanceof AuthenticationRequiredError) { this.invalidate(); return; }
     this.action = undefined;
     this.update({ sessionID: previous, selectedSkill: previous ? this.state.selectedSkill : undefined, pending: false, historyPending: false, error: error instanceof ConversationError ? error.message : "Could not open the conversation. Try again." });
+  }
+  private async editConversation(id: string, patch: Record<string, unknown>, message: string): Promise<boolean> {
+    if (!this.active || this.state.pending) return false;
+    if (!UUID.test(id)) { this.update({ ...this.state, error: "Choose a valid conversation." }); return false; }
+    const previous = this.state.sessionID; const { sequence } = this.begin("update");
+    this.update({ pending: true, historyPending: false });
+    try {
+      const response = await this.request(
+        `/api/conversations/${encodeURIComponent(id)}`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch), signal: this.controller?.signal },
+        sequence,
+      );
+      if (!response.ok) throw new ConversationError(message);
+      const conversation = await response.json(); this.check(sequence);
+      if (!isConversationSummary(conversation) || conversation.id !== id) throw new ConversationError("The server returned an invalid conversation.");
+      const updated = summaryOnly(conversation);
+      const { history, archivedHistory } = this.mergeHistory(updated);
+      const becameArchived = updated.archived && this.state.sessionID === id;
+      if (this.verified?.id === id) this.verified = becameArchived ? undefined : updated;
+      if (becameArchived) clearConversationPointer(this.owner);
+      this.action = undefined;
+      this.update({
+        sessionID: becameArchived ? "" : this.state.sessionID,
+        selectedSkill: becameArchived ? undefined : this.state.selectedSkill,
+        pending: false,
+        historyPending: false,
+        history,
+        archivedHistory,
+      });
+      return true;
+    } catch (error) {
+      this.failed(error, sequence, previous);
+      return false;
+    }
   }
   start = async (): Promise<void> => {
     this.active = true; const { sequence, signal } = this.begin("start");
@@ -102,8 +144,11 @@ export class ConversationSession {
       if (archive && previous) {
         const response = await this.request(`/api/conversations/${encodeURIComponent(previous)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: true }), signal }, sequence);
         if (!response.ok) throw new ConversationError("Could not archive the conversation. Reset was not completed.");
+        const archivedChat = await response.json(); this.check(sequence);
+        if (!isConversationSummary(archivedChat) || archivedChat.id !== previous || !archivedChat.archived) throw new ConversationError("Could not archive the conversation. Reset was not completed.");
         archived = true;
-        this.update({ ...this.state, history: this.state.history.filter(entry => entry.id !== previous) });
+        const { history, archivedHistory } = this.mergeHistory(archivedChat);
+        this.update({ history, archivedHistory });
       }
       this.check(sequence); clearConversationPointer(this.owner); this.verified = undefined;
       const conversation = await this.create(sequence, signal); this.check(sequence); this.accept(conversation, notice);
@@ -134,6 +179,10 @@ export class ConversationSession {
       this.accept(conversation);
     } catch (error) { this.failed(error, sequence, previous); }
   };
+  renameChat = async (id: string, title: string): Promise<boolean> => this.editConversation(id, { title }, "Could not rename that conversation. Try again.");
+  groupChat = async (id: string, groupName: string | null): Promise<boolean> => this.editConversation(id, { groupName }, "Could not update that conversation group. Try again.");
+  archiveChat = async (id: string): Promise<boolean> => this.editConversation(id, { archived: true }, "Could not archive that conversation. Try again.");
+  restoreChat = async (id: string): Promise<boolean> => this.editConversation(id, { archived: false }, "Could not restore that conversation. Try again.");
   refreshHistory = async (): Promise<void> => {
     if (!this.active) return;
     this.cancelList(); this.listController = new AbortController();
@@ -147,11 +196,12 @@ export class ConversationSession {
       if (!response.ok) throw new ConversationError("Could not load chat history. Try again.");
       const body: unknown = await response.json(); if (!current()) return;
       if (!Array.isArray(body) || !body.every(isConversationSummary) || new Set(body.map(entry => entry.id)).size !== body.length) throw new ConversationError("The server returned invalid chat history. Try again.");
-      const available = newest(body.filter(entry => !entry.archived).map(summaryOnly));
-      this.update({ ...this.state, history: available.slice(0, 100), historyPending: false, historyError: undefined, historyLimited: body.length >= 100 });
+      const history = newest(body.filter(entry => !entry.archived).map(summaryOnly));
+      const archivedHistory = newest(body.filter(entry => entry.archived).map(summaryOnly));
+      this.update({ ...this.state, history: history.slice(0, 100), archivedHistory: archivedHistory.slice(0, 100), historyPending: false, historyError: undefined, historyLimited: body.length >= 100 });
     } catch (error) {
       if (!current()) return;
-      this.update({ ...this.state, history: [], historyPending: false, historyLimited: false, historyError: error instanceof ConversationError ? error.message : "Could not load chat history. Try again." });
+      this.update({ ...this.state, history: [], archivedHistory: [], historyPending: false, historyLimited: false, historyError: error instanceof ConversationError ? error.message : "Could not load chat history. Try again." });
     }
   };
   mount = () => {
@@ -167,6 +217,7 @@ export class ConversationSession {
 function isConversationSummary(value: unknown): value is ConversationSummary {
   return typeof value === "object" && value !== null && "id" in value && typeof value.id === "string" && UUID.test(value.id)
     && "title" in value && typeof value.title === "string" && value.title.length <= 200
+    && "groupName" in value && (value.groupName === null || (typeof value.groupName === "string" && value.groupName.length >= 1 && value.groupName.length <= 80))
     && "updatedAt" in value && typeof value.updatedAt === "string" && Number.isFinite(Date.parse(value.updatedAt))
     && "archived" in value && typeof value.archived === "boolean"
     && "pendingApprovals" in value && typeof value.pendingApprovals === "number" && Number.isSafeInteger(value.pendingApprovals) && value.pendingApprovals >= 0;
@@ -176,5 +227,18 @@ export function useAgentSession(owner: Me, onAuthInvalid: () => void) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   useEffect(() => session.mount(), [session]);
   useEffect(() => { if (state.sessionID) void session.refreshHistory(); }, [session, state.sessionID]);
-  return { ...state, renewSession: session.renew, resetSession: session.reset, dismissNotice: session.dismissNotice, retrySession: session.start, newChat: session.newChat, selectChat: session.selectChat, refreshHistory: session.refreshHistory };
+  return {
+    ...state,
+    renewSession: session.renew,
+    resetSession: session.reset,
+    dismissNotice: session.dismissNotice,
+    retrySession: session.start,
+    newChat: session.newChat,
+    selectChat: session.selectChat,
+    renameChat: session.renameChat,
+    groupChat: session.groupChat,
+    archiveChat: session.archiveChat,
+    restoreChat: session.restoreChat,
+    refreshHistory: session.refreshHistory,
+  };
 }
