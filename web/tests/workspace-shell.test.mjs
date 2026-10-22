@@ -315,6 +315,7 @@ function mountedHost() {
     get value() { return this._value ?? ""; }
     set value(value) { this._value = String(value); }
     get type() { return this.getAttribute("type") ?? "text"; }
+    set type(value) { this.setAttribute("type", value); }
     get options() { return this.childNodes.filter(node => node.tagName === "OPTION"); }
   }
   class HostDocument extends HostNode {
