@@ -37,7 +37,12 @@ function ConnectedWorkspace({ configuration }: { configuration: WorkspaceConfigu
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-6 sm:p-10">
           <div className="w-full max-w-lg space-y-5 rounded-xl border bg-muted/20 p-6 sm:p-8">
             <Notebook aria-hidden="true" className="size-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Open JupyterLab to edit files and run notebooks, then use @ files and / skills to work with the assistant in chat.</p>
+            <p className="text-sm text-muted-foreground">Use JupyterLab for notebooks and code-driven analysis, then bring results back to chat.</p>
+            <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+              <li>Use @ files to discuss or edit specific workspace files in chat.</li>
+              <li>Use / skills to run workspace Markdown skills from <code>/workspace/skills</code>.</li>
+              <li>Use regular file edits for one-off updates that do not need reusable instructions.</li>
+            </ul>
           </div>
         </div>
       </div>
