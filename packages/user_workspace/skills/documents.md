@@ -22,10 +22,11 @@ A PDF page without a text layer comes back empty; say so instead of guessing its
 2. Save under a new name unless the person asks to replace the file.
 
 ```python
-count = craft.docs.replace_in_word("inputs/plan.docx", "Draft", "Final", save_as="outputs/plan-final.docx")
-doc = craft.docs.open_word("outputs/plan-final.docx")
+working = craft.docs.editable_copy("inputs/plan.docx")
+count = craft.docs.replace_in_word(working, "Draft", "Final")
+doc = craft.docs.open_word(working)
 doc.add_paragraph("Reviewed on 20 October 2026.")
-craft.save(doc, "outputs/plan-final.docx")
+craft.save(doc, working)
 ```
 
 `replace_in_word` does not match text split across differently formatted runs. Report the count it returns.

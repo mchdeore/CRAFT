@@ -45,10 +45,10 @@ function ConnectedBrowser({ configuration, onOpenFile, refreshToken, revealFile 
         const rowClass = `flex w-full items-start gap-2 rounded-md px-2 py-3 text-left text-sm hover:bg-muted ${selectedPath === file.path ? "bg-muted" : ""}`;
         return <li key={file.path}>{file.type === "directory" ? <button type="button" aria-label={`Open folder ${file.name}`} className={rowClass} onClick={() => navigate(file.path)}>{content}</button> : opensInJupyter ? <a href={personalJupyterURL(configuration, file.path)} target="_blank" rel="noopener noreferrer" aria-current={selectedPath === file.path ? "true" : undefined} className={rowClass} onClick={() => setSelectedPath(file.path)}>{content}</a> : <button type="button" aria-label={`Preview ${file.name}`} aria-current={selectedPath === file.path ? "true" : undefined} className={rowClass} onClick={() => { setSelectedPath(file.path); onOpenFile(file.path); }}>{content}</button>}</li>;
       })}</ul>}
-      {current?.files?.length === 0 && <StatusMessage kind="empty" title="No files yet. Import a source from a chat answer to add one." />}
+      {current?.files?.length === 0 && <StatusMessage kind="empty" title="No files yet. Import a source copy from chat to add one." />}
       {!!current?.files?.length && files.length === 0 && <div className="space-y-2"><p role="status" className="break-words text-sm text-muted-foreground">No files or folders match “{query.trim()}”.</p><button type="button" className={buttonClass} onClick={() => { setQuery(""); filterInput.current?.focus(); }}>Clear filter</button></div>}
     </div>
-    <p className="shrink-0 border-t p-3 text-xs text-muted-foreground">Preview files here; edit and export them in JupyterLab.</p>
+    <p className="shrink-0 border-t p-3 text-xs text-muted-foreground">Preview files here. Edit imported copies and save outputs in JupyterLab.</p>
   </aside>;
 }
 

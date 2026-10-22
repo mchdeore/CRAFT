@@ -209,6 +209,7 @@ test("configured workspace launches JupyterLab separately", () => {
   assert.doesNotMatch(html, /<iframe/);
   assert.match(html, /href="http:\/\/127\.0\.0\.1:53522\/lab"[^>]+target="_blank"[^>]+rel="noopener noreferrer"/);
   assert.match(html, /Open in JupyterLab/);
+  assert.match(html, /import an editable copy/i);
   assert.doesNotMatch(html, /Workspace connected/);
 });
 

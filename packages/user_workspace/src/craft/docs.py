@@ -7,7 +7,9 @@ are read-only; import a personal copy before editing it.
 from pathlib import Path
 from typing import Any
 
-from craft import files
+from craft import _root, files
+
+_EDITABLE_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xlsm", ".docx", ".pptx", ".ipynb", ".md", ".txt"}
 
 # Reading
 
@@ -94,6 +96,41 @@ def sheets(name: str | Path) -> dict:
 
 
 # Editing
+
+
+def editable_copy(name: str | Path, *, save_as: str | Path | None = None) -> str:
+    """Copy a document or table file to a new editable derivative name.
+
+    The original file is never modified. If ``save_as`` is omitted, this creates
+    ``-edit`` (or ``-edit-2``, ``-edit-3``...) beside the source file.
+    """
+    source = files.path(name)
+    suffix = source.suffix.lower()
+    if suffix not in _EDITABLE_SUFFIXES:
+        allowed = ", ".join(sorted(_EDITABLE_SUFFIXES))
+        raise ValueError(f"Editable copies support {allowed}")
+    content = source.read_bytes()
+    if save_as is None:
+        base = f"{source.stem}-edit"
+        index = 1
+        while True:
+            stem = base if index == 1 else f"{base}-{index}"
+            target = source.with_name(f"{stem}{source.suffix}")
+            # Exclusive creation also refuses dangling symlinks and racing writers.
+            try:
+                with target.open("xb") as output:
+                    output.write(content)
+                break
+            except FileExistsError:
+                index += 1
+    else:
+        target = files.path(save_as)
+        if target.suffix.lower() != suffix:
+            raise ValueError("Editable copies keep the same file extension")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("xb") as output:
+            output.write(content)
+    return target.relative_to(_root.USER_ROOT).as_posix()
 
 
 def open_word(name: str | Path):
