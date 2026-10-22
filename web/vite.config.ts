@@ -17,7 +17,7 @@ export default defineConfig(({ command }) => {
   return {
     base: production ? "./" : "/",
     envDir: production ? false : undefined,
-    publicDir: production ? "release-public" : "public",
+    publicDir: "public",
     build: { outDir: "dist", sourcemap: false },
     plugins: [react(), tailwindcss()],
     optimizeDeps: { include: ["docx-preview", "exceljs"] },

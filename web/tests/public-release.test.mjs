@@ -30,7 +30,7 @@ test("production build excludes env files, maps and general public fixtures", as
   assert.equal(value.envDir, false);
   assert.equal(value.build?.sourcemap, false);
   assert.equal(path.basename(value.build?.outDir ?? ""), "dist");
-  assert.equal(path.basename(value.publicDir ?? ""), "release-public");
+  assert.equal(path.basename(value.publicDir ?? ""), "public");
 });
 test("public build is independent of a configured development-only remote target", async () => {
   const value = await config("build", "https://foreign.generated.example");

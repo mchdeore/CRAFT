@@ -13,10 +13,9 @@ app/                     backend: FastAPI server, craft CLI and worker (Python m
   agent/ accounts/ conversations/ library/ cube/ approvals/ notes/ skills/ tools/ summarize/ health/ dev/
   seed/                  base seed (base/: accounts, grants, provider Markdown) and the generated demo set
 web/                     frontend: React and Vite
-workspace/
-  jupyter/               the personal JupyterLab workspace image and its `craft` package
-  python/                the restricted Python analysis image (uv workspace member)
-docs/                    this wiki, published by GitHub Pages
+workspace/               the personal JupyterLab workspace image: Dockerfile, the `craft` package (src/), built-in skills
+.public/wiki/            this wiki, published by GitHub Pages
+.local/                  private and never committed: assistant rules, plans, fake data, runtime scratch, worktrees
 scripts/check            quick and full checks
 scripts/demo             the local demo
 compose.yaml  pyproject.toml  uv.lock  .env.example
@@ -120,7 +119,7 @@ npm run lint
 npm run build
 ```
 
-`npm test` selects every `tests/*.test.mjs` file with the TypeScript test loader and retains production artifact test output outside the frontend source tree. `npm run lint` runs `eslint .`. `npm run build` runs `tsc -b && vite build`, so it checks TypeScript before writing the production bundle to `dist/`. There is no separate frontend type-check script.
+Set the backend's `CRAFT_MCP_URL` to its own `/mcp` address when it does not run on port 8000. To keep the production test build at a chosen place, set `CRAFT_RELEASE_TEST_OUTPUT` to a new absolute path outside the source tree. `npm test` selects every `tests/*.test.mjs` file with the TypeScript test loader and retains production artifact test output outside the frontend source tree. `npm run lint` runs `eslint .`. `npm run build` runs `tsc -b && vite build`, so it checks TypeScript before writing the production bundle to `dist/`. There is no separate frontend type-check script.
 
 ## Services and state
 
@@ -132,7 +131,7 @@ The production image runs as numeric user `10001` and omits uv, development pack
 
 The application agent uses PostgreSQL conversations and sessions with native HTTP MCP. Its `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local effects consume their matching approval in the write transaction.
 
-The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding. The Python workspace prototype remains separate from application chat.
+The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding.
 
 ## Provider and generated data
 

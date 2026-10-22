@@ -95,7 +95,7 @@ go() {
   fi
 
   say "Building the workspace image"
-  docker build -q -f workspace/jupyter/Dockerfile -t "$IMAGE" workspace/jupyter >/dev/null
+  docker build -q -f workspace/Dockerfile -t "$IMAGE" workspace >/dev/null
 
   compose up -d --wait db >/dev/null
   # Only --reseed or a missing saved seed indexes with the model; code and migration changes do not.

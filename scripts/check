@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks for CRAFT. There is no CI; run these yourself.
 #   scripts/check        quick: lint, format, types, fast tests (+ web lint/types when web or the contract changed)
-#   scripts/check full   milestone: lock, migrations, every test except live, images, compose, web tests and build
+#   scripts/check full   milestone: lock, migrations, every test except live, the workspace image, compose, web tests and build
 # Tests use a disposable PostgreSQL container (craft-check-db) on port 55481 and the passwords in .env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -63,8 +63,7 @@ if [ "$mode" = quick ]; then
   fi
 else
   step "migrations" bash -c 'uv run alembic upgrade head && uv run alembic check'
-  step "python image" docker build -q -t craft-python-workspace:local-pilot workspace/python
-  step "jupyter image" docker build -q -t craft-user-workspace:local-pilot workspace/jupyter
+  step "workspace image" docker build -q -t craft-user-workspace:local-pilot workspace
   step "pytest (full)" uv run pytest -m 'not live' --tb=short
   step "compose" env -u CRAFT_DATABASE_HOST CRAFT_DATABASE_PORT=55482 \
     bash -c 'docker compose -p craft-check up --build --wait; s=$?; docker compose -p craft-check down -v; exit $s'

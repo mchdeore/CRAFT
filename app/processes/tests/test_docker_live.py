@@ -18,7 +18,7 @@ def test_real_container_limits_and_owned_removal():
     manager = ProcessManager(FakeBackend(), backend)
     ids = []
     try:
-        image = client.images.get("craft-python-workspace:local-pilot").id
+        image = client.images.get("craft-user-workspace:local-pilot").id
         assert image is not None
         spec = ContainerSpec(
             id="tool-worker",
