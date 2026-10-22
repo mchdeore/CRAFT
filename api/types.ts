@@ -29,6 +29,13 @@ export interface DocumentRef { item: string; version?: number }
 export interface DocumentList { limit?: number }
 export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
 export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
+export type JobState = "queued" | "started" | "deferred" | "scheduled" | "finished" | "failed" | "stopped" | "canceled" | "unknown";
+export interface IndexJobRequest { rebuild?: boolean }
+export interface IndexJobPageRequest { status?: Exclude<JobState, "unknown">; offset?: number; limit?: number }
+export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, number> | null; error?: string | null }
+export interface IndexJobPage { jobs: IndexJob[]; nextOffset: number | null }
+export interface QueueWorker { name: string; state: string; queues: string[]; successfulJobs: number; failedJobs: number; lastHeartbeat?: string | null }
+export interface IndexQueueHealth { queue: string; queued: number; started: number; deferred: number; scheduled: number; failed: number; finished: number; canceled: number; workers: QueueWorker[] }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }

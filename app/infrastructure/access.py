@@ -11,7 +11,10 @@ from app.infrastructure.errors import Forbidden, NotSignedIn
 
 PUBLIC = "public"
 SIGNED_IN = "signed_in"
-PERMISSIONS = {"accounts.manage": frozenset({"admin"})}
+PERMISSIONS = {
+    "accounts.manage": frozenset({"admin"}),
+    "library.manage": frozenset({"admin"}),
+}
 
 
 @dataclass(frozen=True, slots=True)

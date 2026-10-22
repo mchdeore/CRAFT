@@ -125,3 +125,21 @@ def test_disabled_cross_origin_browser_mode_retains_local_origin() -> None:
     configured = Settings.from_env({**VALID, "CRAFT_CROSS_ORIGIN_BROWSER": "false"})
     assert configured.cross_origin_browser is False
     assert configured.allowed_origins == "http://localhost:8000"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://localhost:6379/0",
+        "redis://localhost",
+        "redis://user:secret@localhost:6379/0",
+        "redis://localhost:70000/0",
+        "redis://localhost:6379/not-a-db",
+    ],
+)
+def test_queue_url_validation_has_safe_diagnostics(value: str) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        Settings.from_env({**VALID, "CRAFT_QUEUE_URL": value})
+    diagnostic = str(stopped.value)
+    assert "queue_url" in diagnostic
+    assert value not in diagnostic and SECRET not in diagnostic

@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.infrastructure.provider.locking import synchronized, synchronized_read
+
 SILOS = {"requirements", "quality", "launch", "engineering", "reviews", "budget"}
 STAGES = {
     "st1-concept",
@@ -33,6 +35,7 @@ class SimulatedProvider:
             raise ValueError("invalid provider path")
         return path
 
+    @synchronized_read
     def items(self) -> dict[str, dict[str, Any]]:
         file = self.meta / "items.jsonl"
         return (
@@ -41,6 +44,7 @@ class SimulatedProvider:
             else {}
         )
 
+    @synchronized
     def save(self, items: dict[str, dict[str, Any]]) -> None:
         self.meta.mkdir(parents=True, exist_ok=True)
         temp = self.meta / "items.tmp"
@@ -49,6 +53,7 @@ class SimulatedProvider:
         )
         temp.replace(self.meta / "items.jsonl")
 
+    @synchronized
     def feed(self, item: str, kind: str) -> dict[str, Any]:
         self.meta.mkdir(parents=True, exist_ok=True)
         file = self.meta / "changes.jsonl"
@@ -77,6 +82,7 @@ class SimulatedProvider:
             "warnings": ["unknown_silo"] if mission and len(parts) > 3 and silo is None else [],
         }
 
+    @synchronized
     def scan(self) -> list[dict[str, Any]]:
         self.root.mkdir(parents=True, exist_ok=True)
         items = self.items()
@@ -150,6 +156,7 @@ class SimulatedProvider:
         self.save(items)
         return changes
 
+    @synchronized_read
     def list_changes(self, cursor: int) -> tuple[list[dict[str, Any]], int]:
         file = self.meta / "changes.jsonl"
         changes = (
@@ -163,23 +170,27 @@ class SimulatedProvider:
         )
         return changes, changes[-1]["cursor"] if changes else cursor
 
+    @synchronized_read
     def get_item(self, item: str) -> dict[str, Any]:
         if item not in (items := self.items()):
             raise KeyError(item)
         return items[item]
 
+    @synchronized_read
     def read_content(self, item: str, version: int) -> bytes:
         record = self.get_item(item)
         if version not in {v["version"] for v in record["versions"]}:
             raise KeyError("unknown version")
         return (self.meta / "versions" / item / str(version)).read_bytes()
 
+    @synchronized
     def write_content(self, path: str, content: bytes) -> None:
         file = self.path(path)
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_bytes(content)
         self.scan()
 
+    @synchronized
     def delete_item(self, item: str) -> None:
         record = self.get_item(item)
         if record["deleted_at"] is not None:

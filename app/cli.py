@@ -16,6 +16,8 @@ def main(argv: list[str] | None = None) -> None:
     seed.add_argument("--seed", type=int, default=1)
     index = commands.add_parser("index")
     index.add_argument("--rebuild", action="store_true")
+    worker = commands.add_parser("worker")
+    worker.add_argument("--burst", action="store_true")
     call = commands.add_parser("call")
     call.add_argument("operation")
     call.add_argument("--as", dest="username", required=True)
@@ -53,7 +55,7 @@ def main(argv: list[str] | None = None) -> None:
                 operation.access,
                 operation.effects,
             )
-    elif args.command in {"seed", "index", "provider", "call", "users", "missions"}:
+    elif args.command in {"seed", "index", "worker", "provider", "call", "users", "missions"}:
         import json
         import sys
         from pathlib import Path
@@ -82,6 +84,10 @@ def main(argv: list[str] | None = None) -> None:
             from app.library.handlers import index_provider
 
             print(json.dumps(index_provider(settings, args.rebuild)))
+        elif args.command == "worker":
+            from app.library.queue import run_worker
+
+            run_worker(settings, burst=args.burst)
         elif args.command == "provider":
             from app.infrastructure.provider import get_provider
 

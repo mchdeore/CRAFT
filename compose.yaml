@@ -13,12 +13,23 @@ services:
       test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]  # TCP: not healthy during initdb
       interval: 2s
       retries: 30
+  queue:
+    image: valkey/valkey:8.1.3-alpine
+    command: ["valkey-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - queue:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      retries: 30
   app:
     build: .
     restart: unless-stopped
     environment: &app_environment                       # the app's own settings only
       CRAFT_APP_DB_PASSWORD: ${CRAFT_APP_DB_PASSWORD:?set it in .env}
       CRAFT_PROVIDER_ROOT: /provider
+      CRAFT_QUEUE_URL: ${CRAFT_QUEUE_URL:-redis://queue:6379/0}
+      CRAFT_QUEUE_NAME: ${CRAFT_QUEUE_NAME:-craft-jobs}
       CRAFT_DATABASE_HOST: db
       CRAFT_DATABASE_PORT: "5432"
       CRAFT_DATABASE_NAME: ${CRAFT_DATABASE_NAME:-craft_dev}
@@ -44,6 +55,25 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      queue:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    profiles: ["worker"]
+    command: ["craft", "worker"]
+    environment:
+      <<: *app_environment
+      CRAFT_OWNER_DB_PASSWORD: ${CRAFT_OWNER_DB_PASSWORD:?set it in .env}
+    volumes:
+      - ${CRAFT_PROVIDER_ROOT:-./var/provider}:/provider:ro
+      - ${CRAFT_PROVIDER_ROOT:-./var/provider}/.provider:/provider/.provider
+    depends_on:
+      db:
+        condition: service_healthy
+      queue:
+        condition: service_healthy
 
   mcp:
     build: .
@@ -59,3 +89,4 @@ services:
 
 volumes:
   db: {}
+  queue: {}

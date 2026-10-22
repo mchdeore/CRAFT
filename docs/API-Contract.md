@@ -90,6 +90,12 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /health/live` | — | `Health` | public | — |
 | `GET /health/ready` | — | `Health` | public | — |
 | `POST /api/library/search` | `LibrarySearch` | `LibraryHits` | signed in; live resource access | `search` |
+| `POST /api/library/index/jobs` | `IndexJobRequest` | `IndexJob` | administrator | — |
+| `GET /api/library/index/jobs` | —; query `IndexJobPageRequest` | `IndexJobPage` | administrator | — |
+| `GET /api/library/index/jobs/:jobId` | — | `IndexJob` | administrator | — |
+| `POST /api/library/index/jobs/:jobId/retry` | — | `IndexJob` | administrator | — |
+| `POST /api/library/index/jobs/:jobId/cancel` | — | `IndexJob` | administrator | — |
+| `GET /api/library/index/queue` | — | `IndexQueueHealth` | administrator | — |
 | `GET /api/library/documents/:item` | —; query `{ version?: number }` | `LibraryDocument` | signed in; live resource access | `get_document` |
 | `GET /api/library/documents/:item/chunks` | —; query `{ version: number; fromBlock: number; toBlock: number }` | `ChunkPage` | signed in; live resource access | `read_chunks` |
 | `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | signed in; live resource access | `explore` |
@@ -324,6 +330,13 @@ export interface DocumentRef { item: string; version?: number }
 export interface DocumentList { limit?: number }
 export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
 export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
+export type JobState = "queued" | "started" | "deferred" | "scheduled" | "finished" | "failed" | "stopped" | "canceled" | "unknown";
+export interface IndexJobRequest { rebuild?: boolean }
+export interface IndexJobPageRequest { status?: Exclude<JobState, "unknown">; offset?: number; limit?: number }
+export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, number> | null; error?: string | null }
+export interface IndexJobPage { jobs: IndexJob[]; nextOffset: number | null }
+export interface QueueWorker { name: string; state: string; queues: string[]; successfulJobs: number; failedJobs: number; lastHeartbeat?: string | null }
+export interface IndexQueueHealth { queue: string; queued: number; started: number; deferred: number; scheduled: number; failed: number; finished: number; canceled: number; workers: QueueWorker[] }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
@@ -482,6 +495,12 @@ export interface Routes {
   "GET /health/live": { response: T.Health };
   "GET /health/ready": { response: T.Health };
   "POST /api/library/search": { body: T.LibrarySearch; response: T.LibraryHits };
+  "POST /api/library/index/jobs": { body: T.IndexJobRequest; response: T.IndexJob };
+  "GET /api/library/index/jobs": { query: T.IndexJobPageRequest; response: T.IndexJobPage };
+  "GET /api/library/index/jobs/:jobId": { response: T.IndexJob };
+  "POST /api/library/index/jobs/:jobId/retry": { response: T.IndexJob };
+  "POST /api/library/index/jobs/:jobId/cancel": { response: T.IndexJob };
+  "GET /api/library/index/queue": { response: T.IndexQueueHealth };
   "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
   "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
@@ -550,6 +569,12 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /health/live` | `Health` | `api/examples/health-live.json` |
 | `GET /health/ready` | `Health` | `api/examples/health-ready.json` |
 | `POST /api/library/search` | `LibraryHits` | `api/examples/library-search.json` |
+| `POST /api/library/index/jobs` | `IndexJob` | `api/examples/index-job.json` |
+| `GET /api/library/index/jobs` | `IndexJobPage` | `api/examples/index-job-page.json` |
+| `GET /api/library/index/jobs/:jobId` | `IndexJob` | `api/examples/index-job.json` |
+| `POST /api/library/index/jobs/:jobId/retry` | `IndexJob` | `api/examples/index-job.json` |
+| `POST /api/library/index/jobs/:jobId/cancel` | `IndexJob` | `api/examples/index-job.json` |
+| `GET /api/library/index/queue` | `IndexQueueHealth` | `api/examples/index-queue-health.json` |
 | `GET /api/library/documents/:item` | `LibraryDocument` | `api/examples/library-document.json` |
 | `GET /api/library/documents/:item/chunks` | `ChunkPage` | `api/examples/chunks.json` |
 | `POST /api/library/explore` | `ChunkPage` | `api/examples/explore.json` |

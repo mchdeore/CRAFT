@@ -18,6 +18,8 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     database_name: str = "craft_dev"
     provider_root: str = "var/provider"
     process_root: str = ""
+    queue_url: str = "redis://localhost:6379/0"
+    queue_name: Annotated[str, msgspec.Meta(min_length=1, max_length=64)] = "craft-jobs"
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
@@ -65,6 +67,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
             validate_models(settings, access=False)
             validate_mcp_url(settings.mcp_url)
+            validate_queue_url(settings.queue_url)
             return settings
         except msgspec.ValidationError as error:
             message = str(error)
@@ -101,6 +104,28 @@ def validate_mcp_url(value: str) -> None:
         valid = False
     if not valid:
         raise SystemExit("bad setting: mcp_url: invalid configuration")
+
+
+def validate_queue_url(value: str) -> None:
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(value)
+        valid = (
+            parsed.scheme in {"redis", "rediss"}
+            and bool(parsed.hostname)
+            and (parsed.port is None or 0 < parsed.port <= 65535)
+            and bool(parsed.path)
+            and parsed.path[1:].isdigit()
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        )
+    except (ValueError, TypeError):
+        valid = False
+    if not valid:
+        raise SystemExit("bad setting: queue_url: invalid configuration")
 
 
 def validate_models(settings: Settings, *, access: bool = True) -> None:

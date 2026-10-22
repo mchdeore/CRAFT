@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text, tuple_
 from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
@@ -10,23 +10,38 @@ from app.infrastructure.database import metadata as m
 from app.infrastructure.grants import readable
 
 
-def clear_index(session: Session, items: Sequence[str]) -> None:
-    """Remove derived rows for these source items, preserving other providers."""
+def clear_index(
+    session: Session,
+    items: Sequence[str],
+    *,
+    preserve_versions: bool = False,
+    preserve_facets: bool = False,
+    versions: Sequence[tuple[str, int]] | None = None,
+) -> None:
+    """Remove derived rows for these source items, preserving other providers.
+
+    With versions, only those (item, version) pairs lose their chunks and vectors.
+    """
     if not items:
         return
     documents = select(m.doc_versions.c.id).where(m.doc_versions.c.item.in_(items))
+    if versions is not None:
+        documents = documents.where(
+            tuple_(m.doc_versions.c.item, m.doc_versions.c.version).in_(list(versions))
+        )
     chunks = select(m.chunks.c.id).where(m.chunks.c.doc_version_id.in_(documents))
     facets = select(m.facet_texts.c.id).where(m.facet_texts.c.sources.overlap(list(items)))
-    session.execute(
-        m.vectors.delete().where(
-            or_(
-                and_(m.vectors.c.owner_kind == "doc_version", m.vectors.c.owner_id.in_(documents)),
-                and_(m.vectors.c.owner_kind == "chunk", m.vectors.c.owner_id.in_(chunks)),
-                and_(m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets)),
-            )
+    vector_owners = [
+        and_(m.vectors.c.owner_kind == "doc_version", m.vectors.c.owner_id.in_(documents)),
+        and_(m.vectors.c.owner_kind == "chunk", m.vectors.c.owner_id.in_(chunks)),
+    ]
+    if not preserve_facets:
+        vector_owners.append(
+            and_(m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets))
         )
-    )
-    session.execute(m.facet_texts.delete().where(m.facet_texts.c.id.in_(facets)))
+    session.execute(m.vectors.delete().where(or_(*vector_owners)))
+    if not preserve_facets:
+        session.execute(m.facet_texts.delete().where(m.facet_texts.c.id.in_(facets)))
     session.execute(
         m.version_diffs.delete().where(
             or_(
@@ -36,7 +51,8 @@ def clear_index(session: Session, items: Sequence[str]) -> None:
         )
     )
     session.execute(m.chunks.delete().where(m.chunks.c.id.in_(chunks)))
-    session.execute(m.doc_versions.delete().where(m.doc_versions.c.id.in_(documents)))
+    if not preserve_versions:
+        session.execute(m.doc_versions.delete().where(m.doc_versions.c.id.in_(documents)))
 
 
 def item(session: Session, caller: Caller, key: str):
