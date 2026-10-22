@@ -126,6 +126,7 @@ def test_workspace_call_rows_survive_an_incompatible_downgrade(
 ) -> None:
     config, connection = isolated_migrations
     command.upgrade(config, "head")
+    expected = ScriptDirectory.from_config(config).get_current_head()
     connection.execute(
         text(
             "insert into call_log (kind, name, origin, outcome, duration_ms, request_id, call_id) "
@@ -141,5 +142,5 @@ def test_workspace_call_rows_survive_an_incompatible_downgrade(
         == 1
     )
     assert (
-        connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015"
+        connection.execute(text("select version_num from alembic_version")).scalar_one() == expected
     )
