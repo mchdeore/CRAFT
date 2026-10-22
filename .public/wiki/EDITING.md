@@ -1,6 +1,6 @@
 # Editing the wiki
 
-The wiki is the Markdown in `docs/` on `main`. GitHub Pages republishes it to [mchdeore.github.io/CRAFT](https://mchdeore.github.io/CRAFT/) a minute or two after every merge; there is no build step and no workflow. Pages are updated by hand, when asked, in a normal pull request.
+The wiki is the Markdown in `.public/wiki/` on `main`. When a merge changes it, the `Wiki` workflow (`.github/workflows/wiki.yml`) republishes it to [mchdeore.github.io/CRAFT](https://mchdeore.github.io/CRAFT/) within a few minutes; nothing else runs in GitHub. Pages are updated by hand, when asked, in a normal pull request.
 
 ## How to update
 
@@ -14,9 +14,9 @@ The wiki is the Markdown in `docs/` on `main`. GitHub Pages republishes it to [m
 - Plain GitHub Markdown only: headings, lists, tables, code blocks, links and images. No HTML, and never two opening curly braces in a row or a curly brace followed by a percent sign: the site generator (Jekyll) reads those as template tags and the page fails to publish.
 - One `#` title per page, then `##` sections and `###` subsections. No numbers in headings.
 - Link to another page with its file name, such as `[roadmap](roadmap.md)` or `[access](datacube.md#access)`. Anchors are the heading in lower case, punctuation removed, spaces turned into hyphens.
-- Link to code with a full GitHub address, such as `https://github.com/mchdeore/CRAFT/blob/main/app/contract/types.ts`, because the site only contains `docs/`.
+- Link to code with a full GitHub address, such as `https://github.com/mchdeore/CRAFT/blob/main/app/contract/types.ts`, because the site only contains `.public/wiki/`.
 - Never copy what the code already states. Link to it instead: contract types (`app/contract/`), versions (`pyproject.toml`, `uv.lock`, `web/package.json`), settings (`.env.example`).
-- Images go in `docs/images/` as SVG, with the Mermaid source beside them (`.mmd`).
+- Images go in `.public/wiki/images/` as SVG, with the Mermaid source beside them (`.mmd`).
 - Short sentences, present tense, no private paths, names or credentials.
 
 ## Contract tests read this wiki

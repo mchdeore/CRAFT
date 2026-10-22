@@ -1,1 +1,0 @@
-"""Isolated Python workspace components."""

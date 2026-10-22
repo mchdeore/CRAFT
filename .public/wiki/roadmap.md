@@ -47,7 +47,7 @@ Each row stays as it is until its trigger happens.
 | Run limits | Starting values | Measured values | Evaluation set exists |
 | Confidence calibration | Six evidence inputs and configured gate | Calibrated weights and thresholds | The labelled evaluation set exists |
 | Language | English | French and detection | Next (see above) |
-| Code execution | Approved `run_code` in the owner's JupyterLab; a restricted Python image prototype | Hosted sandbox (Container Apps dynamic sessions) | Azure deployment |
+| Code execution | Approved `run_code` in the owner's JupyterLab | Hosted sandbox (Container Apps dynamic sessions) | Azure deployment |
 | Load | Not sized | Sized to the load profile | Before sizing infrastructure |
 | Database hosting | Local container | Azure Database for PostgreSQL with pgvector, same migrations | Deployment |
 | Database logins | Logins created by `initdb.sh` | Logins and grants from infrastructure code; managed identity | Deployment |

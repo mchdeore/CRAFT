@@ -212,7 +212,7 @@ def test_contract_routes_match_app(settings) -> None:
 
     from app import create_app
 
-    document = (ROOT / "docs/api-contract.md").read_text()
+    document = (ROOT / ".public/wiki/api-contract.md").read_text()
     table = contract_section(document, "### 5.1 Built")
     rows = re.findall(r"^\| `((?:GET|POST|PUT|PATCH|DELETE)) ([^`]+)` \|", table, re.M)
     declared = {
@@ -240,7 +240,7 @@ def test_contract_tools_match_registry(settings) -> None:
 
     app = create_app(settings)
     try:
-        document = (ROOT / "docs/api-contract.md").read_text()
+        document = (ROOT / ".public/wiki/api-contract.md").read_text()
         section = contract_section(document, "## 6. Agent tools")
         rows = re.findall(r"^\| `([a-z0-9_]+)` \|", section, re.M)
         expected = {op.tool_name for op in registry.values() if op.tool}
@@ -256,7 +256,7 @@ def test_contract_json_examples() -> None:
 
     import jsonschema
 
-    document = (ROOT / "docs/api-contract.md").read_text()
+    document = (ROOT / ".public/wiki/api-contract.md").read_text()
     section = contract_section(document, "## 15. Examples")
     rows = re.findall(
         r"^\| `([A-Z]+ /[^`]+)` \| `([A-Za-z]+(?:\[\])?)` \| `([^`]+)` \|", section, re.M

@@ -1,123 +1,73 @@
-# User workspace
+# Workspace
 
-The user workspace image provides an unprivileged JupyterLab workspace with
-the `craft` Python package. Edit and run `.py` scripts and `.ipynb` notebooks,
-keep Markdown skills and input files, and save outputs beneath `USER_ROOT`,
-which is `/workspace`. Jupyter provides terminals, uploads, and downloads.
+CRAFT combines authenticated chat and a personal workspace for files and Markdown skills. The user and agent work with the same `.py` scripts, `.ipynb` notebooks, inputs and outputs beneath `USER_ROOT`, which is `/workspace`. JupyterLab provides Python editing, execution, terminals, uploads and downloads.
 
-## Files and skills in chat
+Use the top navigation to open **Chat** or **Workspace**. Workspace contains **Files** and **Skills**. Switching views retains the conversation, unsent message, visited skill editor and personal file navigation. In Files, choose **Open JupyterLab** to launch the owner's configured workspace in a separate tab. Files and running kernels remain in JupyterLab while browsing CRAFT; agent file access continues through the existing backend workspace connection.
 
-Use `@` to select an owned file and `/` to select a Markdown skill under
-`/workspace/skills`. The message retains the exact path to its current contents.
-The configured `workspace_` tools list entries and read notebook cells, using their
-actual schemas. Plain files and selected Markdown skills require a small approved
-`run_code` read in a configured Jupyter kernel. An exact path needs no discovery
-call; a missing file, unavailable reader or ambiguous name needs an honest response.
-Files and personal Markdown skills stay user-owned and need no registration in the
-saved-skill catalog.
+Each owner has dedicated workspace storage, a Jupyter service and a private MCP control connection. Jupyter uses its own password, separate from CRAFT sign-in. The workspace runs as an unprivileged account and receives no source corpus mount or CRAFT model and database credentials.
 
-Ask the agent to read before editing or executing, preserve unrelated work, and
-verify a save by reading the resulting bytes. Selected skill instructions remain
-subject to system rules, the tool allowlist, approval gates and owner/source
-boundaries. Source originals are read-only; edit an imported workspace copy.
+## Files and skills
 
-Saved files can be returned as clickable Markdown links, for example
-`[sales summary.csv](/workspace/outputs/sales%20summary.csv)`. Encode spaces in
-the href. Chat previews show the current owned file, so refresh after edits.
-Source citations retain their existing source preview links and exact handles;
-an unimported source has no invented `/workspace` path.
+Configured workspace tools let the agent list and read the owner's files. The agent runs Python with `run_code` and changes files with `write_file` or `edit_notebook`; each call waits for the requester's approval, which shows the exact code or change, and runs once in the owner's own kernel with the owner's access. Code the owner runs in Jupyter needs no approval. In Skills, write instructions in the document editor and choose **Save to workspace** to create a Markdown file under `/workspace/skills`. Load a file to edit its current contents, or choose New for another document. The sidebar shows actual registered tool metadata and inserts tool names or personal file paths into the document. These files are not registered as app skills or immutable revisions.
 
-## Local analysis
+In chat, type `/` to select a personal `skills/*.md` file or `@` to select another personal file. The picker inserts the exact `/workspace` path into message text; it refers to current file contents. Personal skills can tell the agent to read or run owned paths such as `/workspace/scripts/analysis.py`. Import source originals first.
 
-Use Python's standard library for simple local inputs and outputs. The shipped
-image installs the locked `analysis` extra for these additional imports:
+Select a `/workspace` file link in a chat response to open the current personal copy beside the conversation. The preview supports text, Python, notebook cells and saved text output, Word, Excel, PDF and PNG files. Refresh reloads saved contents; Download exports the copy. Edit scripts and notebooks in JupyterLab or ask the agent to update the owned file.
 
-| Package | Use |
-| --- | --- |
-| Pandas, DuckDB, PyArrow | Clean, join and query CSV, Excel and Parquet tables |
-| NumPy, SciPy, statsmodels | Numerical analysis, statistics and regression |
-| scikit-learn | Models such as regression and clustering |
-| SymPy, Pint | Symbolic mathematics and unit-aware numbers |
-| Matplotlib | Save charts for preview and export |
-| OpenPyXL, python-docx, python-pptx, pypdf | Read and write Excel, Word and PowerPoint; read PDF text |
+## Source copies
 
-python-docx does not guarantee lossless editing of every Word feature; verify
-changes to an owned copy. External network access and source writes are not
-granted by the Python package.
+In **Chat**, describe the document in ordinary language. Source-result cards show its title, sentence preview and pinned version. Select **Import copy** to save the full original into the personal workspace and open its preview in chat. The browser performs this transfer with the existing CRAFT and Jupyter sign-ins; the agent does not receive those credentials. A previous saved copy can also be opened from the agent’s `/workspace` link.
 
-Name files relative to `USER_ROOT`; the path chooses the folder:
+In **Workspace → Files**, open JupyterLab and sign in there if needed, then choose **Search sources** in CRAFT and select **Import copy**. This saves the selected original version into the workspace root (`USER_ROOT`) with a readable name, such as `report.xlsx`, and reveals its containing folder in Personal files. If that name is taken, it tries numeric alternatives such as `report-2.xlsx`, up to 20 names, without overwriting existing files. The import limit is 16 MB.
 
-```python
-import craft
+Source identity and the initial SHA-256 hash are recorded separately in `USER_ROOT/imports/source-metadata/<UUID>.json`. If metadata cannot be confirmed after the copy saves, search stays open with the warning, saved path and **Open copy** action. The personal browser still refreshes and reveals the saved copy.
 
-sales = craft.read("data/sales.csv")
-summary = craft.sql(
-    "SELECT region, sum(amount) AS total FROM sales GROUP BY region", sales=sales
-)
-craft.save(summary, "outputs/sales-summary.xlsx")
-craft.docs.report("outputs/sales-summary.docx", "Sales", "# Totals", summary)
-```
+Word and Excel copies open in the personal file preview after a fully successful import. **Open copy** opens that preview manually; Download returns the personal bytes. The personal browser also previews supported files up to 10 MB. Use JupyterLab for Python and notebook editing, and for files beyond the preview limit. Source originals remain immutable. Personal copies and generated outputs stay outside ingestion and the engineering datacube.
 
-`craft.read` and `craft.save` pick the format from the extension. `craft.table`
-reads a spreadsheet or CSV whose header sits below title rows and converts
-numeric columns. `craft.ls`, `craft.find` and `craft.path` list and resolve
-owned names; `craft.path` also accepts a path it returned. `craft.docs` reads,
-edits and builds Word, PowerPoint, PDF and Excel files. The image copies the
-starter skills in `skills/` into `USER_ROOT/skills` on first start and never
-replaces an existing file.
+## Python analysis
 
-`craft.analysis` adds quick helpers for repetitive notebook steps:
+The workspace image includes Pandas and DuckDB for tables and SQL, NumPy, SciPy and statsmodels for numerical and statistical analysis, scikit-learn for models, SymPy for symbolic mathematics, Pint for units, Matplotlib for charts, PyArrow for Parquet, OpenPyXL for Excel, python-docx and python-pptx for Word and PowerPoint, and pypdf for PDF text. There is no internet access or package installation inside the workspace.
+
+The `craft` package names files relative to `USER_ROOT`; the path chooses the folder:
 
 ```python
 import craft
 
 sales = craft.read("data/sales.xlsx")
-totals = craft.analysis.totals(sales, by="region", value="amount")
-top = craft.analysis.table(totals, top=5)
-craft.analysis.chart(top, "region", "amount", kind="bar", save_as="charts/top-regions.png")
+totals = craft.sql("select region, sum(amount) as total from sales group by region", sales=sales)
+craft.save(totals, "results/totals.csv")
+craft.docs.report("results/summary.docx", "Sales", "# Totals", totals)
 ```
 
-For editable derivatives, use `craft.docs.editable_copy` first. It creates a new
-owned file and leaves the original bytes unchanged:
-
-```python
-working = craft.docs.editable_copy("imports/budget.xlsx")
-sheet = craft.read(working)
-sheet["forecast"] = sheet["cost"] * 1.05
-craft.save(sheet, working)
-```
+`read` and `save` choose the format from the extension: CSV, TSV, Excel, Parquet, JSON, Markdown, Word, PowerPoint, PDF text, Matplotlib figures and plain text. `craft.docs` reads, edits and builds Word, PowerPoint, PDF and Excel files. Starter skills `documents.md`, `analysis.md` and `cube.md` are copied into `USER_ROOT/skills` on first start; an existing file with the same name is kept.
 
 ## CRAFT access points
 
-The access points send HTTP requests to the same `/api` routes the browser uses,
-with the account's workspace token. The server resolves the token to its account,
-applies mission and silo grants, permits only read-tool routes and logs each call
-with origin `workspace`:
+The access points call the same `/api` routes as the browser, with the account's workspace token ([Workspace tokens](access.md#workspace-tokens)):
 
 ```python
 hits = craft.search("radiator margin", missions=["msn-sim-01"])
 light = craft.cube.find(("mass_dry", "le", 150, "kg"), stage="current")
-light.df, light.citations
-craft.cube.compare(["msn-sim-01", "msn-sim-02"], ["mass_dry", "power_peak"]).df
+table = craft.cube.compare(["msn-sim-01", "msn-sim-02"], ["mass_dry", "power_peak"]).df
+evidence = craft.cube.evidence(light.data["missions"][0]["matched"][0]["id"])
 ```
 
-Issue a token from a signed-in browser session with `POST /api/me/workspace-tokens`,
-or for provisioning:
+Each result has `.data`, a `.df` table and `.citations`. Document access points are `search`, `documents`, `document`, `chunks`, `explore`, `check_citation` and `compare_versions`; cube access points are `craft.cube.parameters`, `missions`, `find`, `mission`, `compare`, `evidence`, `similar`, `explain` and `candidates`. They are read-only. `craft.whoami()` shows the signed-in account and `craft.login()` sets a token for the current kernel.
 
-```sh
-uv run craft call accounts.create_workspace_token --as <username> '{"label": "workspace", "hours": 12}'
+Kernels and terminal shells start with an outbound guard. Python connections, name lookups and program launches are refused except to the CRAFT server named by `CRAFT_API_URL` and, during a bound agent run, its bridge. The workspace network policy remains the boundary; the guard is a second layer.
+
+## Native tools from Python
+
+During an active chat run, the selected notebook kernel also has run-bound native access:
+
+```python
+from craft import native
+
+async with native() as sdk:
+    sources = await sdk.search("project requirements")
 ```
 
-Give the workspace container `CRAFT_API_URL` (the server origin, such as
-`http://host.docker.internal:8000`) and mount the token read-only at
-`/run/craft/workspace-token`, outside `USER_ROOT`. In a kernel, `craft.login()`
-prompts for a token kept only in memory. `craft.whoami()` shows the account.
-Revoke a token with `DELETE /api/me/workspace-tokens/<id>`.
-
-Kernels and terminal shells set `CRAFT_GUARD=1`. The `craft_guard` audit hook then
-refuses Python connections, name lookups and program launches except to
-`CRAFT_API_URL` and an active run bridge. The network policy below remains the
-boundary; the guard is a second layer and not a sandbox.
+These calls use that run's identity, tool-call budget, deadline, retrieval trace and audit records. Access ends on completion, pause, error or cancellation. The SDK refuses operations that require CRAFT approval before dispatch.
 
 ## Build and owner provisioning
 
@@ -125,18 +75,18 @@ Use uv 0.12.23 to regenerate this package's standalone release lock from the
 repository root:
 
 ```sh
-uv lock --project workspace/jupyter
+uv lock --project workspace
 ```
 
-Commit `workspace/jupyter/uv.lock` with the package metadata. It covers the
+Commit `workspace/uv.lock` with the package metadata. It covers the
 SDK dependencies, the `lab` and `analysis` extras, and the `build` group containing Setuptools
 80.9.0. The backend's root lock does not replace this package lock.
 
 Build from the public package directory:
 
 ```sh
-docker build --file workspace/jupyter/Dockerfile \
-  --tag craft-user-workspace:0.1.6 workspace/jupyter
+docker build --file workspace/Dockerfile \
+  --tag craft-user-workspace:0.1.6 workspace
 ```
 
 The Dockerfile installs locked dependency wheels and Setuptools into
@@ -249,7 +199,7 @@ do not read plain Markdown files. Personal files remain separate from the regist
 CRAFT skill catalog. Without a configured Jupyter kernel, only the configured
 list/notebook reads are available.
 
-## SDK reads in an active notebook
+## Notebook SDK reads
 
 `owned_path()` rejects absolute paths, traversal, and existing symlinks. Pass
 `outputs/result.txt`, not `/workspace/outputs/result.txt`. It is a convenience
@@ -328,16 +278,4 @@ until the CRAFT approval/resume path is integrated. `craft.client.Craft(session)
 `craft.client.connect(url, run_token=...)` still consume explicitly injected authentication;
 they issue no credentials or persistent runs.
 
-## Import source copies
-
-In Workspace, sign in to JupyterLab, search sources and select Import to copy an
-original version into the workspace root (`USER_ROOT`). Files up to 16 MB receive readable names
-such as `report.xlsx`. If a name is taken, Import tries numeric alternatives such
-as `report-2.xlsx`, up to 20 names, without overwriting existing files.
-
-Source identity and the initial SHA-256 hash are recorded separately in
-`USER_ROOT/imports/source-metadata/<UUID>.json`. If metadata cannot be confirmed
-after the copy saves, the copy remains and Import prompts inspection in
-JupyterLab before importing again. Open the copy to edit and export it. Originals
-remain read-only; personal copies stay outside ingestion. Update external
-originals manually.
+See [agent runtime](runtime.md).

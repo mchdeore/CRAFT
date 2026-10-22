@@ -185,6 +185,6 @@ Arrows name actual FK columns. `vectors` owner references, `facet_texts` source 
 | External MCP connection credentials | Private service configuration | Workspace-owned connection with protected secret reference and lifecycle |
 | External login | Deferred | User-owned unique issuer/subject link when OIDC is introduced |
 
-The Python workspace prototype is not part of the main PostgreSQL migration set. A prototype table is not evidence that a main application relationship exists.
+
 
 Schema sources: [shared metadata](https://github.com/mchdeore/CRAFT/blob/main/app/infrastructure/database/metadata.py), [accounts](https://github.com/mchdeore/CRAFT/blob/main/app/accounts/storage.py), [conversations](https://github.com/mchdeore/CRAFT/blob/main/app/conversations/storage.py), [agent](https://github.com/mchdeore/CRAFT/blob/main/app/agent/storage.py), [approvals](https://github.com/mchdeore/CRAFT/blob/main/app/approvals/storage.py), [audit](https://github.com/mchdeore/CRAFT/blob/main/app/infrastructure/operations/storage.py) and [migrations](https://github.com/mchdeore/CRAFT/tree/main/app/infrastructure/database/migrations/versions).
