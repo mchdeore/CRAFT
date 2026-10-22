@@ -21,6 +21,7 @@ export interface Routes {
   "POST /api/library/index/jobs/:jobId/retry": { response: T.IndexJob };
   "POST /api/library/index/jobs/:jobId/cancel": { response: T.IndexJob };
   "GET /api/library/index/queue": { response: T.IndexQueueHealth };
+  "POST /api/library/documents/:item/versions/:version/ocr": { response: T.IndexJob };
   "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
   "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };

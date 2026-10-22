@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -14,7 +15,6 @@ from rq.job import Job
 from app.infrastructure.access import Caller, require
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.errors import ApiError, Conflict, NotFound
-from app.library.index import build as index_build
 
 JobState = Literal[
     "queued",
@@ -51,6 +51,12 @@ MAX_JOB_OFFSET = 100_000
 
 class QueueUnavailable(ApiError):
     status, code, message = 503, "queue_unavailable", "Queue unavailable."
+
+
+def index_build(settings: Settings, rebuild: bool, *, enrich_ocr: bool = False) -> dict[str, int]:
+    from app.library.index import build
+
+    return build(settings, rebuild, enrich_ocr=enrich_ocr)
 
 
 class QueueInspector(Worker):
@@ -111,9 +117,14 @@ def index_job_payload(job: Job) -> dict[str, Any]:
     exc = latest.exc_string if latest and isinstance(latest.exc_string, str) else None
     return {
         "job_id": job.id,
+        "kind": "ocr" if job.func_name == "app.library.enrichment.run_ocr_job" else "index",
+        "item": details.get("item"),
+        "version": details.get("version"),
+        "force": bool(details.get("force", False)),
         "status": status_of(job),
         "queue": job.origin,
         "rebuild": bool(details.get("rebuild", False)),
+        "enrich_ocr": bool(details.get("enrich_ocr", False)),
         "requested_by": details.get("requested_by"),
         "retry_of": details.get("retry_of"),
         "enqueued_at": timestamp(job.enqueued_at),
@@ -136,12 +147,15 @@ def load_job(job_id: str, connection: Redis, queue_name: str) -> Job:
         job = Job.fetch(job_id, connection=connection)
     except NoSuchJobError:
         raise NotFound() from None
-    if job.origin != queue_name or job.func_name != "app.library.queue.run_index_job":
+    if job.origin != queue_name or job.func_name not in {
+        "app.library.queue.run_index_job",
+        "app.library.enrichment.run_ocr_job",
+    }:
         raise NotFound()
     return job
 
 
-def enqueue_index_job(caller: Caller, rebuild: bool) -> dict[str, Any]:
+def enqueue_index_job(caller: Caller, rebuild: bool, *, enrich_ocr: bool = False) -> dict[str, Any]:
     settings = queue_settings(caller)
     connection = open_connection(settings)
     try:
@@ -150,6 +164,7 @@ def enqueue_index_job(caller: Caller, rebuild: bool) -> dict[str, Any]:
             run_index_job,
             kwargs={
                 "rebuild": rebuild,
+                "enrich_ocr": enrich_ocr,
                 "requested_by": str(caller.user_id) if caller.user_id else None,
                 "retry_of": None,
             },
@@ -224,14 +239,34 @@ def retry_index_job(caller: Caller, job_id: str) -> dict[str, Any]:
         state = status_of(job)
         if state not in {"failed", "canceled", "stopped"}:
             raise Conflict("Only failed, canceled or stopped jobs can be retried.")
-        retried = queue.enqueue(
-            run_index_job,
-            kwargs={
+        function: Callable[..., dict[str, Any]]
+        details: dict[str, Any]
+        if job.func_name == "app.library.enrichment.run_ocr_job":
+            from app.library.enrichment import enqueue_version_job
+
+            retried, _ = enqueue_version_job(
+                queue,
+                settings,
+                job.kwargs["item"],
+                job.kwargs["version"],
+                force=bool(job.kwargs.get("force", False)),
+                requested_by=str(caller.user_id),
+                retry_of=job.id,
+            )
+            assert retried is not None
+            return index_job_payload(retried)
+        else:
+            function = run_index_job
+            details = {
                 "rebuild": bool(job.kwargs.get("rebuild", False)),
-                "requested_by": str(caller.user_id) if caller.user_id else None,
-                "retry_of": job.id,
-            },
-            job_timeout=60 * 60,
+                "enrich_ocr": bool(job.kwargs.get("enrich_ocr", False)),
+            }
+            timeout = 60 * 60
+        details.update(requested_by=str(caller.user_id), retry_of=job.id)
+        retried = queue.enqueue(
+            function,
+            kwargs=details,
+            job_timeout=timeout,
             result_ttl=7 * 24 * 60 * 60,
             failure_ttl=7 * 24 * 60 * 60,
         )
@@ -263,6 +298,10 @@ def cancel_index_job(caller: Caller, job_id: str) -> dict[str, Any]:
                     job.cancel(pipeline=pipeline)
                     pipeline.execute()
                     job.refresh()
+                    if job.func_name == "app.library.enrichment.run_ocr_job":
+                        from app.library.enrichment import expire_terminal_claim
+
+                        expire_terminal_claim(job, connection)
                     return index_job_payload(job)
                 except (WatchError, InvalidJobOperation):
                     pipeline.reset()
@@ -316,10 +355,14 @@ def queue_health(caller: Caller) -> dict[str, Any]:
 
 
 def run_index_job(
-    *, rebuild: bool = False, requested_by: str | None = None, retry_of: str | None = None
+    *,
+    rebuild: bool = False,
+    requested_by: str | None = None,
+    retry_of: str | None = None,
+    enrich_ocr: bool = False,
 ) -> dict[str, int]:
     _ = (requested_by, retry_of)
-    return index_build(Settings.from_env(), rebuild)
+    return index_build(Settings.from_env(), rebuild, enrich_ocr=enrich_ocr)
 
 
 def run_worker(settings: Settings, *, burst: bool = False) -> None:

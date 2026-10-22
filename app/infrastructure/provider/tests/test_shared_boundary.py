@@ -1,13 +1,16 @@
 import copy
 import shutil
+from io import BytesIO
 from pathlib import Path
 
+import msgspec
 import pytest
+from pypdf import PdfWriter
 
 from app.cube import state
 from app.infrastructure.provider import factory
 from app.infrastructure.provider.simulated import SimulatedProvider
-from app.library import service
+from app.library import enrichment, service
 from app.library.handlers import CitationCheck, LibrarySearch, OriginalRef
 from app.library.index import build
 from app.tests.support.library import library_context
@@ -47,9 +50,12 @@ class MemoryProvider:
         self.calls.append("item")
         return copy.deepcopy(self.records[item])
 
-    def read_content(self, item: str, version: int) -> bytes:
+    def read_content(self, item: str, version: int, *, max_bytes: int | None = None) -> bytes:
         self.calls.append("content")
-        return self.originals[item, version]
+        content = self.originals[item, version]
+        if max_bytes is not None and len(content) > max_bytes:
+            raise ValueError("Source exceeds configured byte limit.")
+        return content
 
     def path(self, relative: str) -> Path:
         raise ValueError("source_is_read_only")
@@ -99,6 +105,36 @@ def test_shared_provider_index_original_citation_and_cube_sources(settings, tmp_
         assert SimulatedProvider(tmp_path).items()[handle.item]["deleted_at"] is None
         assert not (tmp_path / ".provider" / "versions").exists()
         assert all(not (tmp_path / record["path"]).exists() for record in provider.records.values())
+
+
+def test_shared_provider_supports_bounded_ocr(settings, tmp_path, monkeypatch):
+    with library_context(settings, tmp_path) as library:
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        output = BytesIO()
+        writer.write(output)
+        source = SimulatedProvider(tmp_path)
+        source.write_content("reference/generated-ocr.pdf", output.getvalue())
+        record = next(
+            row for row in source.items().values() if row["path"].endswith("generated-ocr.pdf")
+        )
+        monkeypatch.setattr(
+            enrichment, "enqueue_version_jobs", lambda settings, versions: len(versions)
+        )
+        build(library["settings"], enrich_ocr=True)
+        provider = install(monkeypatch, tmp_path)
+
+        class Client:
+            def extract(self, *, content, media_type):
+                assert content == output.getvalue()
+                assert media_type == "application/pdf"
+                return enrichment.OcrExtraction("generated-ocr", "Generated OCR text.", 1)
+
+        enrichment.ocr_version(library["settings"], record["item"], 1, client=Client())
+        assert "content" in provider.calls
+        limited = msgspec.structs.replace(library["settings"], ocr_max_bytes=8)
+        with pytest.raises(enrichment.OcrPermanentError, match="byte limit"):
+            enrichment.ocr_version(limited, record["item"], 1, client=Client())
 
 
 def test_provider_failure_never_falls_back_to_existing_original(settings, tmp_path, monkeypatch):

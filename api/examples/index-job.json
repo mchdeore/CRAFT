@@ -2,5 +2,6 @@
   "jobId": "generated-index-job",
   "status": "queued",
   "queue": "craft-jobs",
-  "rebuild": false
+  "rebuild": false,
+  "enrichOcr": false
 }

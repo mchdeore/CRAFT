@@ -8,10 +8,10 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, Engine, inspect, text
+from sqlalchemy import Connection, Engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.infrastructure.database.metadata import metadata
+from app.infrastructure.database.metadata import doc_versions, metadata, provider_items
 from app.infrastructure.paths import ROOT
 
 
@@ -45,6 +45,58 @@ def test_upgrade_on_empty_database(isolated_migrations: tuple[Config, Connection
     assert_models(connection)
 
 
+@pytest.mark.parametrize("legacy_revision", ["0016", "0017"])
+def test_upgrade_preserves_legacy_ocr_revision(
+    isolated_migrations: tuple[Config, Connection],
+    legacy_revision: str,
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0015")
+    command.upgrade(config, "0016")
+    connection.execute(
+        text("alter table conversations drop constraint ck_conversations_group_name")
+    )
+    connection.execute(text("alter table conversations drop column group_name"))
+    connection.execute(
+        text(
+            "alter table doc_versions add column ocr_text text, add column ocr_model text, "
+            "add column ocr_updated_at timestamptz"
+        )
+    )
+    item = "itm_000000000017"
+    connection.execute(
+        provider_items.insert().values(
+            item=item,
+            path="generated/legacy.pdf",
+            title="Generated migration document",
+            simulated=True,
+            classification="unclassified",
+        )
+    )
+    connection.execute(
+        doc_versions.insert().values(
+            item=item,
+            version=1,
+            sha256=b"\x01" * 32,
+            media_type="application/pdf",
+            summary="Generated legacy summary",
+            summary_kind="extract",
+            ocr_text="Generated existing OCR",
+            ocr_model="generated-model",
+        )
+    )
+    command.stamp(config, legacy_revision)
+    command.upgrade(config, "head")
+    assert connection.execute(
+        select(doc_versions.c.ocr_text, doc_versions.c.ocr_model).where(doc_versions.c.item == item)
+    ).one() == ("Generated existing OCR", "generated-model")
+    assert "ck_conversations_group_name" in {
+        constraint["name"]
+        for constraint in inspect(connection).get_check_constraints("conversations")
+    }
+    assert_models(connection)
+
+
 def test_upgrade_recovers_legacy_conversation_grouping(
     isolated_migrations: tuple[Config, Connection],
 ) -> None:
@@ -65,7 +117,9 @@ def test_upgrade_recovers_legacy_conversation_grouping(
     }
     assert_models(connection)
     command.downgrade(config, "0016")
-    assert_models(connection)
+    assert "group_name" in {
+        column["name"] for column in inspect(connection).get_columns("conversations")
+    }
 
 
 def test_accounts_call_log_migration_roundtrip(

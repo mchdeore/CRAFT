@@ -75,7 +75,7 @@ The command line wraps them: `craft provider scan`, `craft provider put <path> <
 | One vector per chunk, document version and facet text | Semantic search | A vector without its model and recipe |
 | Block differences between versions | What changed | A full copy of each version |
 
-One converter turns each allowed format into chunks. A format not listed is refused with a reason. A PDF without a text layer is refused with the reason `no text layer`.
+One converter turns each allowed format into chunks. A format not listed is refused with a reason. Without OCR opt-in, a PDF without a text layer is refused with the reason `no text layer`. With `--enrich-ocr`, a scanned PDF or image without convertible text can instead have an OCR-only version record, with no chunks or embeddings (section 8.8).
 
 | Format | One chunk is | Locator |
 |---|---|---|
@@ -90,7 +90,7 @@ Tables use pipe-delimited rows with repeated headers. Cell line breaks become sp
 
 Each chunk keeps three text fields: `text` (the words exactly as in the source), `heading_path` (the headings above it, such as `2 Power > 2.3 Margins`, or the slide title, or the sheet name) and `locator`.
 
-Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. The summary says what the document is and which mission, subsystem, review or decision it concerns, and gives its key requirements, findings, figures with units and open issues. Indexing summarizes and embeds up to eight documents at once and writes them in source order.
+Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. The summary says what the document is and which mission, subsystem, review or decision it concerns, and gives its key requirements, findings, figures with units and open issues. Indexing summarizes and embeds up to eight documents at once and writes them in source order. Optional OCR enrichment is queued and stores plain extracted text on the document version; it does not change ranking or embedding inputs.
 
 A citation handle names everything needed to show and re-check a quote. It survives a rebuild of the library; chunk identifiers do not.
 
@@ -112,7 +112,7 @@ Thick blue arrows go into `vectors`: chunks, document versions and facet texts a
 | Record | Tags | Embeddings | What is embedded |
 |---|---|---|---|
 | Chunk | Mission, silo, stage, simulated, from its document | 1 | `chunk-v1`: title, heading path and text |
-| Document version | Mission, silo, stage from the path; simulated and classification from the provider | 1 | `doc-v1`: title and summary |
+| Document version | Mission, silo, stage from the path; simulated and classification from the provider | 1 | `doc-v1`: title and summary (stored OCR text is not embedded) |
 | Facet text | Mission and facet | 1 | `facet-v1`: the facet text |
 | Mission | Simulated; current stage | None; its facet texts carry its vectors | |
 | Cube value | Mission, silo, stage | None; found by filters and by the chunk it cites | |
@@ -177,10 +177,15 @@ create table facet_texts (id, mission_key text not null references missions,
 4. For each move: update the item's path and tags. For each delete: mark the item deleted.
 5. Rebuild the facet texts and facet vectors of every mission whose documents changed.
 6. Store the new cursor.
+7. If `--enrich-ocr` is set, enqueue OCR for each active item's current PDF or image version only when it has no converted chunks and no stored OCR. Text-native and historical versions are not automatically submitted. Workers write `ocr_text`, `ocr_model` and `ocr_updated_at` on `doc_versions`.
 
 Block matching preserves repeated text. Equal hashes at the same position are unchanged; remaining equal hashes pair in ascending position order and are moved. Remaining pairs at the same position are changed; unmatched blocks are added or removed. Differences are stored with the new version in the same transaction.
 
-Running `craft index` twice in a row adds nothing. `craft index --rebuild` empties the library tables and indexes every version of every item again; cube values and their citations are untouched.
+Running `craft index` twice in a row adds nothing. `craft index --rebuild` prepares converted text and model results before atomically replacing derived chunks, vectors and differences. Document-version identifiers and OCR for matching source hashes survive; failed preparation or replacement leaves the existing search index intact. Existing facet texts and vectors survive later OCR enqueue or facet-model failures, and are replaced only after facet preparation succeeds. The ingestion cursor advances only after those steps complete, allowing a later run to recover. Cube values and their citations are untouched.
+
+`craft index --enrich-ocr` recovers eligible current versions after an enqueue outage. A scanned PDF or image without convertible text can have an OCR-only version record, with no chunks or embeddings. OCR stays outside retrieval ranking and embeddings. Explicit version requests can enrich historical PDF or image versions. Enqueue and retry atomically share one active OCR attempt per version, including forced attempts. Persisted text prevents normal re-enqueue even after job records expire.
+
+OCR reads at most `CRAFT_OCR_MAX_BYTES` plus one byte before rejecting an oversized source; the default limit is 10 MiB. PDFs use the provider's document payload and images its image payload. Permanent source/provider rejections block automatic retry while their policy is retained. Transient failures use an exponential cooldown starting at `CRAFT_OCR_RETRY_SECONDS` (one hour by default), capped at one day, and stop after `CRAFT_OCR_ATTEMPT_LIMIT` automatic attempts (three by default). Terminal jobs, version claims, and retry policies expire after seven days; active claims do not expire. After terminal policy expiry, a later indexing request may start a new attempt budget. Persisted OCR text still prevents ordinary re-enqueue. A lost worker or missing persisted result also observes a cooldown; an administrator can request `POST /api/library/documents/{item}/versions/{version}/ocr` to recover a readable version even after job expiry or policy corruption. Explicit recovery may override retry limits but never source provenance, size limits, or active-job deduplication. Inference runs outside database transactions; final OCR persistence locks the active provider row and requires the indexed version hash to still match the captured source.
 
 | Change in the provider | Library | Cube |
 |---|---|---|

@@ -26,7 +26,7 @@ Backend refusal, failed startup, unsupported limits and incomplete cleanup retur
 
 Library indexing can run out-of-band through a Redis-compatible queue. Queue control and health operations require the administrator-only `library.manage` permission:
 
-- `POST /api/library/index/jobs` to enqueue (`rebuild` optional)
+- `POST /api/library/index/jobs` to enqueue (`rebuild` and `enrich_ocr` optional)
 - `GET /api/library/index/jobs/{jobId}` for status and result
 - `GET /api/library/index/jobs` for job discovery (`status`, `offset` up to 100000, `limit` 1-100)
 - `POST /api/library/index/jobs/{jobId}/retry` to queue another attempt
@@ -40,5 +40,7 @@ Job pages scan at most `limit + 1` raw queue/registry entries. Missing or foreig
 Keep queue storage on a trusted internal network with no public listener or untrusted writers. RQ uses pickle serialization, so access to write queue data is equivalent to code execution in the owner-capable worker.
 
 Start the queue and worker with `docker compose --profile worker up --build --wait`. The worker alone receives `CRAFT_OWNER_DB_PASSWORD`. Source files remain mounted read-only; only the provider's `.provider` metadata and immutable version snapshots are writable. Before starting the worker, create that metadata directory and give container UID 10001 write access to it; preserve any existing metadata and snapshots. The health endpoint is the local operator surface; a separate dashboard is not required.
+
+Job status includes a `kind` of `index` or `ocr`. OCR jobs expose their source `item`, `version`, and `force` flag, with extraction counts in their result. Retry preserves the job type and arguments. Normal OCR work skips persisted text; `force` requests replacement, not a second concurrent attempt. Enqueue and retry share an atomic per-version active-job claim, so retrying an old failure returns an already active attempt rather than duplicating inference. Terminal jobs, claims, and retry policies expire after seven days; active claims remain persistent. Policy expiry allows a later indexing request to start a new attempt budget. Administrators can recover a readable historical or current version with `POST /api/library/documents/{item}/versions/{version}/ocr`, even after job expiry or policy corruption; source provenance and byte limits still apply. Status inspection fails closed with 503 if one job has more than 32 execution records. Redis outages also return 503, not a missing-job response.
 
 Related interfaces: [components](components.md), [runtime](runtime.md), [Python workspace](python.md) and [code layout](../spec/06-code-layout.md).

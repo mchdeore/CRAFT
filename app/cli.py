@@ -16,6 +16,7 @@ def main(argv: list[str] | None = None) -> None:
     seed.add_argument("--seed", type=int, default=1)
     index = commands.add_parser("index")
     index.add_argument("--rebuild", action="store_true")
+    index.add_argument("--enrich-ocr", action="store_true")
     worker = commands.add_parser("worker")
     worker.add_argument("--burst", action="store_true")
     call = commands.add_parser("call")
@@ -83,7 +84,7 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command == "index":
             from app.library.handlers import index_provider
 
-            print(json.dumps(index_provider(settings, args.rebuild)))
+            print(json.dumps(index_provider(settings, args.rebuild, enrich_ocr=args.enrich_ocr)))
         elif args.command == "worker":
             from app.library.queue import run_worker
 

@@ -91,6 +91,9 @@ doc_versions = Table(
     Column("media_type", Text, nullable=False),
     Column("summary", Text, nullable=False),
     Column("summary_kind", Text, nullable=False),
+    Column("ocr_text", Text),
+    Column("ocr_model", Text),
+    Column("ocr_updated_at", DateTime(timezone=True)),
     Column(
         "summary_tsv",
         TSVECTOR,

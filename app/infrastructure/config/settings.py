@@ -30,6 +30,11 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     model_main: str = "gpt-5.2"
     model_check: str = "gpt-5.2"
     model_embedding: str = "text-embedding-3-large"
+    model_ocr: str = "mistral-ocr-4-0"
+    index_max_bytes: Annotated[int, msgspec.Meta(gt=0, le=100 * 1024 * 1024)] = 25 * 1024 * 1024
+    ocr_max_bytes: Annotated[int, msgspec.Meta(gt=0, le=50 * 1024 * 1024)] = 10 * 1024 * 1024
+    ocr_attempt_limit: Annotated[int, msgspec.Meta(ge=1, le=10)] = 3
+    ocr_retry_seconds: Annotated[int, msgspec.Meta(ge=1, le=86400)] = 3600
     model_endpoint: str = ""
     model_key: str = ""
     model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=16000)] = 4000
@@ -139,7 +144,7 @@ def validate_models(settings: Settings, *, access: bool = True) -> None:
     def fail(field: str):
         raise SystemExit(f"bad setting: {field}: invalid configuration")
 
-    for field in ["model_main", "model_check", "model_embedding"]:
+    for field in ["model_main", "model_check", "model_embedding", "model_ocr"]:
         value = getattr(settings, field)
         if not isinstance(value, str) or not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}", value

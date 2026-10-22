@@ -143,3 +143,34 @@ def test_queue_url_validation_has_safe_diagnostics(value: str) -> None:
     diagnostic = str(stopped.value)
     assert "queue_url" in diagnostic
     assert value not in diagnostic and SECRET not in diagnostic
+
+
+def test_ocr_policy_settings_from_environment() -> None:
+    configured = Settings.from_env(
+        {
+            **VALID,
+            "CRAFT_OCR_MAX_BYTES": "2048",
+            "CRAFT_OCR_ATTEMPT_LIMIT": "4",
+            "CRAFT_OCR_RETRY_SECONDS": "60",
+        }
+    )
+    assert (
+        configured.ocr_max_bytes,
+        configured.ocr_attempt_limit,
+        configured.ocr_retry_seconds,
+    ) == (2048, 4, 60)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("OCR_MAX_BYTES", "0"),
+        ("OCR_MAX_BYTES", "52428801"),
+        ("OCR_ATTEMPT_LIMIT", "11"),
+        ("OCR_RETRY_SECONDS", "0"),
+    ],
+)
+def test_ocr_policy_settings_reject_invalid_values(field: str, value: str) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        Settings.from_env({**VALID, f"CRAFT_{field}": value})
+    assert field.lower() in str(stopped.value)

@@ -26,6 +26,7 @@ from app.library.handlers import (
     IndexJobPageRequest,
     IndexJobRequest,
     IndexQueueHealth,
+    OcrJobRequest,
     QueueWorker,
 )
 from app.skills.handlers import (
@@ -52,6 +53,15 @@ def test_session_contract() -> None:
     assert set(msgspec.to_builtins(error)) == {"code", "message", "requestId"}
     declarations = Path("api/routes.ts").read_text()
     assert "POST /api/session" in declarations and "DELETE /api/session" in declarations
+
+
+def test_ocr_request_and_job_contract() -> None:
+    request = msgspec.convert({"item": "itm_abcdef123456", "version": 1}, OcrJobRequest)
+    assert request.version == 1
+    example = json.loads(Path("api/examples/ocr-job.json").read_text())
+    job = msgspec.convert(example, IndexJob)
+    assert job.kind == "ocr" and job.force and not job.enrich_ocr
+    assert msgspec.to_builtins(IndexJobRequest(enrich_ocr=True))["enrichOcr"] is True
 
 
 def typescript_schema(name: str) -> dict:
@@ -102,6 +112,7 @@ def test_python_shapes_match_compiled_typescript() -> None:
         DocumentCatalog,
         IndexJob,
         IndexJobRequest,
+        OcrJobRequest,
         IndexJobPageRequest,
         IndexJobPage,
         QueueWorker,

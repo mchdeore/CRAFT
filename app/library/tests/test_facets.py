@@ -8,7 +8,7 @@ from app.cube.tests.test_similarity import pair as pair
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
-from app.library import facets
+from app.library import facets, storage
 from app.library.handlers import index_provider
 from app.tests.support.cube import cube_source as cube_source
 
@@ -76,6 +76,19 @@ def test_facet_vectors(pair):
     assert len(vectors) == len(rows) == 2
     assert all(row["recipe"] == "facet-v1" for row in vectors)
     assert len({row["owner_id"] for row in vectors}) == len(rows)
+
+
+def test_clear_index_removes_facet_vectors(pair):
+    identifiers = [row["id"] for row in records(pair)]
+    assert identifiers
+    with pair["owner"].begin() as connection:
+        storage.clear_index(connection, list(pair["provider"].items()))
+        assert not connection.execute(
+            select(m.facet_texts.c.id).where(m.facet_texts.c.id.in_(identifiers))
+        ).all()
+        assert not connection.execute(
+            select(m.vectors.c.id).where(m.vectors.c.owner_id.in_(identifiers))
+        ).all()
 
 
 def test_rebuild_on_change(pair):

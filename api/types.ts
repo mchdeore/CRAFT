@@ -30,9 +30,10 @@ export interface DocumentList { limit?: number }
 export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
 export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
 export type JobState = "queued" | "started" | "deferred" | "scheduled" | "finished" | "failed" | "stopped" | "canceled" | "unknown";
-export interface IndexJobRequest { rebuild?: boolean }
+export interface IndexJobRequest { rebuild?: boolean; enrichOcr?: boolean }
+export interface OcrJobRequest { item: string; version: number }
 export interface IndexJobPageRequest { status?: Exclude<JobState, "unknown">; offset?: number; limit?: number }
-export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, number> | null; error?: string | null }
+export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; enrichOcr: boolean; kind?: "index" | "ocr"; item?: string | null; version?: number | null; force?: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, string | number> | null; error?: string | null }
 export interface IndexJobPage { jobs: IndexJob[]; nextOffset: number | null }
 export interface QueueWorker { name: string; state: string; queues: string[]; successfulJobs: number; failedJobs: number; lastHeartbeat?: string | null }
 export interface IndexQueueHealth { queue: string; queued: number; started: number; deferred: number; scheduled: number; failed: number; finished: number; canceled: number; workers: QueueWorker[] }

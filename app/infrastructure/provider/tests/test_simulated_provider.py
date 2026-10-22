@@ -1,5 +1,10 @@
+import hashlib
+from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
+from app.infrastructure.provider import simulated
 from app.infrastructure.provider.simulated import SimulatedProvider
 
 
@@ -15,6 +20,49 @@ def test_scan_assigns_items_and_versions(tmp_path: Path) -> None:
     provider.scan()
     assert provider.get_item(item)["versions"][-1]["version"] == 2
     assert provider.read_content(item, 1) == b"a"
+
+
+def test_content_read_limit(tmp_path: Path) -> None:
+    provider = SimulatedProvider(tmp_path)
+    provider.write_content("generated.md", b"Generated")
+    item = next(iter(provider.items()))
+    assert provider.read_content(item, 1, max_bytes=9) == b"Generated"
+    with pytest.raises(ValueError, match="byte limit"):
+        provider.read_content(item, 1, max_bytes=8)
+
+
+def test_unchanged_scan_does_not_stage_source(tmp_path, monkeypatch):
+    provider = SimulatedProvider(tmp_path)
+    provider.write_content("generated.md", b"Generated source")
+
+    def unexpected(*args):
+        raise AssertionError("An unchanged source must not require temporary disk space")
+
+    monkeypatch.setattr(simulated, "captured_source", unexpected)
+    assert provider.scan() == []
+
+
+def test_snapshot_hash_matches_captured_bytes_after_source_change(tmp_path, monkeypatch):
+    provider = SimulatedProvider(tmp_path)
+    provider.write_content("generated.md", b"First source")
+    source = tmp_path / "generated.md"
+    source.write_bytes(b"Changed before capture")
+    original = simulated.captured_source
+
+    @contextmanager
+    def changed(file, directory):
+        file.write_bytes(b"Changed during capture setup")
+        with original(file, directory) as captured:
+            yield captured
+
+    monkeypatch.setattr(simulated, "captured_source", changed)
+    provider.scan()
+    record = next(iter(provider.items().values()))
+    version = record["versions"][-1]
+    content = provider.read_content(record["item"], version["version"])
+    assert content == b"Changed during capture setup"
+    assert version["sha256"] == hashlib.sha256(content).hexdigest()
+    assert not list(provider.meta.glob(".capture-*"))
 
 
 def test_move_and_rename_keep_item(tmp_path: Path) -> None:
