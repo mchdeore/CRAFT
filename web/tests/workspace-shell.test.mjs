@@ -94,6 +94,88 @@ test("authenticated app routes two owners and leaves missing or malformed mappin
   }
 });
 
+test("authenticated app creates a saved skill and tries its saved revision without losing the editor", async () => {
+  const host = mountedHost();
+  const originalFetch = globalThis.fetch;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(host.container);
+  const appURL = `${new URL("../src/App.tsx", import.meta.url).href}?saved-skills-integration`;
+  const threadURL = new URL("../src/components/agent-thread.tsx", import.meta.url).href;
+  const mockedThreadURL = `${threadURL}?saved-skills-integration`;
+  let conversations = 0;
+  let saved;
+  let failCreation = false;
+  const json = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === "/api/me") return json(ownerA);
+    if (url === "/api/conversations" && options.method === "POST") {
+      if (failCreation) return new Response(null, { status: 503 });
+      conversations++;
+      return json({ id: `01997bd1-0000-7000-8000-${String(conversations).padStart(12, "0")}`, title: "Generated chat", groupName: null, updatedAt: "2026-10-18T00:00:00Z", archived: false, pendingApprovals: 0 });
+    }
+    if (url.startsWith("/api/conversations?")) return json([]);
+    if (url === "/api/skills") return json({ items: [], nextCursor: null });
+    if (url === "/api/tools") return json([]);
+    if (url.startsWith("/api/skills/") && options.method === "PUT") {
+      const fields = JSON.parse(options.body);
+      saved = { id: url.split("/").at(-1), revision: 1, ...fields, unavailableTools: [], createdAt: "2026-10-18T00:00:00Z", updatedAt: "2026-10-18T00:00:00Z" };
+      return json(saved);
+    }
+    if (url.startsWith("/api/skills/") && url.endsWith("/versions?revision=1")) return json(saved);
+    throw new Error(`Unexpected generated request: ${url}`);
+  };
+  const hooks = registerHooks({ resolve(specifier, context, next) {
+    const resolved = next(specifier, context);
+    return context.parentURL === appURL && resolved.url === threadURL ? { ...resolved, url: mockedThreadURL } : resolved;
+  }, load(url, context, next) {
+    if (url === mockedThreadURL) return { format: "module", shortCircuit: true, source: 'import React from "react"; export function AgentThread({selectedSkill}) { return React.createElement("output", null, selectedSkill?.name ?? "No selected skill"); }' };
+    const loaded = next(url, context);
+    return url === appURL ? { ...loaded, source: `import.meta.env = {};\n${loaded.source}` } : loaded;
+  } });
+  const click = async label => {
+    const button = host.elements("button").find(element => element.textContent === label);
+    assert.ok(button, label);
+    await React.act(async () => button.dispatchEvent({ type: "click", button: 0, bubbles: true }));
+  };
+  const change = async (label, value) => {
+    const input = [...host.elements("input"), ...host.elements("textarea")].find(element => element.parentNode.textContent.startsWith(label));
+    assert.ok(input, label);
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+    await React.act(async () => input.dispatchEvent({ type: "input", bubbles: true }));
+  };
+  try {
+    const { default: App } = await import(appURL);
+    hooks.deregister();
+    await React.act(async () => root.render(React.createElement(App)));
+    await click("Workspace");
+    await click("Saved skills");
+    await click("New saved skill");
+    await change("Name", "Generated review skill");
+    await change("Instructions", "Review generated requirements.");
+    await React.act(async () => host.elements("form").at(-1).dispatchEvent({ type: "submit", bubbles: true }));
+    assert.equal(saved.name, "Generated review skill");
+    assert.equal(saved.instructions, "Review generated requirements.");
+    assert.match(host.container.textContent, /Saved revision 1/);
+    failCreation = true;
+    await click("Try skill");
+    assert.equal(conversations, 1);
+    assert.equal(visible(host.elements("form").at(-1)), true, "A failed try stays in the saved editor");
+    failCreation = false;
+    await click("Try skill");
+    assert.equal(conversations, 2);
+    const selection = host.elements("output").find(element => element.textContent === saved.name);
+    assert.ok(selection);
+    assert.equal(visible(selection), true);
+    await click("Workspace");
+    const name = host.elements("input").find(element => element.parentNode.textContent.startsWith("Name"));
+    assert.equal(name.value, saved.name);
+    assert.equal(visible(name), true, "Returning to Workspace retains the saved editor");
+  } finally {
+    hooks.deregister();
+    try { await React.act(async () => root.unmount()); } finally { globalThis.fetch = originalFetch; host.restore(); }
+  }
+});
+
 test("workspace accepts a separate loopback HTTP server root and opens standard JupyterLab on the CRAFT host", () => {
   assert.deepEqual(resolveURL("http://127.0.0.1:53522/"), { status: "configured", url: "http://127.0.0.1:53522/lab" });
   // The loopback host follows the CRAFT page so the Jupyter sign-in cookie reaches the file browser.
@@ -230,10 +312,13 @@ function mountedHost() {
     setAttributeNS(_namespace, name, value) { this.setAttribute(name, value); }
     removeAttributeNS(_namespace, name) { this.removeAttribute(name); }
     hasAttribute(name) { return this.attributes.has(name); }
+    get value() { return this._value ?? ""; }
+    set value(value) { this._value = String(value); }
+    get type() { return this.getAttribute("type") ?? "text"; }
     get options() { return this.childNodes.filter(node => node.tagName === "OPTION"); }
   }
   class HostDocument extends HostNode {
-    constructor() { super(9, null); this.ownerDocument = this; this.nodeName = '#document'; this.documentElement = new HostElement('html', this); this.head = new HostElement('head', this); this.body = new HostElement('body', this); this.appendChild(this.documentElement); this.documentElement.appendChild(this.head); this.documentElement.appendChild(this.body); this.activeElement = this.body; }
+    constructor() { super(9, null); this.ownerDocument = this; this.nodeName = '#document'; this.oninput = null; this.documentElement = new HostElement('html', this); this.head = new HostElement('head', this); this.body = new HostElement('body', this); this.appendChild(this.documentElement); this.documentElement.appendChild(this.head); this.documentElement.appendChild(this.body); this.activeElement = this.body; }
     createElement(name) { return new HostElement(name, this); }
     createElementNS(namespace, name) { return new HostElement(name, this, namespace); }
     createTextNode(value) { const node = new HostNode(3, this); node.nodeName = '#text'; node.nodeValue = String(value); return node; }

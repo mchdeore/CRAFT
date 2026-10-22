@@ -1,6 +1,7 @@
 import { ChatHistory } from "@/components/chat-history";
 import { AgentThread } from "@/components/agent-thread";
 import { PersonalSkillsWorkspace } from "@/components/personal-skills-workspace";
+import { SkillsWorkspace } from "@/components/skills-workspace";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { JupyterWorkspace } from "@/components/jupyter-workspace";
 import { StatusMessage } from "@/components/ui/status-message";
@@ -93,6 +94,11 @@ function AuthenticatedChat({ owner, generation, onAuthInvalid, onSignOut }: { ow
     <WorkspaceShell
       files={<JupyterWorkspace configuration={workspace} />}
       skills={<PersonalSkillsWorkspace configuration={workspace} onAuthInvalid={onAuthInvalid} />}
+      savedSkills={showChat => <SkillsWorkspace onAuthInvalid={onAuthInvalid} tryPending={pending} onTry={async skill => {
+        const started = await newChat(skill);
+        if (started) showChat();
+        return started;
+      }} />}
       account={<Account owner={owner} onSignOut={onSignOut} />}
       chats={<ChatHistory
         sessionID={sessionID}
