@@ -13,7 +13,7 @@ const App = (await import('../src/App.tsx')).default;
 const ownerA = { id: '11111111-1111-4111-8111-111111111111', username: 'generated-a', displayName: 'Generated A', roles: ['member'] };
 const ownerB = { id: '22222222-2222-4222-8222-222222222222', username: 'generated-b', displayName: 'Generated B', roles: ['member'] };
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const summary = { id, title: 'Generated conversation', updatedAt: '2026-10-17T00:00:00Z', archived: false, pendingApprovals: 0 };
+const summary = { id, title: 'Generated conversation', groupName: null, updatedAt: '2026-10-17T00:00:00Z', archived: false, pendingApprovals: 0 };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const tick = () => new Promise(r => setImmediate(r));

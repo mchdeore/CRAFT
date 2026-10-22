@@ -12,7 +12,7 @@ const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const selection = () => ({ id: C, revision: 2, name: "Engineering" });
-const summary = id => ({ id, title: "Generated chat", updatedAt: "2026-10-18T00:00:00Z", archived: false, pendingApprovals: 0 });
+const summary = id => ({ id, title: "Generated chat", groupName: null, updatedAt: "2026-10-18T00:00:00Z", archived: false, pendingApprovals: 0 });
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 async function conversation(fetcher, body) {

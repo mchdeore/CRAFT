@@ -45,6 +45,29 @@ def test_upgrade_on_empty_database(isolated_migrations: tuple[Config, Connection
     assert_models(connection)
 
 
+def test_upgrade_recovers_legacy_conversation_grouping(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0015")
+    command.upgrade(config, "0016")
+    connection.execute(
+        text("alter table conversations drop constraint ck_conversations_group_name")
+    )
+    connection.execute(text("alter table conversations drop column group_name"))
+    command.upgrade(config, "head")
+    assert "group_name" in {
+        column["name"] for column in inspect(connection).get_columns("conversations")
+    }
+    assert "ck_conversations_group_name" in {
+        constraint["name"]
+        for constraint in inspect(connection).get_check_constraints("conversations")
+    }
+    assert_models(connection)
+    command.downgrade(config, "0016")
+    assert_models(connection)
+
+
 def test_accounts_call_log_migration_roundtrip(
     isolated_migrations: tuple[Config, Connection],
 ) -> None:
