@@ -2,6 +2,7 @@
 # Local demo on real models and a freshly built workspace image.
 #   demo go    wipe the demo database and workspace, seed them, start everything, open Chrome
 #              (the workspace also gets app/seed/demo-finance-skill.md as a personal skill)
+#              (restores the saved seed and applies new migrations; no indexing model calls)
 #   demo go --reseed  index every document again with the model instead of restoring the saved seed
 #   demo stop  stop the backend, frontend, workspace and database
 # Accounts sign in with password 1 unless DEMO_PASSWORD is set. Generated database
@@ -68,12 +69,6 @@ stop() {
   fi
 }
 
-# The saved seed is reused until the seed code, migrations, embedding model or password change.
-seed_key() {
-  { (cd "$REPO" && find migrations app/seed seeds -type f -not -path '*/__pycache__/*' -not -name '*.md' \
-      | sort | xargs shasum)
-    echo "${CRAFT_MODEL_EMBEDDING:-}" "$DEMO_PASSWORD"; } | shasum -a 256 | cut -c1-16
-}
 
 wait_for() {
   for _ in $(seq 120); do curl -fs -o /dev/null "$@" && return; sleep 1; done
@@ -103,10 +98,16 @@ go() {
   docker build -q -f packages/user_workspace/Dockerfile -t "$IMAGE" packages/user_workspace >/dev/null
 
   compose up -d --wait db >/dev/null
-  if [ "${1:-}" != --reseed ] && [ -f "$SNAPSHOT/key" ] && [ "$(cat "$SNAPSHOT/key")" = "$(seed_key)" ]; then
+  # Only --reseed or a missing saved seed indexes with the model; code and migration changes do not.
+  if [ "${1:-}" != --reseed ] && [ -f "$SNAPSHOT/craft_dev.dump" ]; then
+    if [ -f "$SNAPSHOT/embedding" ] && [ "$(cat "$SNAPSHOT/embedding")" != "${CRAFT_MODEL_EMBEDDING:-}" ]; then
+      echo "The saved seed uses another embedding model; run demo go --reseed (indexes with the model)" >&2
+      exit 1
+    fi
     say "Restoring the saved seed (no model calls)"
     compose exec -T db pg_restore -U postgres -d craft_dev --exit-on-error < "$SNAPSHOT/craft_dev.dump"
     tar -xzf "$SNAPSHOT/provider.tgz" -C "$STATE"
+    uv run -q alembic upgrade head
   else
     say "Creating and seeding the database (indexes every document with the model)"
     uv run -q alembic upgrade head
@@ -121,7 +122,7 @@ go() {
     rm -rf "$SNAPSHOT"; mkdir -p "$SNAPSHOT"
     compose exec -T db pg_dump -U postgres -Fc craft_dev > "$SNAPSHOT/craft_dev.dump"
     tar -czf "$SNAPSHOT/provider.tgz" -C "$STATE" provider
-    seed_key > "$SNAPSHOT/key"
+    echo "${CRAFT_MODEL_EMBEDDING:-}" > "$SNAPSHOT/embedding"
   fi
 
   say "Starting the demo workspace"
