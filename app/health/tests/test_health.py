@@ -59,6 +59,7 @@ def test_health_ready_503_when_db_down(settings: Settings) -> None:
     assert response.status_code == 503 and response.json() == {"status": "unavailable"}
 
 
+@pytest.mark.slow
 def test_health_ready_503_within_3_s_when_db_hangs(settings: Settings, hung_port: int) -> None:
     with TestClient(app_on_port(settings, hung_port)) as client:
         started = time.perf_counter()

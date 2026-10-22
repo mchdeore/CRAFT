@@ -1,0 +1,4 @@
+title: CRAFT
+description: Cited answers from project documents and an engineering datacube
+theme: jekyll-theme-primer
+exclude: [images/*.mmd]

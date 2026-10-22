@@ -11,8 +11,11 @@ dist/
 build/
 *.egg-info/
 
-# Local configuration and runtime files
+# Local configuration, runtime files and assistant links (see .local/README.md)
 /.local/
+/AGENTS.md
+/CLAUDE.md
+.claude/
 .env
 .env.*
 !.env.example
@@ -26,9 +29,7 @@ instance/
 * 2
 * 2.*
 
-/var/
-
-/api/node_modules/
+/app/contract/node_modules/
 
 # Frontend dependencies and test output
 /web/node_modules/

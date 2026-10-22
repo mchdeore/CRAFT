@@ -92,6 +92,7 @@ def test_workspace_owner_content_and_state(chat, foreign_http, monkeypatch):
         )
 
 
+@pytest.mark.slow
 def test_workspace_limits_archive_and_labels(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
         assert chat["sign_in"](http).status_code == 200

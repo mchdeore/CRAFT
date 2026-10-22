@@ -8,7 +8,7 @@ services:
     ports: ["${CRAFT_DATABASE_PORT:-5432}:5432"]
     volumes:
       - db:/var/lib/postgresql                          # the PostgreSQL 18 image's path
-      - ./docker/initdb.sh:/docker-entrypoint-initdb.d/10-craft.sh:ro
+      - ./app/infrastructure/database/initdb.sh:/docker-entrypoint-initdb.d/10-craft.sh:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]  # TCP: not healthy during initdb
       interval: 2s
@@ -23,7 +23,7 @@ services:
       interval: 2s
       retries: 30
   app:
-    build: .
+    build: { context: ., dockerfile: app/Dockerfile }
     restart: unless-stopped
     environment: &app_environment                       # the app's own settings only
       CRAFT_APP_DB_PASSWORD: ${CRAFT_APP_DB_PASSWORD:?set it in .env}
@@ -51,7 +51,7 @@ services:
       CRAFT_WOLFRAM_APP_ID: ${CRAFT_WOLFRAM_APP_ID:-}
       CRAFT_MCP_URL: ${CRAFT_MCP_URL:-http://127.0.0.1:8000/mcp}
     volumes: &provider_mount
-      - ${CRAFT_PROVIDER_ROOT:-./var/provider}:/provider:ro
+      - ${CRAFT_PROVIDER_ROOT:-./.local/runtime/provider}:/provider:ro
     ports: ["8000:8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://localhost:8000/health/live', timeout=2)"]
@@ -64,7 +64,7 @@ services:
         condition: service_healthy
 
   worker:
-    build: .
+    build: { context: ., dockerfile: app/Dockerfile }
     restart: unless-stopped
     profiles: ["worker"]
     command: ["craft", "worker"]
@@ -72,8 +72,8 @@ services:
       <<: *app_environment
       CRAFT_OWNER_DB_PASSWORD: ${CRAFT_OWNER_DB_PASSWORD:?set it in .env}
     volumes:
-      - ${CRAFT_PROVIDER_ROOT:-./var/provider}:/provider:ro
-      - ${CRAFT_PROVIDER_ROOT:-./var/provider}/.provider:/provider/.provider
+      - ${CRAFT_PROVIDER_ROOT:-./.local/runtime/provider}:/provider:ro
+      - ${CRAFT_PROVIDER_ROOT:-./.local/runtime/provider}/.provider:/provider/.provider
     depends_on:
       db:
         condition: service_healthy
@@ -81,7 +81,7 @@ services:
         condition: service_healthy
 
   mcp:
-    build: .
+    build: { context: ., dockerfile: app/Dockerfile }
     profiles: ["mcp"]
     stdin_open: true
     network_mode: "service:app"

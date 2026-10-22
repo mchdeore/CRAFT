@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import msgspec
+import pytest
 from fastapi.testclient import TestClient
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -19,6 +20,7 @@ from app.library.index import build
 from app.seed.base import seed
 
 
+@pytest.mark.slow
 def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
     configured = msgspec.structs.replace(settings, provider_root=str(tmp_path))
     seed(configured)

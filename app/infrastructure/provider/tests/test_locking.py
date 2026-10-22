@@ -29,6 +29,7 @@ def test_provider_mutations_are_thread_safe_across_instances(tmp_path):
     _assert_records(tmp_path)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("start_method", ["spawn", "fork"])
 def test_provider_mutations_are_process_safe(tmp_path, start_method):
     with ProcessPoolExecutor(

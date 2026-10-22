@@ -36,7 +36,7 @@ def scripted() -> Iterator[None]:
 @pytest.fixture(scope="session", autouse=True)
 def migrated(settings: Settings) -> None:
     """Upgrade craft_test to head once per session (no revisions until S1)."""
-    config = Config(str(ROOT / "alembic.ini"))
+    config = Config(toml_file=str(ROOT / "pyproject.toml"))
     config.attributes["database_name"] = TEST_DATABASE
     command.upgrade(config, "head")
 

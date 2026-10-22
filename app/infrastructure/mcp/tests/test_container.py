@@ -20,8 +20,8 @@ from app.infrastructure.paths import ROOT
 
 @pytest.fixture
 def container_provider():
-    root = ROOT / "var"
-    root.mkdir(exist_ok=True)
+    root = ROOT / ".local/runtime"
+    root.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="mcp-test-provider-", dir=root) as directory:
         provider = Path(directory)
         provider.chmod(0o755)

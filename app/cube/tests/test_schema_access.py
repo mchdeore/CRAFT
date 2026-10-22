@@ -226,7 +226,7 @@ def test_list_missions_access(settings, tmp_path) -> None:
     python = root_schema(msgspec.json.schema(Mission))
     assert set(declared["properties"]) == set(python["properties"])
     assert set(declared["required"]) == set(python["required"])
-    example = json.load(open("api/examples/missions.json"))
+    example = json.load(open("app/contract/examples/missions.json"))
     for row in example:
         jsonschema.validate(row, schema)
 

@@ -17,7 +17,7 @@ READY_DEADLINE_S = 3
 
 
 def migration_head() -> str | None:
-    """The newest migration in migrations/versions (None until S1 adds the first)."""
+    """The newest migration in the migrations folder (None until S1 adds the first)."""
     return ScriptDirectory(str(MIGRATIONS)).get_current_head()
 
 

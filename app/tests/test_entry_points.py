@@ -25,4 +25,4 @@ def test_migrations_refuse_to_run_without_the_owner_password(
 ) -> None:
     monkeypatch.setenv("CRAFT_OWNER_DB_PASSWORD", "")
     with pytest.raises(SystemExit, match="CRAFT_OWNER_DB_PASSWORD"):
-        command.current(Config(str(ROOT / "alembic.ini")))
+        command.current(Config(toml_file=str(ROOT / "pyproject.toml")))

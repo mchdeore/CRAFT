@@ -27,7 +27,8 @@ dependencies = [
   "vl-convert-python==1.9.0.post1",
   "redis==6.4.0",
   "rq==2.6.0",
-  "craft-process-manager",
+  "supervisor==4.3.0",
+  "docker==7.2.0",
 ]
 
 [dependency-groups]
@@ -37,19 +38,14 @@ dev = [
     "pyright==1.1.414",
     "fpdf2==2.8.9",
     "fakeredis==2.32.1",
-    "craft-runtime",
     "craft-python-workspace",
 ]
 
-docs = ["mkdocs==1.6.1"]
-
 [tool.uv.workspace]
-members = ["packages/runtime", "packages/python_workspace", "packages/process_manager"]
+members = ["workspace/python"]
 
 [tool.uv.sources]
-craft-runtime = { workspace = true }
 craft-python-workspace = { workspace = true }
-craft-process-manager = { workspace = true }
 
 [project.scripts]
 craft = "app.cli:main"
@@ -65,7 +61,7 @@ module-root = ""
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = [".", "packages/runtime/src", "packages/python_workspace/src", "packages/process_manager/src"]
+src = [".", "workspace/python/src"]
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
@@ -73,13 +69,33 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
 pythonVersion = "3.12"
-include = ["app", "migrations", "packages"]
-extraPaths = ["packages/runtime/src", "packages/python_workspace/src", "packages/process_manager/src", "packages/user_workspace/src"]
+include = ["app", "workspace"]
+# These tests came from the old root tests/ folder, which Pyright never checked; typing them is separate work.
+exclude = [
+  "**/node_modules",
+  "**/__pycache__",
+  "**/.*",
+  "app/agent/tests/test_workspace_run_controller.py",
+  "app/agent/tests/test_workspace_session.py",
+  "app/infrastructure/mcp/tests/test_mcp_proxy.py",
+  "app/infrastructure/mcp/tests/test_mcp_retry.py",
+]
+extraPaths = ["workspace/python/src", "workspace/jupyter/src"]
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-testpaths = ["app", "tests", "packages"]
-pythonpath = ["packages/runtime/src", "packages/python_workspace/src", "packages/process_manager/src", "packages/runtime/tests", "packages/user_workspace/src"]
-addopts = "-q --import-mode=importlib"
-markers = ["live: requires configured external service credentials", "docker: requires the restricted Python workspace image and Docker daemon"]
+testpaths = ["app", "workspace"]
+pythonpath = ["workspace/python/src", "workspace/jupyter/src"]
+# A plain run is the quick set; scripts/check full adds the docker, live and slow tests.
+addopts = "-q --import-mode=importlib -m 'not docker and not live and not slow'"
+markers = [
+  "live: requires configured external service credentials",
+  "docker: requires the restricted Python workspace image and Docker daemon",
+  "slow: takes more than about a second; runs only in scripts/check full",
+]
+
+[tool.alembic]
+script_location = "%(here)s/app/infrastructure/database/migrations"
+file_template = "%%(rev)s_%%(slug)s"
+prepend_sys_path = ["."]

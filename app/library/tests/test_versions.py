@@ -88,6 +88,7 @@ def test_diff_stored_on_index(library):
     assert index_provider(library["settings"]) == {}
 
 
+@pytest.mark.slow
 def test_compare_any_pair(library):
     _, item = versions(library, 600)
     caller = library["callers"]["admin"]
@@ -166,6 +167,7 @@ def test_row_citation(library):
     assert check_citation(caller, CitationCheck(handle=malformed)).status == "changed"
 
 
+@pytest.mark.slow
 def test_ground_truth_versions(demo):
     import os
     import subprocess
@@ -251,6 +253,7 @@ def test_live_provider_move_permissions(library, monkeypatch):
         check_citation(library["callers"]["restricted"], CitationCheck(handle=handle))
 
 
+@pytest.mark.slow
 def test_http_and_contract(library):
     _, item = versions(library)
     handle = one_handle(library, item)
@@ -388,5 +391,6 @@ def test_examples_validate():
 
     for filename, shape in [("citation-status", "CitationStatus"), ("version-diff", "VersionDiff")]:
         jsonschema.validate(
-            json.loads(Path(f"api/examples/{filename}.json").read_text()), typescript_schema(shape)
+            json.loads(Path(f"app/contract/examples/{filename}.json").read_text()),
+            typescript_schema(shape),
         )

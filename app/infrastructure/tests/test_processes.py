@@ -3,12 +3,13 @@ from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 
 import anyio
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import Engine
 
 from app import close_on_exit
 from app.infrastructure.config.settings import Settings
-from craft_processes import ProcessSpec
+from app.processes import ProcessSpec
 
 
 class MCP:
@@ -17,6 +18,7 @@ class MCP:
         yield
 
 
+@pytest.mark.slow
 def test_production_lifespan_closes_owned_runtime_and_tool_children(tmp_path):
     engine = MagicMock(spec=Engine)
     app = FastAPI()

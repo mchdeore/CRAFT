@@ -70,6 +70,7 @@ def count_notes(context):
         ).scalar_one()
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("source_state", ["current", "newer", "withdrawn"])
 def test_approved_write_rechecks_frozen_source(context, tmp_path, source_state, monkeypatch):
     from app.infrastructure.errors import Conflict, NotFound

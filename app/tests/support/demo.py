@@ -42,7 +42,7 @@ def demo(tmp_path_factory, settings):
         configured = msgspec.structs.replace(settings, database_port=port, provider_root=str(one))
         sessions, engine = make_owner_sessions(configured)
         with engine.begin() as connection:
-            config = Config(str(ROOT / "alembic.ini"))
+            config = Config(toml_file=str(ROOT / "pyproject.toml"))
             config.attributes["connection"] = connection
             config.attributes["database_name"] = "craft_test"
             command.upgrade(config, "head")

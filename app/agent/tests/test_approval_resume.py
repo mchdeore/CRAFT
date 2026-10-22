@@ -74,6 +74,7 @@ def clear_run_approvals(context, identifier):
 @pytest.mark.parametrize(
     "approve, exhausted", [(True, None), (False, None), (True, "time"), (True, "calls")]
 )
+@pytest.mark.slow
 def test_http_paused_write_restores_decision_once_after_reload(
     context, monkeypatch, approve, exhausted
 ):

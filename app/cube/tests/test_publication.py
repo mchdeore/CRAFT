@@ -483,6 +483,7 @@ def test_http_cannot_bypass_requester_review(publication_source):
     assert not stored(source)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("approve", [True, False])
 def test_native_mcp_batch_resumes_after_application_restart(
     publication_source, monkeypatch, approve

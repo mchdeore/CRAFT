@@ -16,7 +16,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "craft_dev"
-    provider_root: str = "var/provider"
+    provider_root: str = ".local/runtime/provider"
     process_root: str = ""
     queue_url: str = "redis://localhost:6379/0"
     queue_name: Annotated[str, msgspec.Meta(min_length=1, max_length=64)] = "craft-jobs"

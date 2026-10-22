@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 
 import jsonschema
+import pytest
 from fastapi.testclient import TestClient
 
 from app.accounts import storage
@@ -11,6 +12,7 @@ from app.infrastructure import access
 from app.tests.test_contract import typescript_schema
 
 
+@pytest.mark.slow
 def test_me_returns_signed_in_account(account, owner_engine) -> None:
     assert account.client.get("/api/me").status_code == 401
     assert login(account).status_code == 200
@@ -52,4 +54,4 @@ def test_me_ignores_browser_identity(account) -> None:
     response = account.client.get("/api/me", headers={"X-User-Id": "another", "X-Roles": "admin"})
     assert response.json()["id"] == str(account.id)
     assert set(response.json()) == {"id", "username", "displayName", "roles"}
-    jsonschema.validate(json.load(open("api/examples/me.json")), typescript_schema("Me"))
+    jsonschema.validate(json.load(open("app/contract/examples/me.json")), typescript_schema("Me"))
