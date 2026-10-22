@@ -8,7 +8,7 @@ import { PersonalFileBrowser, PersonalFilePreview } from "./personal-file-browse
 export function JupyterWorkspace({ configuration }: { configuration: WorkspaceConfiguration }) {
   if (configuration.status !== "configured") return <section aria-label="Files and notebooks" className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
     <div className="max-w-md space-y-3">
-      <PageHeader title="Files" description="Documents you imported and files you created in your workspace." />
+      <PageHeader title="Files" description="Imported source copies and files you created in your workspace." />
       <StatusMessage kind="signin" detail="Your workspace is not connected. Chat is still available." />
     </div>
   </section>;
@@ -30,14 +30,14 @@ function ConnectedWorkspace({ configuration }: { configuration: WorkspaceConfigu
     setSelection({ path });
   };
   return <section aria-label="Files and notebooks" className="relative flex min-h-0 flex-1 flex-col">
-    <PageHeader title="Files" description="Documents you imported and files you created in your workspace." actions={<a href={configuration.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Open in JupyterLab<ExternalLink aria-hidden="true" className="size-4" /></a>} />
+    <PageHeader title="Files" description="Imported source copies and files you created in your workspace." actions={<a href={configuration.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Open in JupyterLab<ExternalLink aria-hidden="true" className="size-4" /></a>} />
     <div inert={!!selection} className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1">
         <PersonalFileBrowser configuration={configuration} onOpenFile={openCopy} />
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-6 sm:p-10">
           <div className="w-full max-w-lg space-y-5 rounded-xl border bg-muted/20 p-6 sm:p-8">
             <Notebook aria-hidden="true" className="size-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Use JupyterLab for notebooks and code-driven analysis, then bring results back to chat.</p>
+            <p className="text-sm text-muted-foreground">Preview source originals in chat, import an editable copy, then edit and save that copy in JupyterLab. Use notebooks for code-driven analysis, then bring results back to chat.</p>
             <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
               <li>Use @ files to discuss or edit specific workspace files in chat.</li>
               <li>Use / skills to run workspace Markdown skills from <code>/workspace/skills</code>.</li>

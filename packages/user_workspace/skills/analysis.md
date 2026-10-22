@@ -15,6 +15,14 @@ craft.ls("results"), craft.find("*.xlsx")
 
 Names are relative to USER_ROOT; the path chooses the folder.
 
+For common shaping and charting, use `craft.analysis`:
+
+```python
+totals = craft.analysis.totals(sales, by="region", value="amount")
+top = craft.analysis.table(totals, top=5)
+craft.analysis.chart(top, "region", "amount", kind="bar", save_as="charts/top-regions.png")
+```
+
 ## Libraries
 
 | Need | Library |

@@ -131,6 +131,7 @@ def test_package_exposes_no_generic_dispatcher():
     assert not hasattr(craft, "connect")
     assert not hasattr(craft.Craft, "call")
     assert "call" not in craft.__all__
+    assert "analysis" in craft.__all__
 
 
 @pytest.fixture
@@ -165,6 +166,97 @@ def test_files_read_and_save_by_extension(root):
         craft.read("../outside.csv")
     with pytest.raises(ValueError):
         craft.save(frame, "no-extension")
+
+
+def test_analysis_helpers_shape_tables_and_save_charts(root):
+    pytest.importorskip("matplotlib", reason="needs the analysis extra")
+    pytest.importorskip("pandas", reason="needs the analysis extra")
+    import matplotlib  # pyright: ignore[reportMissingImports]
+
+    matplotlib.use("Agg")
+    import craft
+    import pandas as pd
+
+    sales = pd.DataFrame(
+        {
+            "region": ["north", "south", "north", "west"],
+            "amount": [5, 8, 6, 2],
+            "quarter": ["Q1", "Q1", "Q2", "Q1"],
+        }
+    )
+    totals = craft.analysis.totals(sales, by="region", value="amount")
+    assert totals.to_dict("records")[0] == {"region": "north", "amount": 11}
+    top = craft.analysis.table(totals, rename={"amount": "total_amount"}, top=2)
+    assert list(top.columns) == ["region", "total_amount"]
+    saved = craft.analysis.chart(
+        top, "region", "total_amount", kind="bar", save_as="charts/top.png"
+    )
+    assert saved == "charts/top.png"
+    assert craft.path(saved).is_file()
+
+
+def test_docs_editable_copy_makes_safe_derivatives(root):
+    pytest.importorskip("pandas", reason="needs the analysis extra")
+    import craft
+    import pandas as pd
+
+    frame = pd.DataFrame({"region": ["east", "west"], "amount": [3, 4]})
+    craft.save(frame, "imports/budget.xlsx")
+    original = craft.path("imports/budget.xlsx").read_bytes()
+    editable = craft.docs.editable_copy("imports/budget.xlsx")
+    assert editable == "imports/budget-edit.xlsx"
+    assert craft.path(editable).read_bytes() == original
+
+    edited = craft.read(editable)
+    edited["amount"] = edited["amount"] * 2
+    craft.save(edited, editable)
+    assert list(craft.read("imports/budget.xlsx")["amount"]) == [3, 4]
+    assert list(craft.read(editable)["amount"]) == [6, 8]
+    assert craft.docs.editable_copy("imports/budget.xlsx") == "imports/budget-edit-2.xlsx"
+
+    craft.save(frame, "imports/sales.csv")
+    assert craft.docs.editable_copy("imports/sales.csv", save_as="working/sales-copy.csv") == (
+        "working/sales-copy.csv"
+    )
+    with pytest.raises(FileExistsError):
+        craft.docs.editable_copy("imports/sales.csv", save_as="working/sales-copy.csv")
+    with pytest.raises(ValueError):
+        craft.docs.editable_copy("imports/budget.xlsx", save_as="imports/budget.csv")
+    craft.save("plain text", "notes/readme.txt")
+    with pytest.raises(ValueError):
+        craft.docs.editable_copy("notes/readme.txt", save_as="notes/readme-edit.md")
+
+
+def test_editable_copy_skips_dangling_symlink(root, tmp_path):
+    import craft
+
+    craft.path("source.csv").write_bytes(b"name,value\nSynthetic,1\n")
+    outside = tmp_path / "outside.csv"
+    craft.path("source-edit.csv").symlink_to(outside)
+    assert craft.docs.editable_copy("source.csv") == "source-edit-2.csv"
+    assert not outside.exists()
+    with pytest.raises(ValueError, match="Symlinks"):
+        craft.docs.editable_copy("source.csv", save_as="source-edit.csv")
+
+
+def test_editable_copy_refuses_racing_destination(root, monkeypatch):
+    from pathlib import Path
+
+    import craft
+
+    craft.path("source.csv").write_bytes(b"original")
+    target = craft.path("copy.csv")
+    original_open = Path.open
+
+    def racing_open(path, mode="r", *args, **kwargs):
+        if path == target and mode == "xb":
+            target.write_bytes(b"other writer")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", racing_open)
+    with pytest.raises(FileExistsError):
+        craft.docs.editable_copy("source.csv", save_as="copy.csv")
+    assert target.read_bytes() == b"other writer"
 
 
 def test_word_and_slides_round_trip(root):

@@ -66,6 +66,27 @@ edits and builds Word, PowerPoint, PDF and Excel files. The image copies the
 starter skills in `skills/` into `USER_ROOT/skills` on first start and never
 replaces an existing file.
 
+`craft.analysis` adds quick helpers for repetitive notebook steps:
+
+```python
+import craft
+
+sales = craft.read("data/sales.xlsx")
+totals = craft.analysis.totals(sales, by="region", value="amount")
+top = craft.analysis.table(totals, top=5)
+craft.analysis.chart(top, "region", "amount", kind="bar", save_as="charts/top-regions.png")
+```
+
+For editable derivatives, use `craft.docs.editable_copy` first. It creates a new
+owned file and leaves the original bytes unchanged:
+
+```python
+working = craft.docs.editable_copy("imports/budget.xlsx")
+sheet = craft.read(working)
+sheet["forecast"] = sheet["cost"] * 1.05
+craft.save(sheet, working)
+```
+
 ## CRAFT access points
 
 The access points send HTTP requests to the same `/api` routes the browser uses,

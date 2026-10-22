@@ -17,7 +17,7 @@ during an agent run that has bound this kernel::
 Other network access and program launches are refused in the kernel.
 """
 
-from craft import docs
+from craft import analysis, docs
 from craft._root import USER_ROOT, owned_path
 from craft.access import (
     CraftError,
@@ -42,6 +42,7 @@ __all__ = [
     "Craft",
     "CraftError",
     "Result",
+    "analysis",
     "capabilities",
     "check_citation",
     "chunks",
