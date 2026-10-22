@@ -166,6 +166,7 @@ def test_skill_tools_are_registered_checked_reads():
     assert not registry["skills.read_skill"].tool
 
 
+@pytest.mark.slow
 def test_selected_revision_and_fresh_client_edit_execute_different_actual_tools(
     context, monkeypatch
 ):
@@ -217,6 +218,7 @@ def test_automatic_mcp_discovery_reads_and_records_exact_revision(context, monke
         assert overview["skills"] == ["Generated engineering workflow"]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("approve", [True, False])
 def test_pause_edit_fresh_app_resume_keeps_revision_and_exact_effect(context, monkeypatch, approve):
     clients = []
@@ -373,6 +375,7 @@ def test_native_completion_only_pins_checked_matching_success(context, result_ki
     assert provider.references == []
 
 
+@pytest.mark.slow
 def test_capability_overview_is_owned_bounded_and_complete_discovery_pages(context):
     from app.tools import service as tools_service
 
@@ -479,6 +482,7 @@ def test_oversized_recovery_ledger_is_rejected_before_storage_access(context, mo
         )
 
 
+@pytest.mark.slow
 def test_native_recovery_load_failure_finishes_run_without_effect(context, monkeypatch):
     from app.infrastructure.errors import Conflict
     from app.skills import native

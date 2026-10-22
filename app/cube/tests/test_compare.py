@@ -134,6 +134,7 @@ def test_evidence_current_access_refusal_has_no_quote(cube_source, change, index
     assert denied.value.status == 404
 
 
+@pytest.mark.slow
 def test_cube_contract():
     import json
     from pathlib import Path
@@ -151,7 +152,7 @@ def test_cube_contract():
         (Comparison, "comparison"),
         (ValueEvidence, "value-evidence"),
     ]:
-        data = json.loads(Path("api/examples/" + name + ".json").read_text())
+        data = json.loads(Path("app/contract/examples/" + name + ".json").read_text())
         compiled = typescript_schema(shape.__name__)
         declared = root_schema(compiled)
         python = root_schema(msgspec.json.schema(shape))

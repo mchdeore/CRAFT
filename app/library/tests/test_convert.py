@@ -37,6 +37,7 @@ def test_docx_headings_and_tables(tmp_path) -> None:
     assert "before the table" in blocks[0].text and "after the table" in blocks[2].text
 
 
+@pytest.mark.slow
 def test_pdf_pages(tmp_path) -> None:
     blocks = read(pdf_file(tmp_path / "simulated.pdf"))
     assert [block.locator for block in blocks] == [

@@ -4,6 +4,7 @@ import json
 from uuid import uuid4
 
 import msgspec
+import pytest
 from fastapi.testclient import TestClient
 
 from app import create_app
@@ -11,6 +12,7 @@ from app.agent.tests.test_chat_stream import collect, request
 from app.tests.test_contract import typescript_schema, validate_chat_events
 
 
+@pytest.mark.slow
 def test_conversations_persist_reload_messages_and_answers(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
         assert chat["sign_in"](http).status_code == 200
@@ -49,7 +51,7 @@ def test_conversations_persist_reload_messages_and_answers(chat):
                     "process.exit(MessageSchema.array().safeParse(JSON.parse(text)).success?0:1);"
                 ),
             ],
-            cwd="api",
+            cwd="app/contract",
             input=json.dumps(payload["messages"]),
             text=True,
             capture_output=True,

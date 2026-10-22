@@ -181,6 +181,7 @@ def test_catalog_checks_revoked_database_grants(catalog_source):
                 session.execute(m.mission_grants.insert(), grants)
 
 
+@pytest.mark.slow
 def test_catalog_bounds_scan_results_and_fetches_metadata_outside_uow(library, monkeypatch):
     provider = SimulatedProvider(library["root"])
     for index in range(205):

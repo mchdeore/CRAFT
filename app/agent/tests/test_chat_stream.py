@@ -41,7 +41,7 @@ def collect(caller, data):
 
 def valid_events(events):
     output = subprocess.run(
-        ["node", "api/validate-stream.mjs"],
+        ["node", "app/contract/validate-stream.mjs"],
         input=json.dumps(events),
         capture_output=True,
         text=True,
@@ -62,6 +62,7 @@ def row(chat, identifier):
         )
 
 
+@pytest.mark.slow
 def test_chat_stream_valid_events_in_order(chat):
     data = request(chat)
     events = collect(chat["caller"], data)

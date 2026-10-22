@@ -396,7 +396,7 @@ def load_cube(settings: Settings, truth: dict) -> None:
         with unit_of_work(sessions) as session:
             users = m.metadata.tables["users"]
             roles = m.metadata.tables["user_roles"]
-            for row in json.loads((ROOT / "seeds/base/users.json").read_text()):
+            for row in json.loads((ROOT / "app/seed/base/users.json").read_text()):
                 session.execute(
                     insert(users)
                     .values(username=row["username"], display_name=row["display_name"])

@@ -33,6 +33,7 @@ def test_same_seed_same_bytes(demo) -> None:
     assert unchanged
 
 
+@pytest.mark.slow
 def test_other_seed_differs(demo, tmp_path) -> None:
     generate(tmp_path, 2)
     first = file_hashes(demo["one"])

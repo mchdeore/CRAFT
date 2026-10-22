@@ -417,6 +417,7 @@ def malformed_linkages(native_pause):
     return cases
 
 
+@pytest.mark.slow
 def test_native_pause_recovery_corrupt_or_missing_linkage_is_hidden_and_read_only(
     context, native_pause, monkeypatch
 ):

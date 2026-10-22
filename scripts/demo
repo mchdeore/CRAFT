@@ -6,11 +6,11 @@
 #   demo go --reseed  index every document again with the model instead of restoring the saved seed
 #   demo stop  stop the backend, frontend, workspace and database
 # Accounts sign in with password 1 unless DEMO_PASSWORD is set. Generated database
-# passwords live in var/demo (ignored by git); nothing secret is printed.
+# passwords live in .local/runtime/demo (ignored by git); nothing secret is printed.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-STATE=$REPO/var/demo
+STATE=$REPO/.local/runtime/demo
 SNAPSHOT=$STATE/seed-snapshot
 DB_PORT=55470 API_PORT=18766 UI_PORT=5200 JUPYTER_PORT=18881 MCP_PORT=4040 BRIDGE_PORT=18790
 UI=http://localhost:$UI_PORT
@@ -95,7 +95,7 @@ go() {
   fi
 
   say "Building the workspace image"
-  docker build -q -f packages/user_workspace/Dockerfile -t "$IMAGE" packages/user_workspace >/dev/null
+  docker build -q -f workspace/jupyter/Dockerfile -t "$IMAGE" workspace/jupyter >/dev/null
 
   compose up -d --wait db >/dev/null
   # Only --reseed or a missing saved seed indexes with the model; code and migration changes do not.

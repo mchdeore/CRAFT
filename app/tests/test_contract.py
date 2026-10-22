@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import msgspec
+import pytest
 
 from app.accounts.handlers import (
     IssuedWorkspaceToken,
@@ -42,7 +43,7 @@ from app.tools.handlers import Capability, CapabilityCatalog
 
 
 def test_session_contract() -> None:
-    example = json.loads(Path("api/examples/session.json").read_text())
+    example = json.loads(Path("app/contract/examples/session.json").read_text())
     body = msgspec.convert(example, Me)
     assert set(msgspec.to_builtins(body)) == {"id", "username", "displayName", "roles"}
     assert set(msgspec.structs.fields(SignIn)[n].encode_name for n in [0, 1]) == {
@@ -51,28 +52,28 @@ def test_session_contract() -> None:
     }
     error = ApiErrorBody(code="not_signed_in", message="Not signed in.", request_id="synthetic")
     assert set(msgspec.to_builtins(error)) == {"code", "message", "requestId"}
-    declarations = Path("api/routes.ts").read_text()
+    declarations = Path("app/contract/routes.ts").read_text()
     assert "POST /api/session" in declarations and "DELETE /api/session" in declarations
 
 
 def test_ocr_request_and_job_contract() -> None:
     request = msgspec.convert({"item": "itm_abcdef123456", "version": 1}, OcrJobRequest)
     assert request.version == 1
-    example = json.loads(Path("api/examples/ocr-job.json").read_text())
+    example = json.loads(Path("app/contract/examples/ocr-job.json").read_text())
     job = msgspec.convert(example, IndexJob)
     assert job.kind == "ocr" and job.force and not job.enrich_ocr
     assert msgspec.to_builtins(IndexJobRequest(enrich_ocr=True))["enrichOcr"] is True
 
 
 def typescript_schema(name: str) -> dict:
-    executable = ROOT / "api/node_modules/.bin/ts-json-schema-generator"
+    executable = ROOT / "app/contract/node_modules/.bin/ts-json-schema-generator"
     if not executable.exists():
         subprocess.run(
             [
                 "npm",
                 "ci",
                 "--prefix",
-                str(ROOT / "api"),
+                str(ROOT / "app/contract"),
                 "--ignore-scripts",
                 "--no-audit",
                 "--no-fund",
@@ -82,7 +83,7 @@ def typescript_schema(name: str) -> dict:
             text=True,
         )
     output = subprocess.check_output(
-        [str(executable), "--path", str(ROOT / "api/types.ts"), "--type", name], text=True
+        [str(executable), "--path", str(ROOT / "app/contract/types.ts"), "--type", name], text=True
     )
     return json.loads(output)
 
@@ -94,6 +95,7 @@ def root_schema(schema: dict) -> dict:
     return schema[collection][key]
 
 
+@pytest.mark.slow
 def test_python_shapes_match_compiled_typescript() -> None:
     import jsonschema
 
@@ -140,7 +142,7 @@ def test_python_shapes_match_compiled_typescript() -> None:
             )
         if shape is Me:
             jsonschema.validate(
-                json.loads((ROOT / "api/examples/session.json").read_text()), compiled
+                json.loads((ROOT / "app/contract/examples/session.json").read_text()), compiled
             )
 
 
@@ -157,7 +159,8 @@ def test_route_keys_match_running_registry(settings) -> None:
     }
     declared = set(
         re.findall(
-            r'"((?:GET|POST|PUT|PATCH|DELETE) /[^" ]+)"', (ROOT / "api/routes.ts").read_text()
+            r'"((?:GET|POST|PUT|PATCH|DELETE) /[^" ]+)"',
+            (ROOT / "app/contract/routes.ts").read_text(),
         )
     )
     assert actual == declared
@@ -167,7 +170,7 @@ def validate_chat_events(events) -> bool:
     import jsonschema
 
     checked = subprocess.run(
-        ["node", str(ROOT / "api/validate-stream.mjs")],
+        ["node", str(ROOT / "app/contract/validate-stream.mjs")],
         input=json.dumps(events),
         text=True,
         capture_output=True,
@@ -186,7 +189,7 @@ def validate_chat_events(events) -> bool:
 def test_chat_stream_example_matches_browser_contract() -> None:
     events = [
         json.loads(line[6:])
-        for line in (ROOT / "api/examples/chat-answer.sse").read_text().splitlines()
+        for line in (ROOT / "app/contract/examples/chat-answer.sse").read_text().splitlines()
         if line.startswith("data: ")
     ]
     assert events and validate_chat_events(events)
@@ -209,7 +212,7 @@ def test_contract_routes_match_app(settings) -> None:
 
     from app import create_app
 
-    document = (ROOT / "docs/API-Contract.md").read_text()
+    document = (ROOT / "docs/api-contract.md").read_text()
     table = contract_section(document, "### 5.1 Built")
     rows = re.findall(r"^\| `((?:GET|POST|PUT|PATCH|DELETE)) ([^`]+)` \|", table, re.M)
     declared = {
@@ -237,7 +240,7 @@ def test_contract_tools_match_registry(settings) -> None:
 
     app = create_app(settings)
     try:
-        document = (ROOT / "docs/API-Contract.md").read_text()
+        document = (ROOT / "docs/api-contract.md").read_text()
         section = contract_section(document, "## 6. Agent tools")
         rows = re.findall(r"^\| `([a-z0-9_]+)` \|", section, re.M)
         expected = {op.tool_name for op in registry.values() if op.tool}
@@ -247,12 +250,13 @@ def test_contract_tools_match_registry(settings) -> None:
         app.state.engine.dispose()
 
 
+@pytest.mark.slow
 def test_contract_json_examples() -> None:
     import re
 
     import jsonschema
 
-    document = (ROOT / "docs/API-Contract.md").read_text()
+    document = (ROOT / "docs/api-contract.md").read_text()
     section = contract_section(document, "## 15. Examples")
     rows = re.findall(
         r"^\| `([A-Z]+ /[^`]+)` \| `([A-Za-z]+(?:\[\])?)` \| `([^`]+)` \|", section, re.M
@@ -261,7 +265,7 @@ def test_contract_json_examples() -> None:
         route: shape
         for route, shape in re.findall(
             r'"([A-Z]+ /[^"]+)": [^\n]*?response: T\.([A-Za-z]+(?:\[\])?)',
-            (ROOT / "api/routes.ts").read_text(),
+            (ROOT / "app/contract/routes.ts").read_text(),
         )
     }
     assert {route: shape for route, shape, _ in rows} == expected
@@ -279,14 +283,14 @@ def test_contract_json_examples() -> None:
                 "definitions": schema["definitions"],
             }
         example = ROOT / path
-        assert example.parent == ROOT / "api/examples" and example.is_file()
+        assert example.parent == ROOT / "app/contract/examples" and example.is_file()
         assert jsonschema.Draft7Validator(schema).is_valid(json.loads(example.read_text()))
 
 
 def test_run_recovery_example_wire_shape() -> None:
     import jsonschema
 
-    example = json.loads((ROOT / "api/examples/run-recovery.json").read_text())
+    example = json.loads((ROOT / "app/contract/examples/run-recovery.json").read_text())
     parsed = msgspec.convert(example, RunRecovery)
     assert msgspec.to_builtins(parsed) == example
     assert parsed.status == "paused" and parsed.approval_status == "pending"

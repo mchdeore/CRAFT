@@ -18,9 +18,9 @@ from app.infrastructure.provider import get_provider
 
 def seed(settings: Settings) -> dict[str, int]:
     root = Path(settings.provider_root)
-    for source in (ROOT / "seeds/base/provider").rglob("*"):
+    for source in (ROOT / "app/seed/base/provider").rglob("*"):
         if source.is_file():
-            target = root / source.relative_to(ROOT / "seeds/base/provider")
+            target = root / source.relative_to(ROOT / "app/seed/base/provider")
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
@@ -49,7 +49,7 @@ def seed(settings: Settings) -> dict[str, int]:
                     .values(alias=f"sim-{number:02}", mission_key=key)
                     .on_conflict_do_nothing()
                 )
-            for row in json.loads((ROOT / "seeds/base/users.json").read_text()):
+            for row in json.loads((ROOT / "app/seed/base/users.json").read_text()):
                 session.execute(
                     insert(users)
                     .values(username=row["username"], display_name=row["display_name"])
@@ -61,7 +61,7 @@ def seed(settings: Settings) -> dict[str, int]:
                 session.execute(
                     insert(roles).values(user_id=user, role=row["role"]).on_conflict_do_nothing()
                 )
-            for row in json.loads((ROOT / "seeds/base/grants.json").read_text()):
+            for row in json.loads((ROOT / "app/seed/base/grants.json").read_text()):
                 user = session.execute(
                     select(users.c.id).where(users.c.username == row["username"])
                 ).scalar_one()
@@ -95,7 +95,7 @@ def set_demo_passwords(settings: Settings) -> bool:
     credentials = metadata.tables["local_credentials"]
     try:
         with unit_of_work(sessions) as session:
-            for row in json.loads((ROOT / "seeds/base/users.json").read_text()):
+            for row in json.loads((ROOT / "app/seed/base/users.json").read_text()):
                 user = session.execute(
                     select(users.c.id).where(users.c.username == row["username"])
                 ).scalar_one()

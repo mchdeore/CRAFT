@@ -266,6 +266,7 @@ def test_mean_counts_only_available_facets(pair):
     assert row.facet_scores == {"design": 1.0, "operations": 0.0}
 
 
+@pytest.mark.slow
 def test_http_and_contract(pair):
     import json
     from pathlib import Path
@@ -287,7 +288,7 @@ def test_http_and_contract(pair):
         ("similar-missions", SimilarPage),
         ("similarity-explanation", SimilarityExplanation),
     ]:
-        example = Path("api/examples/" + name + ".json").read_bytes()
+        example = Path("app/contract/examples/" + name + ".json").read_bytes()
         msgspec.json.decode(example, type=shape)
         assert valid(json.loads(example), typescript_schema(shape.__name__))
 

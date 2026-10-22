@@ -3,7 +3,7 @@
 The frontend uses React, TypeScript and Vite. Use Node.js 24 with npm. From a clean checkout, install both the shared API type dependencies and frontend dependencies:
 
 ```sh
-npm ci --prefix api --ignore-scripts --no-audit --no-fund
+npm ci --prefix app/contract --ignore-scripts --no-audit --no-fund
 npm ci --prefix web --no-audit --no-fund
 cd web
 ```

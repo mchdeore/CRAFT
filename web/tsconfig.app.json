@@ -25,7 +25,7 @@
     /* tailwindcss */
     "paths": {
       "@/*": ["./src/*"],
-      "craft-api/api/types": ["../api/types.ts"]
+      "craft-api/api/types": ["../app/contract/types.ts"]
     }
   },
   "include": ["src"]

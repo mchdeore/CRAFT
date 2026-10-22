@@ -38,6 +38,6 @@ def test_summary_contract():
         assert set(declared["required"]) == set(python["required"])
         if shape is SummaryResult:
             for name in ["summarize-selected", "summarize-uploaded"]:
-                data = json.loads(Path("api/examples/" + name + ".json").read_text())
+                data = json.loads(Path("app/contract/examples/" + name + ".json").read_text())
                 msgspec.convert(data, shape)
                 jsonschema.validate(data, compiled)

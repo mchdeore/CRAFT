@@ -118,6 +118,7 @@ def test_notes_never_logged(chat, capsys):
     assert safe and len(rows) == 2
 
 
+@pytest.mark.slow
 def test_mcp_reads_owned_notes_but_unapproved_writes_are_refused(chat):
     from app.notes.handlers import WriteNote, write_note
 

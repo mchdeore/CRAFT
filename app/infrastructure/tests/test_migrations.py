@@ -19,7 +19,7 @@ from app.infrastructure.paths import ROOT
 def isolated_migrations(owner_engine: Engine) -> Iterator[tuple[Config, Connection]]:
     with owner_engine.connect() as connection, connection.begin() as transaction:
         assert connection.execute(text("select current_database()")).scalar() == "craft_test"
-        config = Config(str(ROOT / "alembic.ini"))
+        config = Config(toml_file=str(ROOT / "pyproject.toml"))
         config.attributes["database_name"] = "craft_test"
         config.attributes["connection"] = connection
         yield config, connection

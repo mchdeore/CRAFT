@@ -487,6 +487,7 @@ def test_silo_grant_does_not_expose_hidden_elements(intake_source):
         call(source, handle, mission=source["mission"], silo="quality", valid_from="2026-01-01")
 
 
+@pytest.mark.slow
 def test_contract_and_response(intake_source):
     import jsonschema
 
@@ -545,6 +546,6 @@ def test_example_validates():
     from app.tests.test_contract import typescript_schema
 
     jsonschema.validate(
-        json.loads(Path("api/examples/candidates.json").read_text()),
+        json.loads(Path("app/contract/examples/candidates.json").read_text()),
         typescript_schema("Candidates"),
     )

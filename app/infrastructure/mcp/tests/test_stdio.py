@@ -7,6 +7,7 @@ import os
 import subprocess
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -130,6 +131,7 @@ def test_no_content_in_logs(app: FastAPI) -> None:
     assert all(marker not in str(cell) for cell in log_rows(app, "probe_read")[-1].values())
 
 
+@pytest.mark.slow
 def test_cli_unknown_account() -> None:
     result = subprocess.run(
         ["uv", "run", "craft", "mcp", "--as", "nobody"],
@@ -142,6 +144,7 @@ def test_cli_unknown_account() -> None:
     assert "unknown or disabled account" in result.stderr
 
 
+@pytest.mark.slow
 def test_cli_lists_real_registry(owner_engine: Engine) -> None:
     with owner_engine.begin() as connection:
         user = connection.execute(
