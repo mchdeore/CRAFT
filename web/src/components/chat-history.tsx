@@ -1,6 +1,7 @@
 import type { ConversationSummary } from "craft-api/api/types";
 import { ArchiveIcon, FolderIcon, PencilIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon } from "lucide-react";
 import { useState } from "react";
+import { confirmChatArchive } from "@/lib/chat-archive";
 
 interface ChatHistoryProps {
   sessionID: string;
@@ -101,16 +102,16 @@ export function ChatHistory({
             {chat.groupName && <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{chat.groupName}</span>}
             {chat.pendingApprovals > 0 && <span className="size-2 shrink-0 rounded-full bg-amber-500" aria-label="Waiting for approval" />}
           </button>
-          <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
             <button type="button" aria-label="Rename chat" title="Rename chat" className={iconButton} onClick={() => rename(chat)} disabled={pending}>
               <PencilIcon className="size-3.5" />
             </button>
             <button type="button" aria-label={chat.groupName ? "Edit group" : "Set group"} title={chat.groupName ? "Edit group" : "Set group"} className={iconButton} onClick={() => group(chat)} disabled={pending}>
               <FolderIcon className="size-3.5" />
             </button>
-            {current ? <button type="button" aria-label="Archive and reset" title="Archive and reset" className={iconButton} onClick={onReset} disabled={pending}>
+            {current ? <button type="button" aria-label="Archive and reset" title="Archive and reset" className={iconButton} onClick={() => confirmChatArchive(onReset)} disabled={pending}>
               <ArchiveIcon className="size-3.5" />
-            </button> : <button type="button" aria-label="Archive chat" title="Archive chat" className={iconButton} onClick={() => onArchiveChat(chat.id)} disabled={pending}>
+            </button> : <button type="button" aria-label="Archive chat" title="Archive chat" className={iconButton} onClick={() => confirmChatArchive(() => onArchiveChat(chat.id))} disabled={pending}>
               <ArchiveIcon className="size-3.5" />
             </button>}
           </div>
