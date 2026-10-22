@@ -96,6 +96,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/library/index/jobs/:jobId/retry` | — | `IndexJob` | administrator | — |
 | `POST /api/library/index/jobs/:jobId/cancel` | — | `IndexJob` | administrator | — |
 | `GET /api/library/index/queue` | — | `IndexQueueHealth` | administrator | — |
+| `POST /api/library/documents/:item/versions/:version/ocr` | — | `IndexJob` | administrator | — |
 | `GET /api/library/documents/:item` | —; query `{ version?: number }` | `LibraryDocument` | signed in; live resource access | `get_document` |
 | `GET /api/library/documents/:item/chunks` | —; query `{ version: number; fromBlock: number; toBlock: number }` | `ChunkPage` | signed in; live resource access | `read_chunks` |
 | `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | signed in; live resource access | `explore` |
@@ -331,9 +332,10 @@ export interface DocumentList { limit?: number }
 export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
 export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
 export type JobState = "queued" | "started" | "deferred" | "scheduled" | "finished" | "failed" | "stopped" | "canceled" | "unknown";
-export interface IndexJobRequest { rebuild?: boolean }
+export interface IndexJobRequest { rebuild?: boolean; enrichOcr?: boolean }
+export interface OcrJobRequest { item: string; version: number }
 export interface IndexJobPageRequest { status?: Exclude<JobState, "unknown">; offset?: number; limit?: number }
-export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, number> | null; error?: string | null }
+export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; enrichOcr: boolean; kind?: "index" | "ocr"; item?: string | null; version?: number | null; force?: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, string | number> | null; error?: string | null }
 export interface IndexJobPage { jobs: IndexJob[]; nextOffset: number | null }
 export interface QueueWorker { name: string; state: string; queues: string[]; successfulJobs: number; failedJobs: number; lastHeartbeat?: string | null }
 export interface IndexQueueHealth { queue: string; queued: number; started: number; deferred: number; scheduled: number; failed: number; finished: number; canceled: number; workers: QueueWorker[] }
@@ -501,6 +503,7 @@ export interface Routes {
   "POST /api/library/index/jobs/:jobId/retry": { response: T.IndexJob };
   "POST /api/library/index/jobs/:jobId/cancel": { response: T.IndexJob };
   "GET /api/library/index/queue": { response: T.IndexQueueHealth };
+  "POST /api/library/documents/:item/versions/:version/ocr": { response: T.IndexJob };
   "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
   "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
@@ -575,6 +578,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/library/index/jobs/:jobId/retry` | `IndexJob` | `api/examples/index-job.json` |
 | `POST /api/library/index/jobs/:jobId/cancel` | `IndexJob` | `api/examples/index-job.json` |
 | `GET /api/library/index/queue` | `IndexQueueHealth` | `api/examples/index-queue-health.json` |
+| `POST /api/library/documents/:item/versions/:version/ocr` | `IndexJob` | `api/examples/ocr-job.json` |
 | `GET /api/library/documents/:item` | `LibraryDocument` | `api/examples/library-document.json` |
 | `GET /api/library/documents/:item/chunks` | `ChunkPage` | `api/examples/chunks.json` |
 | `POST /api/library/explore` | `ChunkPage` | `api/examples/explore.json` |

@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from sqlalchemy import select, text
+from sqlalchemy import case, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from app.infrastructure.access import Caller
@@ -29,7 +29,7 @@ WORKERS = 8
 ATTEMPTS = 4
 
 
-def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
+def build(settings: Settings, rebuild: bool = False, *, enrich_ocr: bool = False) -> dict[str, int]:
     provider = get_provider(settings.provider_root)
     sessions, engine = make_owner_sessions(settings)
     caller = Caller(sessions=sessions, settings=settings)
@@ -52,12 +52,32 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
             )
         cursor = 0 if rebuild else cursor
         changed_items = set()
+        change_kinds: dict[str, set[str]] = {}
         while True:
             changes, new_cursor = provider.list_changes(cursor)
             if not changes:
                 break
             changed_items.update(change["item"] for change in changes)
+            for change in changes:
+                if (item := change.get("item")) and (kind := change.get("kind")):
+                    change_kinds.setdefault(item, set()).add(kind)
             cursor = new_cursor
+        new_items = {item for item, kinds in change_kinds.items() if "added" in kinds}
+        changed_existing = {
+            item
+            for item, kinds in change_kinds.items()
+            if "changed" in kinds and item not in new_items
+        }
+        moved_items = {item for item, kinds in change_kinds.items() if "moved" in kinds}
+        deleted_items = {item for item, kinds in change_kinds.items() if "deleted" in kinds}
+        for key, value in [
+            ("new_items", len(new_items)),
+            ("changed_items", len(changed_existing)),
+            ("moved_items", len(moved_items)),
+            ("deleted_items", len(deleted_items)),
+        ]:
+            if value:
+                counts[key] += value
         records = provider.items()
         missions = {item["mission_key"] for item in records.values() if item["mission_key"]}
         dirty = {records[item]["mission_key"] for item in changed_items if item in records}
@@ -120,17 +140,32 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 if present and not rebuild:
                     continue
                 try:
-                    blocks = convert(
-                        provider.read_content(item["item"], version["version"]),
-                        version.get("file_name", item["path"]),
+                    content = provider.read_content(
+                        item["item"], version["version"], max_bytes=settings.index_max_bytes
                     )
-                except (ValueError, UnicodeDecodeError):
-                    counts["unsupported"] += 1
+                except ValueError:
+                    counts["oversized"] += 1
                     continue
+                try:
+                    blocks = convert(content, version.get("file_name", item["path"]))
+                except (ValueError, UnicodeDecodeError):
+                    media_type = version.get("media_type", "")
+                    if (
+                        enrich_ocr
+                        and isinstance(media_type, str)
+                        and (media_type == "application/pdf" or media_type.startswith("image/"))
+                    ):
+                        # OCR-only versions have no searchable text or embeddings.
+                        blocks = []
+                    else:
+                        counts["unsupported"] += 1
+                        continue
                 pending.append((item, version, blocks))
 
         def represent(job):
             item, _, blocks = job
+            if not blocks:
+                return "", "extract", None, []
             attempt = 0
             while True:
                 try:
@@ -150,7 +185,7 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
 
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             represented = list(pool.map(represent, pending))
-        # Failed preparation must leave the previous searchable index intact.
+        # Replace derived rows only after conversion/model preparation succeeds.
         with unit_of_work(sessions) as session:
             if rebuild:
                 # Versions that failed to convert this time keep their previous search rows.
@@ -165,40 +200,44 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 pending, represented, strict=True
             ):
                 dirty.add(item["mission_key"])
-                document = session.execute(
-                    insert(m.doc_versions)
-                    .values(
-                        item=item["item"],
-                        version=version["version"],
-                        sha256=bytes.fromhex(version["sha256"]),
-                        media_type=version.get("media_type")
-                        or mimetypes.guess_type(item["path"])[0]
-                        or "text/plain",
-                        summary=summary,
-                        summary_kind=summary_kind,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=[m.doc_versions.c.item, m.doc_versions.c.version],
-                        set_={
-                            "sha256": bytes.fromhex(version["sha256"]),
-                            "media_type": version.get("media_type")
-                            or mimetypes.guess_type(item["path"])[0]
-                            or "text/plain",
-                            "summary": summary,
-                            "summary_kind": summary_kind,
-                        },
-                    )
-                    .returning(m.doc_versions.c.id)
-                ).scalar_one()
-                session.execute(
-                    m.vectors.insert().values(
-                        owner_kind="doc_version",
-                        owner_id=document,
-                        model=model_name(settings),
-                        recipe="doc-v1",
-                        embedding=doc_vector,
-                    )
+                statement = insert(m.doc_versions).values(
+                    item=item["item"],
+                    version=version["version"],
+                    sha256=bytes.fromhex(version["sha256"]),
+                    media_type=version.get("media_type")
+                    or mimetypes.guess_type(item["path"])[0]
+                    or "text/plain",
+                    summary=summary,
+                    summary_kind=summary_kind,
                 )
+                updates = {
+                    key: getattr(statement.excluded, key)
+                    for key in ("sha256", "media_type", "summary", "summary_kind")
+                }
+                for key in ("ocr_text", "ocr_model", "ocr_updated_at"):
+                    updates[key] = case(
+                        (
+                            m.doc_versions.c.sha256 == statement.excluded.sha256,
+                            getattr(m.doc_versions.c, key),
+                        ),
+                        else_=None,
+                    )
+                document = session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[m.doc_versions.c.item, m.doc_versions.c.version],
+                        set_=updates,
+                    ).returning(m.doc_versions.c.id)
+                ).scalar_one()
+                if doc_vector is not None:
+                    session.execute(
+                        m.vectors.insert().values(
+                            owner_kind="doc_version",
+                            owner_id=document,
+                            model=model_name(settings),
+                            recipe="doc-v1",
+                            embedding=doc_vector,
+                        )
+                    )
                 for block, vector in zip(blocks, chunk_vectors, strict=True):
                     chunk = session.execute(
                         m.chunks.insert()
@@ -251,6 +290,35 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                         )
                     counts["differences"] += len(differences)
                 counts["versions"] += 1
+        if enrich_ocr:
+            from app.library.enrichment import enqueue_version_jobs
+
+            with unit_of_work(sessions, read_only=True) as session:
+                missing_ocr = list(
+                    session.execute(
+                        select(m.doc_versions.c.item, m.doc_versions.c.version)
+                        .join(m.provider_items, m.provider_items.c.item == m.doc_versions.c.item)
+                        .where(
+                            m.doc_versions.c.item.in_(records),
+                            m.doc_versions.c.ocr_text.is_(None),
+                            m.provider_items.c.deleted_at.is_(None),
+                            (
+                                (m.doc_versions.c.media_type == "application/pdf")
+                                | m.doc_versions.c.media_type.like("image/%")
+                            ),
+                            ~select(m.chunks.c.id)
+                            .where(m.chunks.c.doc_version_id == m.doc_versions.c.id)
+                            .exists(),
+                        )
+                    ).tuples()
+                )
+            missing_ocr = [
+                (item, version)
+                for item, version in missing_ocr
+                if version == records[item]["versions"][-1]["version"]
+            ]
+            if missing_ocr:
+                counts["ocr_jobs_enqueued"] += enqueue_version_jobs(settings, missing_ocr)
         dirty.discard(None)
         counts.update(build_facets(caller, dirty, set(records)))
         with unit_of_work(sessions) as session:

@@ -3,9 +3,12 @@
 import hashlib
 import json
 import mimetypes
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from app.infrastructure.provider.locking import synchronized, synchronized_read
 
@@ -19,6 +22,30 @@ STAGES = {
     "st6-operation",
     "st7-closure",
 }
+
+
+def source_digest(file: Path) -> str:
+    with file.open("rb") as source:
+        digest = hashlib.sha256()
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@contextmanager
+def captured_source(file: Path, directory: Path) -> Iterator[tuple[Path, str]]:
+    # Hash the same streamed bytes that become the immutable snapshot.
+    path = directory / f".capture-{uuid4().hex}"
+    try:
+        with path.open("xb") as staged:
+            digest = hashlib.sha256()
+            with file.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+                    staged.write(chunk)
+        yield path, digest.hexdigest()
+    finally:
+        path.unlink(missing_ok=True)
 
 
 class SimulatedProvider:
@@ -98,57 +125,65 @@ class SimulatedProvider:
         changes = []
         now = self.clock or datetime.now(UTC).isoformat()
         for path, file in sorted(files.items()):
-            content = file.read_bytes()
-            digest = hashlib.sha256(content).hexdigest()
-            record = active.get(path)
-            kind = None
-            if record is None:
-                moved = next(
-                    (
-                        old
-                        for old, r in sorted(absent.items())
-                        if r["versions"][-1]["sha256"] == digest
-                    ),
-                    None,
-                )
-                if moved is not None:
-                    record = absent.pop(moved)
-                    record["path"] = path
-                    kind = "moved"
-                else:
-                    key = "itm_" + hashlib.sha256(path.encode()).hexdigest()[:12]
-                    while key in items:
-                        key = "itm_" + hashlib.sha256((key + path).encode()).hexdigest()[:12]
-                    record = {
-                        "item": key,
-                        "path": path,
-                        "title": file.stem.replace("-", " ").replace("_", " "),
-                        "simulated": True,
-                        "classification": "unclassified",
-                        "deleted_at": None,
-                        "versions": [],
-                    }
-                    items[key] = record
-                    kind = "added"
-            record.update(self.tags(path))
-            record["title"] = file.stem.replace("-", " ").replace("_", " ")
-            if not record["versions"] or record["versions"][-1]["sha256"] != digest:
-                version = len(record["versions"]) + 1
-                snapshot = self.meta / "versions" / record["item"] / str(version)
-                snapshot.parent.mkdir(parents=True, exist_ok=True)
-                snapshot.write_bytes(content)
-                record["versions"].append(
-                    {
-                        "version": version,
-                        "sha256": digest,
-                        "file_name": file.name,
-                        "media_type": mimetypes.guess_type(path)[0] or "text/plain",
-                    }
-                )
-                kind = kind or "changed"
-            if kind:
-                record["updated_at"] = now
-                changes.append(self.feed(record["item"], kind))
+            existing = active.get(path)
+            if (
+                existing is not None
+                and existing["versions"]
+                and source_digest(file) == existing["versions"][-1]["sha256"]
+            ):
+                existing.update(self.tags(path))
+                existing["title"] = file.stem.replace("-", " ").replace("_", " ")
+                continue
+            with captured_source(file, self.meta) as (staged, digest):
+                record = active.get(path)
+                kind = None
+                if record is None:
+                    moved = next(
+                        (
+                            old
+                            for old, r in sorted(absent.items())
+                            if r["versions"][-1]["sha256"] == digest
+                        ),
+                        None,
+                    )
+                    if moved is not None:
+                        record = absent.pop(moved)
+                        record["path"] = path
+                        kind = "moved"
+                    else:
+                        key = "itm_" + hashlib.sha256(path.encode()).hexdigest()[:12]
+                        while key in items:
+                            key = "itm_" + hashlib.sha256((key + path).encode()).hexdigest()[:12]
+                        record = {
+                            "item": key,
+                            "path": path,
+                            "title": file.stem.replace("-", " ").replace("_", " "),
+                            "simulated": True,
+                            "classification": "unclassified",
+                            "deleted_at": None,
+                            "versions": [],
+                        }
+                        items[key] = record
+                        kind = "added"
+                record.update(self.tags(path))
+                record["title"] = file.stem.replace("-", " ").replace("_", " ")
+                if not record["versions"] or record["versions"][-1]["sha256"] != digest:
+                    version = len(record["versions"]) + 1
+                    snapshot = self.meta / "versions" / record["item"] / str(version)
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    staged.replace(snapshot)
+                    record["versions"].append(
+                        {
+                            "version": version,
+                            "sha256": digest,
+                            "file_name": file.name,
+                            "media_type": mimetypes.guess_type(path)[0] or "text/plain",
+                        }
+                    )
+                    kind = kind or "changed"
+                if kind:
+                    record["updated_at"] = now
+                    changes.append(self.feed(record["item"], kind))
         for record in absent.values():
             record["deleted_at"] = now
             record["updated_at"] = now
@@ -177,11 +212,15 @@ class SimulatedProvider:
         return items[item]
 
     @synchronized_read
-    def read_content(self, item: str, version: int) -> bytes:
+    def read_content(self, item: str, version: int, *, max_bytes: int | None = None) -> bytes:
         record = self.get_item(item)
         if version not in {v["version"] for v in record["versions"]}:
             raise KeyError("unknown version")
-        return (self.meta / "versions" / item / str(version)).read_bytes()
+        with (self.meta / "versions" / item / str(version)).open("rb") as source:
+            content = source.read() if max_bytes is None else source.read(max_bytes + 1)
+        if max_bytes is not None and len(content) > max_bytes:
+            raise ValueError("Source exceeds configured byte limit.")
+        return content
 
     @synchronized
     def write_content(self, path: str, content: bytes) -> None:

@@ -277,19 +277,25 @@ def download(caller: Caller, request: OriginalRef) -> Response:
     return service.original(caller, request, True)
 
 
-def index_provider(settings, rebuild: bool = False) -> dict[str, int]:
+def index_provider(settings, rebuild: bool = False, *, enrich_ocr: bool = False) -> dict[str, int]:
     """Run local owner indexing for command and seed orchestration."""
     from app.library.index import build
 
-    return build(settings, rebuild)
+    return build(settings, rebuild, enrich_ocr=enrich_ocr)
 
 
 class IndexJobRequest(Shape):
     rebuild: bool = False
+    enrich_ocr: bool = False
 
 
 class IndexJobRef(Shape):
     job_id: str
+
+
+class OcrJobRequest(Shape):
+    item: str
+    version: Annotated[int, msgspec.Meta(gt=0)]
 
 
 class IndexJobPageRequest(Shape):
@@ -305,12 +311,17 @@ class IndexJob(Shape, omit_defaults=True):
     status: JobState
     queue: str
     rebuild: bool
+    enrich_ocr: bool
+    kind: Literal["index", "ocr"] = "index"
+    item: str | None = None
+    version: int | None = None
+    force: bool = False
     requested_by: str | None = None
     retry_of: str | None = None
     enqueued_at: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
-    result: dict[str, int] | None = None
+    result: dict[str, str | int] | None = None
     error: str | None = None
 
 
@@ -345,7 +356,7 @@ def enqueue_index_job(caller: Caller, request: IndexJobRequest) -> IndexJob:
     """Queue one library indexing build for asynchronous worker execution."""
     from app.library.queue import enqueue_index_job
 
-    return IndexJob(**enqueue_index_job(caller, request.rebuild))
+    return IndexJob(**enqueue_index_job(caller, request.rebuild, enrich_ocr=request.enrich_ocr))
 
 
 @operation("library.manage", get="/library/index/jobs/{jobId}")
@@ -391,6 +402,14 @@ def read_index_queue(caller: Caller) -> IndexQueueHealth:
     data = queue_health(caller)
     data["workers"] = [QueueWorker(**worker) for worker in data["workers"]]
     return IndexQueueHealth(**data)
+
+
+@operation("library.manage", post="/library/documents/{item}/versions/{version}/ocr")
+def recover_ocr(caller: Caller, request: OcrJobRequest) -> IndexJob:
+    """Explicitly re-run OCR for a readable version, including expired failed jobs."""
+    from app.library.enrichment import recover_version
+
+    return IndexJob(**recover_version(caller, request.item, request.version))
 
 
 def convert_source(content: bytes, filename: str):
