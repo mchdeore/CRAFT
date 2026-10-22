@@ -30,7 +30,9 @@ conversations = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("archived_at", DateTime(timezone=True)),
-    CheckConstraint("group_name is null or char_length(group_name) between 1 and 80", name="group_name"),
+    CheckConstraint(
+        "group_name is null or char_length(group_name) between 1 and 80", name="group_name"
+    ),
 )
 Index(
     "ix_conversations_owner_id_updated_at",
