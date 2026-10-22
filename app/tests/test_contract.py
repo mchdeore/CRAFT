@@ -17,7 +17,17 @@ from app.agent.handlers import RunRecovery, RunRecoveryRef
 from app.cube.handlers import MissionRef, ValueRef
 from app.infrastructure.paths import ROOT
 from app.infrastructure.shapes import ApiErrorBody
-from app.library.handlers import CatalogDocument, DocumentCatalog, DocumentList
+from app.library.handlers import (
+    CatalogDocument,
+    DocumentCatalog,
+    DocumentList,
+    IndexJob,
+    IndexJobPage,
+    IndexJobPageRequest,
+    IndexJobRequest,
+    IndexQueueHealth,
+    QueueWorker,
+)
 from app.skills.handlers import (
     SaveSkill,
     Skill,
@@ -90,6 +100,12 @@ def test_python_shapes_match_compiled_typescript() -> None:
         DocumentList,
         CatalogDocument,
         DocumentCatalog,
+        IndexJob,
+        IndexJobRequest,
+        IndexJobPageRequest,
+        IndexJobPage,
+        QueueWorker,
+        IndexQueueHealth,
         RunRecoveryRef,
         RunRecovery,
         SaveSkill,

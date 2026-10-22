@@ -15,6 +15,12 @@ export interface Routes {
   "GET /health/live": { response: T.Health };
   "GET /health/ready": { response: T.Health };
   "POST /api/library/search": { body: T.LibrarySearch; response: T.LibraryHits };
+  "POST /api/library/index/jobs": { body: T.IndexJobRequest; response: T.IndexJob };
+  "GET /api/library/index/jobs": { query: T.IndexJobPageRequest; response: T.IndexJobPage };
+  "GET /api/library/index/jobs/:jobId": { response: T.IndexJob };
+  "POST /api/library/index/jobs/:jobId/retry": { response: T.IndexJob };
+  "POST /api/library/index/jobs/:jobId/cancel": { response: T.IndexJob };
+  "GET /api/library/index/queue": { response: T.IndexQueueHealth };
   "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
   "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };

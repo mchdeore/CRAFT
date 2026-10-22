@@ -1,4 +1,9 @@
-from sqlalchemy import select
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+
+import pytest
+from sqlalchemy import select, text
 
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import ApiError
@@ -33,6 +38,90 @@ def test_rebuild_keeps_handles(library) -> None:
     before = sorted(handles(library))
     build(library["settings"], True)
     assert sorted(handles(library)) == before
+
+
+@pytest.mark.parametrize("failure", ["model", "write", "facet"])
+def test_rebuild_failure_preserves_search_state(library, monkeypatch, failure):
+    before = handles(library)
+    with library["sessions"].begin() as session:
+        versions = session.execute(select(m.doc_versions).order_by(m.doc_versions.c.id)).all()
+        facets = session.execute(select(m.facet_texts).order_by(m.facet_texts.c.id)).all()
+        assert facets
+
+    def fail(*args, **kwargs):
+        raise ApiError("Synthetic rebuild failure")
+
+    with monkeypatch.context() as patch:
+        if failure == "model":
+            patch.setattr(index, "make_summary", fail)
+            patch.setattr(index.time, "sleep", lambda _: None)
+        elif failure == "write":
+            clear = index.storage.clear_index
+
+            def clear_then_fail(*args, **kwargs):
+                clear(*args, **kwargs)
+                fail()
+
+            patch.setattr(index.storage, "clear_index", clear_then_fail)
+        else:
+            patch.setattr(index, "build_facets", fail)
+        with pytest.raises(ApiError):
+            build(library["settings"], rebuild=True)
+    assert handles(library) == before
+    with library["sessions"].begin() as session:
+        assert (
+            session.execute(select(m.doc_versions).order_by(m.doc_versions.c.id)).all() == versions
+        )
+        assert session.execute(select(m.facet_texts).order_by(m.facet_texts.c.id)).all() == facets
+    build(library["settings"])
+    assert handles(library) == before
+
+
+def test_rebuild_keeps_search_rows_for_versions_that_no_longer_convert(library, monkeypatch):
+    before = handles(library)
+
+    def unsupported(*args, **kwargs):
+        raise ValueError("Synthetic conversion failure")
+
+    monkeypatch.setattr(index, "convert", unsupported)
+    assert build(library["settings"], rebuild=True)["unsupported"] == 5
+    assert handles(library) == before
+
+
+def test_index_waits_for_database_lock_before_provider_scan(library, monkeypatch):
+    provider = SimulatedProvider(library["root"])
+    scanned = Event()
+    scan = provider.scan
+
+    def tracked_scan():
+        scanned.set()
+        return scan()
+
+    monkeypatch.setattr(provider, "scan", tracked_scan)
+    monkeypatch.setattr(index, "get_provider", lambda _: provider)
+    engine = library["sessions"].kw["bind"]
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text("SELECT pg_advisory_lock(1129464134, 1)"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(build, library["settings"])
+            try:
+                deadline = time.monotonic() + 5
+                waiting = False
+                while time.monotonic() < deadline:
+                    waiting = connection.execute(
+                        text(
+                            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+                            "AND classid = 1129464134 AND objid = 1 AND NOT granted)"
+                        )
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.01)
+                assert waiting and not scanned.is_set()
+            finally:
+                connection.execute(text("SELECT pg_advisory_unlock(1129464134, 1)"))
+            assert future.result(timeout=10) == {}
+            assert scanned.is_set()
 
 
 def test_generated_summary(library) -> None:

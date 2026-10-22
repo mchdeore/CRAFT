@@ -22,4 +22,23 @@ Container lifecycle uses the Docker SDK. A container requires a pinned digest or
 
 Backend refusal, failed startup, unsupported limits and incomplete cleanup return fixed error codes. They never report a healthy service or expose backend diagnostics. Original lifecycle ownership remains available when cleanup fails.
 
+## 4. Worker queue runtime
+
+Library indexing can run out-of-band through a Redis-compatible queue. Queue control and health operations require the administrator-only `library.manage` permission:
+
+- `POST /api/library/index/jobs` to enqueue (`rebuild` optional)
+- `GET /api/library/index/jobs/{jobId}` for status and result
+- `GET /api/library/index/jobs` for job discovery (`status`, `offset` up to 100000, `limit` 1-100)
+- `POST /api/library/index/jobs/{jobId}/retry` to queue another attempt
+- `POST /api/library/index/jobs/{jobId}/cancel` to cancel an attempt still waiting in the queue; a worker-claimed attempt returns a conflict
+- `GET /api/library/index/queue` for operator health (depth, failures, started jobs, worker heartbeats)
+
+`compose.yaml` includes `queue` (Valkey) plus an optional `worker` profile service (`craft worker`). This keeps the app process focused on request validation and enqueue/status operations while the worker process owns long-running indexing execution. Queue storage remains durable across app restarts as long as the queue volume persists.
+
+Job pages scan at most `limit + 1` raw queue/registry entries. Missing or foreign jobs are skipped without scanning to fill a page. Follow `nextOffset` even after an empty page. Pagination is mutable: concurrent enqueue, dequeue, or cleanup can move entries, so it is not an audit snapshot. Health counts can include expired entries until worker maintenance runs; API reads do not perform registry cleanup.
+
+Keep queue storage on a trusted internal network with no public listener or untrusted writers. RQ uses pickle serialization, so access to write queue data is equivalent to code execution in the owner-capable worker.
+
+Start the queue and worker with `docker compose --profile worker up --build --wait`. The worker alone receives `CRAFT_OWNER_DB_PASSWORD`. Source files remain mounted read-only; only the provider's `.provider` metadata and immutable version snapshots are writable. Before starting the worker, create that metadata directory and give container UID 10001 write access to it; preserve any existing metadata and snapshots. The health endpoint is the local operator surface; a separate dashboard is not required.
+
 Related interfaces: [components](components.md), [runtime](runtime.md), [Python workspace](python.md) and [code layout](../spec/06-code-layout.md).

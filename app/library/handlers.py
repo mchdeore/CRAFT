@@ -172,6 +172,19 @@ class ChunkPage(Shape):
     truncated: bool
 
 
+JobState = Literal[
+    "queued",
+    "started",
+    "deferred",
+    "scheduled",
+    "finished",
+    "failed",
+    "stopped",
+    "canceled",
+    "unknown",
+]
+
+
 class OriginalRef(Shape):
     item: str
     version: int
@@ -269,6 +282,115 @@ def index_provider(settings, rebuild: bool = False) -> dict[str, int]:
     from app.library.index import build
 
     return build(settings, rebuild)
+
+
+class IndexJobRequest(Shape):
+    rebuild: bool = False
+
+
+class IndexJobRef(Shape):
+    job_id: str
+
+
+class IndexJobPageRequest(Shape):
+    status: Literal[
+        "queued", "started", "deferred", "scheduled", "finished", "failed", "stopped", "canceled"
+    ] = "queued"
+    offset: Annotated[int, msgspec.Meta(ge=0, le=100_000)] = 0
+    limit: Annotated[int, msgspec.Meta(ge=1, le=100)] = 25
+
+
+class IndexJob(Shape, omit_defaults=True):
+    job_id: str
+    status: JobState
+    queue: str
+    rebuild: bool
+    requested_by: str | None = None
+    retry_of: str | None = None
+    enqueued_at: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    result: dict[str, int] | None = None
+    error: str | None = None
+
+
+class QueueWorker(Shape, omit_defaults=True):
+    name: str
+    state: str
+    queues: list[str]
+    successful_jobs: int
+    failed_jobs: int
+    last_heartbeat: str | None = None
+
+
+class IndexJobPage(Shape):
+    jobs: list[IndexJob]
+    next_offset: int | None
+
+
+class IndexQueueHealth(Shape):
+    queue: str
+    queued: int
+    started: int
+    deferred: int
+    scheduled: int
+    failed: int
+    finished: int
+    canceled: int
+    workers: list[QueueWorker]
+
+
+@operation("library.manage", post="/library/index/jobs")
+def enqueue_index_job(caller: Caller, request: IndexJobRequest) -> IndexJob:
+    """Queue one library indexing build for asynchronous worker execution."""
+    from app.library.queue import enqueue_index_job
+
+    return IndexJob(**enqueue_index_job(caller, request.rebuild))
+
+
+@operation("library.manage", get="/library/index/jobs/{jobId}")
+def read_index_job(caller: Caller, request: IndexJobRef) -> IndexJob:
+    """Read one queued index job status, result and failure details."""
+    from app.library.queue import read_index_job
+
+    return IndexJob(**read_index_job(caller, request.job_id))
+
+
+@operation("library.manage", get="/library/index/jobs")
+def list_index_jobs(caller: Caller, request: IndexJobPageRequest) -> IndexJobPage:
+    """Read a bounded raw queue or registry page without registry maintenance."""
+    from app.library.queue import list_index_jobs
+
+    data = list_index_jobs(caller, request.status, request.offset, request.limit)
+    return IndexJobPage(
+        jobs=[IndexJob(**job) for job in data["jobs"]], next_offset=data["next_offset"]
+    )
+
+
+@operation("library.manage", post="/library/index/jobs/{jobId}/retry")
+def retry_index_job(caller: Caller, request: IndexJobRef) -> IndexJob:
+    """Retry one failed, canceled or stopped index job as a new queued run."""
+    from app.library.queue import retry_index_job
+
+    return IndexJob(**retry_index_job(caller, request.job_id))
+
+
+@operation("library.manage", post="/library/index/jobs/{jobId}/cancel")
+def cancel_index_job(caller: Caller, request: IndexJobRef) -> IndexJob:
+    """Cancel one queued index job before a worker starts it."""
+    from app.library.queue import cancel_index_job
+
+    return IndexJob(**cancel_index_job(caller, request.job_id))
+
+
+@operation("library.manage", get="/library/index/queue")
+def read_index_queue(caller: Caller) -> IndexQueueHealth:
+    """Show queue depth, terminal job counts and active worker heartbeats."""
+    from app.library.queue import queue_health
+
+    data = queue_health(caller)
+    data["workers"] = [QueueWorker(**worker) for worker in data["workers"]]
+    return IndexQueueHealth(**data)
 
 
 def convert_source(content: bytes, filename: str):

@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from app.infrastructure.access import Caller
@@ -31,11 +31,16 @@ ATTEMPTS = 4
 
 def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
     provider = get_provider(settings.provider_root)
-    provider.scan()
     sessions, engine = make_owner_sessions(settings)
     caller = Caller(sessions=sessions, settings=settings)
     counts = Counter()
+    lock = None
     try:
+        # A dedicated autocommit connection serializes CLI and worker builds without
+        # holding a service transaction open across conversion or model calls.
+        lock = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        lock.execute(text("SELECT pg_advisory_lock(1129464134, 1)"))
+        provider.scan()
         with unit_of_work(sessions, read_only=True) as session:
             cursor = (
                 session.execute(
@@ -69,7 +74,6 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 )
             )
             if rebuild:
-                storage.clear_index(session, list(records))
                 dirty.update(missions)
             for item in records.values():
                 columns = {
@@ -113,7 +117,7 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                             m.doc_versions.c.version == version["version"],
                         )
                     ).first()
-                if present:
+                if present and not rebuild:
                     continue
                 try:
                     blocks = convert(
@@ -146,13 +150,23 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
 
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             represented = list(pool.map(represent, pending))
-        for (item, version, blocks), (summary, summary_kind, doc_vector, chunk_vectors) in zip(
-            pending, represented, strict=True
-        ):
-            dirty.add(item["mission_key"])
-            with unit_of_work(sessions) as session:
+        # Failed preparation must leave the previous searchable index intact.
+        with unit_of_work(sessions) as session:
+            if rebuild:
+                # Versions that failed to convert this time keep their previous search rows.
+                storage.clear_index(
+                    session,
+                    list(records),
+                    preserve_versions=True,
+                    preserve_facets=True,
+                    versions=[(item["item"], version["version"]) for item, version, _ in pending],
+                )
+            for (item, version, blocks), (summary, summary_kind, doc_vector, chunk_vectors) in zip(
+                pending, represented, strict=True
+            ):
+                dirty.add(item["mission_key"])
                 document = session.execute(
-                    m.doc_versions.insert()
+                    insert(m.doc_versions)
                     .values(
                         item=item["item"],
                         version=version["version"],
@@ -162,6 +176,17 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                         or "text/plain",
                         summary=summary,
                         summary_kind=summary_kind,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=[m.doc_versions.c.item, m.doc_versions.c.version],
+                        set_={
+                            "sha256": bytes.fromhex(version["sha256"]),
+                            "media_type": version.get("media_type")
+                            or mimetypes.guess_type(item["path"])[0]
+                            or "text/plain",
+                            "summary": summary,
+                            "summary_kind": summary_kind,
+                        },
                     )
                     .returning(m.doc_versions.c.id)
                 ).scalar_one()
@@ -236,5 +261,12 @@ def build(settings: Settings, rebuild: bool = False) -> dict[str, int]:
                 )
             )
     finally:
-        engine.dispose()
+        try:
+            if lock is not None:
+                try:
+                    lock.execute(text("SELECT pg_advisory_unlock(1129464134, 1)"))
+                finally:
+                    lock.close()
+        finally:
+            engine.dispose()
     return dict(counts)
