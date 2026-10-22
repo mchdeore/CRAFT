@@ -15,7 +15,7 @@ app/                     backend: FastAPI server, craft CLI and worker (Python m
 web/                     frontend: React and Vite
 workspace/               the personal JupyterLab workspace image: Dockerfile, the `craft` package (src/), built-in skills
 .public/wiki/            this wiki, published by GitHub Pages
-.local/                  private and never committed: assistant rules, plans, fake data, runtime scratch, worktrees
+.local/                  private and never committed: assistant rules and skills, plans, fake data, demo and provider state, worktrees
 scripts/check            quick and full checks
 scripts/demo             the local demo
 compose.yaml  pyproject.toml  uv.lock  .env.example
