@@ -119,7 +119,7 @@ test("Fresh owned activation clears prior transient selection", async () => {
 
 test("Successful archive followed by failed replacement clears the old skill", async () => {
   let created = 0;
-  await conversation(async (url, init) => init?.method === "PATCH" ? json(summary(B)) : ++created < 3 ? json(summary(created === 1 ? A : B)) : json({ code: "unavailable" }, 503), async session => {
+  await conversation(async (url, init) => init?.method === "PATCH" ? json({ ...summary(B), archived: true }) : ++created < 3 ? json(summary(created === 1 ? A : B)) : json({ code: "unavailable" }, 503), async session => {
     await session.newChat(selection()); await session.reset();
     assert.equal(session.getSnapshot().sessionID, ""); assert.equal(session.getSnapshot().selectedSkill, undefined);
   });
