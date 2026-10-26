@@ -8,4 +8,4 @@ docker compose up --build --wait  # database, queue and app on localhost:8000
 scripts/check                     # quick checks; scripts/check full for milestones
 ```
 
-Layout: `app/` backend (with the API contract in `app/contract/`), `web/` frontend, `workspace/` the JupyterLab workspace image, `.public/wiki/` the wiki. Setup, checks and conventions: [development](.public/wiki/development.md). Only the maintainer merges pull requests.
+Layout: `app/` backend (with the API contract in `app/contract/`, which the separate `craft-frontend` repository compiles against), `workspace/` the JupyterLab workspace image, `.public/wiki/` the wiki. Setup, checks and conventions: [development](.public/wiki/development.md). Only the maintainer merges pull requests.
