@@ -11,7 +11,7 @@ ALLOWED_FIELDS = (
     "method", "path", "status", "duration_ms", "request_id", "error_type",
     "kind", "name", "origin", "outcome", "error_code", "db_statements", "db_ms",
     "call_id", "parent_call_id", "user_id", "auth_session_id",
-    "conversation_id", "run_id", "tool_call_id",
+    "conversation_id", "run_id", "tool_call_id", "job_id", "queue", "attempt",
 )  # fmt: skip
 QUIET = (
     "httpx",
@@ -20,7 +20,16 @@ QUIET = (
     "alembic",
     "mcp",
 )  # chatty at INFO; URLs include query strings
-PAYLOAD_LOGGERS = ("openai", "azure", "agent_framework", "httpx", "httpx2", "httpcore")
+# procrastinate's own lines carry job arguments; app.infrastructure.queue logs jobs instead.
+PAYLOAD_LOGGERS = (
+    "openai",
+    "azure",
+    "agent_framework",
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "procrastinate",
+)
 
 
 class PayloadFilter(logging.Filter):

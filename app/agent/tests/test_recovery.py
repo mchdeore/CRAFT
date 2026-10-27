@@ -25,7 +25,16 @@ from app.infrastructure.access import SIGNED_IN
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import NotFound
 
-FIELDS = {"status", "runId", "startedAt", "endedAt", "approvalId", "approvalStatus", "canResume"}
+FIELDS = {
+    "status",
+    "runId",
+    "startedAt",
+    "endedAt",
+    "approvalId",
+    "approvalStatus",
+    "canResume",
+    "lastEvent",
+}
 IDLE = {
     "status": "none",
     "runId": None,
@@ -34,6 +43,7 @@ IDLE = {
     "approvalId": None,
     "approvalStatus": None,
     "canResume": False,
+    "lastEvent": None,
 }
 OLD_START = datetime(2020, 1, 1, tzinfo=UTC)
 
@@ -305,6 +315,7 @@ def test_recovery_projects_every_recorded_status_without_liveness_inference(
         "approvalId": None,
         "approvalStatus": None,
         "canResume": False,
+        "lastEvent": None,
     }
 
 

@@ -11,7 +11,7 @@ from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.engine import conninfo
 from app.infrastructure.operations import operation
 from app.infrastructure.paths import MIGRATIONS
-from app.infrastructure.shapes import Health
+from app.infrastructure.shapes import Health, Shape
 
 READY_DEADLINE_S = 3
 
@@ -50,3 +50,31 @@ async def current_migration(settings: Settings) -> str | None:
         cursor = await connection.execute("select version_num from alembic_version")
         row = await cursor.fetchone()
         return row[0] if row else None
+
+
+class QueueCounts(Shape):
+    queue: str
+    queued: int
+    scheduled: int
+    started: int
+    stopping: int
+    finished: int
+    failed: int
+    canceled: int
+    stopped: int
+    oldest_queued_seconds: float | None
+
+
+class QueueHealth(Shape):
+    queues: list[QueueCounts]
+    dead: int
+
+
+@operation(PUBLIC, get="/health/queue")
+def queue(caller: Caller) -> QueueHealth:
+    """Job counts per queue and state, the oldest queued job's age and the dead (failed) count."""
+    from app.jobs.handlers import queue_counts
+
+    assert caller.sessions is not None
+    data = queue_counts(caller.sessions)
+    return QueueHealth(queues=[QueueCounts(**q) for q in data["queues"]], dead=data["dead"])

@@ -11,7 +11,12 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, Engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.infrastructure.database.metadata import doc_versions, metadata, provider_items
+from app.infrastructure.database.metadata import (
+    doc_versions,
+    include_name,
+    metadata,
+    provider_items,
+)
 from app.infrastructure.paths import ROOT
 
 
@@ -27,7 +32,7 @@ def isolated_migrations(owner_engine: Engine) -> Iterator[tuple[Config, Connecti
 
 
 def assert_models(connection: Connection) -> None:
-    context = MigrationContext.configure(connection)
+    context = MigrationContext.configure(connection, opts={"include_name": include_name})
     assert compare_metadata(context, metadata) == []
 
 

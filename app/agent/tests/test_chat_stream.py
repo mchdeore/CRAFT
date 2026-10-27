@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import subprocess
+import threading
+import time
 from dataclasses import replace
 from uuid import uuid4
 
@@ -15,10 +17,18 @@ from sqlalchemy import select
 
 from app import create_app
 from app.agent import runtime
-from app.agent.handlers import RunAgentInput, run_agent
+from app.agent.handlers import (
+    RunAgentInput,
+    RunEventsRef,
+    RunRef,
+    cancel_run,
+    run_agent,
+    run_events,
+)
+from app.infrastructure import queue
 from app.infrastructure.database import metadata as m
+from app.infrastructure.database.engine import make_engine
 from app.infrastructure.errors import Conflict, NotFound, RateLimited
-from app.infrastructure.operations.context import current_call
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
@@ -242,52 +252,81 @@ def test_chat_stream_owner_and_run_limits(chat):
             )
 
 
-def test_chat_stream_closed_stream_cancels_run(chat, monkeypatch):
-    async def execute():
-        entered = asyncio.Event()
-        original = ScriptedChatClient._inner_get_response
+def wait_for(check, seconds=10.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(0.05)
+    raise AssertionError("condition not reached")
 
-        def blocked(self, **kwargs):
-            from agent_framework import ResponseStream
 
-            async def updates():
-                entered.set()
-                await asyncio.Event().wait()
-                if False:
-                    yield None
+def test_closed_stream_keeps_the_run_and_cancel_stops_it(chat, monkeypatch):
+    entered = threading.Event()
 
-            return ResponseStream(updates(), finalizer=lambda _: None)
+    def blocked(self, **kwargs):
+        from agent_framework import ResponseStream
 
-        monkeypatch.setattr(ScriptedChatClient, "_inner_get_response", blocked)
-        data = request(chat)
+        async def updates():
+            entered.set()
+            await asyncio.Event().wait()
+            if False:
+                yield None
+
+        return ResponseStream(updates(), finalizer=lambda _: None)
+
+    monkeypatch.setattr(ScriptedChatClient, "_inner_get_response", blocked)
+    data = request(chat)
+
+    async def leave():
         iterator = run_agent(chat["caller"], data)
         assert (await anext(iterator)).type == "RUN_STARTED"
-        task = asyncio.create_task(anext(iterator))
-        await entered.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
         await iterator.aclose()
-        assert row(chat, data.run_id)["status"] == "cancelled"
-        cleared = row(chat, data.run_id)["token_sha256"] is None
-        assert cleared
-        assert current_call.get() is None
-        monkeypatch.setattr(ScriptedChatClient, "_inner_get_response", original)
 
-    asyncio.run(execute())
+    asyncio.run(leave())
+    assert entered.wait(10) and row(chat, data.run_id)["status"] == "running"
+    cancel_run(chat["caller"], RunRef(run=data.run_id))
+    wait_for(lambda: row(chat, data.run_id)["status"] == "cancelled")
+    assert row(chat, data.run_id)["token_sha256"] is None
+
+    async def reattach():
+        return [
+            msgspec.to_builtins(event)
+            async for event in run_events(chat["caller"], RunEventsRef(run=data.run_id, after=1))
+        ]
+
+    events = asyncio.run(reattach())
+    assert events[-1] == {
+        "type": "RUN_ERROR",
+        "code": "run_cancelled",
+        "message": "Run stopped.",
+    }
+    assert all(event["type"] != "RUN_STARTED" for event in events)
 
 
 def test_chat_stream_no_transaction_or_payload_logs(chat, monkeypatch, capsys):
     original = ScriptedChatClient.reply
     checks = []
     marker = uuid4().hex
+    engines = []
+
+    def engine(settings):
+        engines.append(make_engine(settings))
+        return engines[-1]
 
     def inspected(self, messages):
-        checks.append(chat["app"].state.engine.pool.checkedout() == 0)
+        # No transaction stays open while the model answers; the previous event's short
+        # write may still be finishing on another thread.
+        deadline = time.monotonic() + 1
+        while engines[-1].pool.checkedout() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        checks.append(engines[-1].pool.checkedout() == 0)
         return original(self, messages)
 
+    monkeypatch.setattr(queue, "make_engine", engine)
     monkeypatch.setattr(ScriptedChatClient, "reply", inspected)
-    collect(chat["caller"], request(chat, marker))
+    with chat["worker"].using(chat["settings"]):
+        collect(chat["caller"], request(chat, marker))
     captured = capsys.readouterr()
     safe = marker not in captured.out + captured.err
     assert checks and all(checks) and safe
@@ -323,7 +362,8 @@ def test_chat_stream_output_budget(chat, monkeypatch):
         ),
     )
     data = request(chat)
-    events = collect(caller, data)
+    with chat["worker"].using(configured):
+        events = collect(caller, data)
     assert events[-1]["type"] == "RUN_ERROR" and row(chat, data.run_id)["status"] == "failed"
     cleared = row(chat, data.run_id)["token_sha256"] is None
     assert cleared
@@ -341,7 +381,7 @@ def test_chat_stream_output_budget(chat, monkeypatch):
     assert result == "error"
 
 
-def test_http_disconnect_preserves_state_and_cancels(chat):
+def test_http_disconnect_keeps_the_run_going(chat):
     data = request(chat)
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
         assert chat["sign_in"](client).status_code == 200
@@ -389,7 +429,8 @@ def test_http_disconnect_preserves_state_and_cancels(chat):
             "server": ("testserver", 443),
         }
         await asyncio.wait_for(chat["app"](scope, receive, send), 5)
-        assert started.is_set() and row(chat, data.run_id)["status"] == "cancelled"
+        assert started.is_set()
+        await asyncio.to_thread(wait_for, lambda: row(chat, data.run_id)["status"] == "finished")
         assert chat["app"].state.engine.pool.checkedout() == 0
         with chat["owner"].connect() as connection:
             stored = connection.execute(

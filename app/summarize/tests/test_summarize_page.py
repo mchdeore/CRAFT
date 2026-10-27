@@ -8,7 +8,7 @@ from app.infrastructure.operations.registry import registry
 
 
 def test_summarize_page_persists_without_dev_mount(settings):
-    app = create_app(msgspec.structs.replace(settings, dev_page=False))
+    app = create_app(settings)
     with TestClient(app, follow_redirects=False) as http:
         result = http.get("/summarize")
         assert result.status_code == 200 and result.headers["content-type"].startswith("text/html")
@@ -25,7 +25,6 @@ def test_summary_contract():
     from pathlib import Path
 
     import jsonschema
-    import msgspec
 
     from app.summarize.handlers import SelectedSource, SummaryResult
     from app.tests.test_contract import root_schema, typescript_schema

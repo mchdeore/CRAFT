@@ -23,21 +23,13 @@ from app.infrastructure.logging import configure_logging, instrument_sql
 from app.infrastructure.operations.pipeline import register_http
 from app.infrastructure.paths import ROOT
 from app.infrastructure.requests import RequestIdMiddleware
+from app.jobs import handlers as job_handlers
 from app.library import handlers as library_handlers
 from app.notes import handlers as note_handlers
 from app.skills import handlers as skill_handlers
 from app.summarize import handlers as summarize_handlers
 from app.tools import handlers as tool_handlers
 from app.workspace import handlers as workspace_handlers
-
-
-class DevPage(StaticFiles):
-    """Expose only the single development page, never neighboring source files."""
-
-    async def get_response(self, path: str, scope: Scope):
-        if path != ".":
-            raise HTTPException(status_code=404)
-        return await super().get_response("dev.html", scope)
 
 
 class SummaryPage(StaticFiles):
@@ -95,6 +87,7 @@ def create_app(settings: Settings) -> FastAPI:
     """Build the app: logging, the pool, error bodies, health routes, request IDs."""
     _ = (
         library_handlers,
+        job_handlers,
         account_handlers,
         approval_handlers,
         cube_handlers,
@@ -126,8 +119,6 @@ def create_app(settings: Settings) -> FastAPI:
     install_error_handlers(app)
     register_http(app)
     app.mount("/mcp", mcp)
-    if settings.dev_page:
-        app.mount("/dev", DevPage(directory=ROOT / "app/dev"))
     app.mount("/summarize", SummaryPage(directory=ROOT / "app/summarize"))
     app.add_middleware(MountPathMiddleware)
     if settings.cross_origin_browser:

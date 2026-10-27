@@ -10,6 +10,18 @@ from app.infrastructure.config.env import read_env
 
 PREFIX = "CRAFT_"
 OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account"}  # setup and Compose only
+# Settings of the deleted indexer, RQ queue and demo page; older .env files may still set them.
+RETIRED = {
+    "model_ocr",
+    "ocr_max_bytes",
+    "index_max_bytes",
+    "ocr_attempt_limit",
+    "ocr_retry_seconds",
+    "queue_url",
+    "queue_name",
+    "dev_page",
+}
+QUEUES = ("agent", "interactive", "bulk")
 
 
 class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=True):
@@ -18,23 +30,17 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     database_name: str = "craft_dev"
     provider_root: str = ".local/runtime/provider"
     process_root: str = ""
-    queue_url: str = "redis://localhost:6379/0"
-    queue_name: Annotated[str, msgspec.Meta(min_length=1, max_length=64)] = "craft-jobs"
+    worker_queues: str = "agent,interactive,bulk"
+    worker_concurrency: Annotated[int, msgspec.Meta(ge=1, le=100)] = 4
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
     password_min_length: Annotated[int, msgspec.Meta(ge=1)] = 12
     allowed_origins: str = "http://localhost:8000"
     cross_origin_browser: bool = False
-    dev_page: bool = False
     model_main: str = "gpt-5.2"
     model_check: str = "gpt-5.2"
     model_embedding: str = "text-embedding-3-large"
-    model_ocr: str = "mistral-ocr-4-0"
-    index_max_bytes: Annotated[int, msgspec.Meta(gt=0, le=100 * 1024 * 1024)] = 25 * 1024 * 1024
-    ocr_max_bytes: Annotated[int, msgspec.Meta(gt=0, le=50 * 1024 * 1024)] = 10 * 1024 * 1024
-    ocr_attempt_limit: Annotated[int, msgspec.Meta(ge=1, le=10)] = 3
-    ocr_retry_seconds: Annotated[int, msgspec.Meta(ge=1, le=86400)] = 3600
     model_endpoint: str = ""
     model_key: str = ""
     model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=16000)] = 4000
@@ -52,7 +58,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             name: value
             for key, value in source.items()
             if key.startswith(PREFIX)
-            and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS
+            and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS | RETIRED
         }
         try:
             settings = msgspec.convert(raw, cls, strict=False)
@@ -72,7 +78,8 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
             validate_models(settings, access=False)
             validate_mcp_url(settings.mcp_url)
-            validate_queue_url(settings.queue_url)
+            if not settings.queue_names():
+                raise SystemExit("bad setting: worker_queues: invalid configuration")
             return settings
         except msgspec.ValidationError as error:
             message = str(error)
@@ -83,6 +90,11 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
                 )
             field = match[1] if match else "configuration"
             raise SystemExit(f"bad setting: {field}: invalid configuration") from None
+
+    def queue_names(self) -> list[str]:
+        """The worker's queues in the order given; empty when any name is unknown."""
+        names = [name.strip() for name in self.worker_queues.split(",") if name.strip()]
+        return names if names and set(names) <= set(QUEUES) else []
 
     def __repr__(self) -> str:
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"
@@ -111,28 +123,6 @@ def validate_mcp_url(value: str) -> None:
         raise SystemExit("bad setting: mcp_url: invalid configuration")
 
 
-def validate_queue_url(value: str) -> None:
-    from urllib.parse import urlsplit
-
-    try:
-        parsed = urlsplit(value)
-        valid = (
-            parsed.scheme in {"redis", "rediss"}
-            and bool(parsed.hostname)
-            and (parsed.port is None or 0 < parsed.port <= 65535)
-            and bool(parsed.path)
-            and parsed.path[1:].isdigit()
-            and parsed.username is None
-            and parsed.password is None
-            and not parsed.query
-            and not parsed.fragment
-        )
-    except (ValueError, TypeError):
-        valid = False
-    if not valid:
-        raise SystemExit("bad setting: queue_url: invalid configuration")
-
-
 def validate_models(settings: Settings, *, access: bool = True) -> None:
     """Check model settings; with access, the endpoint and key must be configured.
 
@@ -144,7 +134,7 @@ def validate_models(settings: Settings, *, access: bool = True) -> None:
     def fail(field: str):
         raise SystemExit(f"bad setting: {field}: invalid configuration")
 
-    for field in ["model_main", "model_check", "model_embedding", "model_ocr"]:
+    for field in ["model_main", "model_check", "model_embedding"]:
         value = getattr(settings, field)
         if not isinstance(value, str) or not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}", value

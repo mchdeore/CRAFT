@@ -1,4 +1,4 @@
-"""Source-backed edge cases and the separate full demonstration database."""
+"""A synthetic mission with one source-backed budget table."""
 
 import hashlib
 from datetime import UTC, date, datetime
@@ -15,7 +15,8 @@ from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library import storage
-from app.library.handlers import convert_source, index_provider
+from app.library.convert import convert
+from app.tests.support import rows
 
 
 @pytest.fixture
@@ -64,7 +65,7 @@ def cube_source(settings, owner_engine, tmp_path):
     )
     provider.write_content(path, initial)
     item = next(iter(provider.items()))
-    index_provider(configured)
+    rows.load(owner_engine, provider)
     app = create_app(configured)
     caller = Caller(
         user_id=user, roles=frozenset({"member"}), sessions=app.state.sessions, settings=configured
@@ -83,9 +84,7 @@ def cube_source(settings, owner_engine, tmp_path):
         source_unit=None,
     ):
         block = next(
-            b
-            for b in convert_source(provider.read_content(item, version), path)
-            if b.kind == "table"
+            b for b in convert(provider.read_content(item, version), path) if b.kind == "table"
         )
         row = block.text.splitlines()[2]
         values = {
@@ -157,9 +156,13 @@ def cube_source(settings, owner_engine, tmp_path):
         items = list(provider.items())
         storage.clear_index(connection, items)
         connection.execute(m.provider_items.delete().where(m.provider_items.c.item.in_(items)))
-        connection.execute(
-            m.index_cursor.delete().where(m.index_cursor.c.provider == str(tmp_path.resolve()))
+        inputs, events = (
+            m.metadata.tables["agent_run_inputs"],
+            m.metadata.tables["agent_run_events"],
         )
+        runs = select(inputs.c.run_id).where(inputs.c.owner_id == user)
+        connection.execute(events.delete().where(events.c.run_id.in_(runs)))
+        connection.execute(inputs.delete().where(inputs.c.owner_id == user))
         for name in ["auth_sessions", "local_credentials", "user_roles"]:
             table = m.metadata.tables[name]
             connection.execute(table.delete().where(table.c.user_id == user))

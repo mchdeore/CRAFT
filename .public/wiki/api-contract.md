@@ -83,20 +83,20 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/tools/capabilities` | — | `CapabilityCatalog` | signed in | `list_capabilities` |
 | `GET /api/library/documents` | —; query `DocumentList` | `DocumentCatalog` | signed in; current readable indexed sources | `list_documents` |
 | `POST /api/agent/runs` | `RunAgentInput` | `AG-UI event stream` | signed in; live resource access | — |
+| `GET /api/agent/runs/:run/events` | —; query `{ after?: number }` | `AG-UI event stream` | signed in; owned run | — |
+| `POST /api/agent/runs/:run/cancel` | — | `void` | signed in; owned run | — |
 | `POST /api/cube/candidates` | `PrepareValues` | `Candidates` | signed in; live resource access | `prepare_values` |
 | `POST /api/cube/values` | `SubmitValues` | `ValueReceipt` | signed in; requester-approved batch | `submit_values` |
 | `POST /api/library/citations/check` | `CitationCheck` | `CitationStatus` | signed in; live resource access | `check_citation` |
 | `GET /api/library/documents/:item/compare` | —; query `{ fromVersion: number; toVersion: number }` | `VersionDiff` | signed in; live resource access | `compare_versions` |
 | `GET /health/live` | — | `Health` | public | — |
 | `GET /health/ready` | — | `Health` | public | — |
+| `GET /health/queue` | — | `QueueHealth` | public | — |
+| `GET /api/jobs` | —; query `JobPageRequest` | `JobPage` | signed in; own jobs (administrator: all) | — |
+| `GET /api/jobs/:jobId` | — | `Job` | signed in; own job (administrator: any) | — |
+| `POST /api/jobs/:jobId/retry` | — | `Job` | signed in; own job (administrator: any) | — |
+| `POST /api/jobs/:jobId/cancel` | — | `Job` | signed in; own job (administrator: any) | — |
 | `POST /api/library/search` | `LibrarySearch` | `LibraryHits` | signed in; live resource access | `search` |
-| `POST /api/library/index/jobs` | `IndexJobRequest` | `IndexJob` | administrator | — |
-| `GET /api/library/index/jobs` | —; query `IndexJobPageRequest` | `IndexJobPage` | administrator | — |
-| `GET /api/library/index/jobs/:jobId` | — | `IndexJob` | administrator | — |
-| `POST /api/library/index/jobs/:jobId/retry` | — | `IndexJob` | administrator | — |
-| `POST /api/library/index/jobs/:jobId/cancel` | — | `IndexJob` | administrator | — |
-| `GET /api/library/index/queue` | — | `IndexQueueHealth` | administrator | — |
-| `POST /api/library/documents/:item/versions/:version/ocr` | — | `IndexJob` | administrator | — |
 | `GET /api/library/documents/:item` | —; query `{ version?: number }` | `LibraryDocument` | signed in; live resource access | `get_document` |
 | `GET /api/library/documents/:item/chunks` | —; query `{ version: number; fromBlock: number; toBlock: number }` | `ChunkPage` | signed in; live resource access | `read_chunks` |
 | `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | signed in; live resource access | `explore` |
@@ -321,14 +321,12 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/library/documents/:item/compare` | `VersionDiff` | `app/contract/examples/version-diff.json` |
 | `GET /health/live` | `Health` | `app/contract/examples/health-live.json` |
 | `GET /health/ready` | `Health` | `app/contract/examples/health-ready.json` |
+| `GET /health/queue` | `QueueHealth` | `app/contract/examples/queue-health.json` |
+| `GET /api/jobs` | `JobPage` | `app/contract/examples/job-page.json` |
+| `GET /api/jobs/:jobId` | `Job` | `app/contract/examples/job.json` |
+| `POST /api/jobs/:jobId/retry` | `Job` | `app/contract/examples/job.json` |
+| `POST /api/jobs/:jobId/cancel` | `Job` | `app/contract/examples/job.json` |
 | `POST /api/library/search` | `LibraryHits` | `app/contract/examples/library-search.json` |
-| `POST /api/library/index/jobs` | `IndexJob` | `app/contract/examples/index-job.json` |
-| `GET /api/library/index/jobs` | `IndexJobPage` | `app/contract/examples/index-job-page.json` |
-| `GET /api/library/index/jobs/:jobId` | `IndexJob` | `app/contract/examples/index-job.json` |
-| `POST /api/library/index/jobs/:jobId/retry` | `IndexJob` | `app/contract/examples/index-job.json` |
-| `POST /api/library/index/jobs/:jobId/cancel` | `IndexJob` | `app/contract/examples/index-job.json` |
-| `GET /api/library/index/queue` | `IndexQueueHealth` | `app/contract/examples/index-queue-health.json` |
-| `POST /api/library/documents/:item/versions/:version/ocr` | `IndexJob` | `app/contract/examples/ocr-job.json` |
 | `GET /api/library/documents/:item` | `LibraryDocument` | `app/contract/examples/library-document.json` |
 | `GET /api/library/documents/:item/chunks` | `ChunkPage` | `app/contract/examples/chunks.json` |
 | `POST /api/library/explore` | `ChunkPage` | `app/contract/examples/explore.json` |

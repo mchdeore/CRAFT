@@ -17,9 +17,9 @@ from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import ApiError, Forbidden, InvalidInput, NotFound, TooLarge
 from app.infrastructure.logging import configure_logging
 from app.infrastructure.shapes import RawFile
-from app.library.handlers import index_provider
 from app.summarize import handlers as summary
 from app.summarize.service import supported_filing, supported_sentence
+from app.tests.support import rows
 from app.tests.support.model import ScriptedChatClient
 
 
@@ -36,7 +36,7 @@ def selected_source(source):
         source["path"],
         b"# 1 Thermal\n\nThe radiator margin is 5 K.\n\n# 2 Power\n\nThe power budget is 120 W.\n",
     )
-    index_provider(source["settings"])
+    rows.load(source["owner"], source["provider"])
     version = source["provider"].get_item(source["item"])["versions"][-1]
     return {"item": source["item"], "version": version["version"], "sha256": version["sha256"]}
 
@@ -345,7 +345,7 @@ def test_summarize_foreign_admin_and_disabled(cube_source, monkeypatch):
         )
     path = f"missions/{other}/engineering/st3-design/source.md"
     cube_source["provider"].write_content(path, b"# Simulated source\n\nA simulated foreign fact.")
-    index_provider(cube_source["settings"])
+    rows.load(cube_source["owner"], cube_source["provider"])
     item = next(row for row in cube_source["provider"].items().values() if row["path"] == path)
     version = item["versions"][-1]
     request = {"item": item["item"], "version": version["version"], "sha256": version["sha256"]}

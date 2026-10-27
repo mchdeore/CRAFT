@@ -6,7 +6,7 @@ from sqlalchemy import URL, create_engine
 
 from app.infrastructure.config.env import read_env
 from app.infrastructure.config.settings import Settings
-from app.infrastructure.database.metadata import metadata
+from app.infrastructure.database.metadata import include_name, metadata
 
 settings = Settings.from_env()
 owner_password = read_env().get("CRAFT_OWNER_DB_PASSWORD")
@@ -24,7 +24,7 @@ url = URL.create(
 
 
 def migrate(connection):
-    context.configure(connection=connection, target_metadata=metadata)
+    context.configure(connection=connection, target_metadata=metadata, include_name=include_name)
     with context.begin_transaction():
         context.run_migrations()
 

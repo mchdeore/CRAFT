@@ -16,15 +16,18 @@ from app import create_app
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
-from app.library.index import build
+from app.infrastructure.provider.simulated import SimulatedProvider
 from app.seed.base import seed
+from app.tests.support import rows
 
 
 @pytest.mark.slow
 def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
     configured = msgspec.structs.replace(settings, provider_root=str(tmp_path))
     seed(configured)
-    build(configured)
+    owner, engine = make_owner_sessions(configured)
+    rows.load(engine, SimulatedProvider(tmp_path))
+    engine.dispose()
     env = os.environ | {"CRAFT_DATABASE_NAME": "craft_test", "CRAFT_PROVIDER_ROOT": str(tmp_path)}
     result = subprocess.run(
         [

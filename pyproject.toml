@@ -25,8 +25,7 @@ dependencies = [
   "azure-ai-projects==2.7.0",
   "anyio==4.15.1",
   "vl-convert-python==1.9.0.post1",
-  "redis==6.4.0",
-  "rq==2.6.0",
+  "procrastinate==3.10.0",
   "supervisor==4.3.0",
   "docker==7.2.0",
 ]
@@ -37,7 +36,6 @@ dev = [
     "ruff==0.16.10",
     "pyright==1.1.414",
     "fpdf2==2.8.9",
-    "fakeredis==2.32.1",
     "pandas==2.3.3",  # the workspace package's tests read and write tables
 ]
 

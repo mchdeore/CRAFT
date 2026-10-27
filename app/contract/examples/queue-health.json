@@ -1,0 +1,41 @@
+{
+  "queues": [
+    {
+      "queue": "agent",
+      "queued": 0,
+      "scheduled": 0,
+      "started": 2,
+      "stopping": 0,
+      "finished": 40,
+      "failed": 0,
+      "canceled": 0,
+      "stopped": 0,
+      "oldestQueuedSeconds": null
+    },
+    {
+      "queue": "interactive",
+      "queued": 1,
+      "scheduled": 0,
+      "started": 0,
+      "stopping": 0,
+      "finished": 12,
+      "failed": 1,
+      "canceled": 0,
+      "stopped": 0,
+      "oldestQueuedSeconds": 3.5
+    },
+    {
+      "queue": "bulk",
+      "queued": 0,
+      "scheduled": 0,
+      "started": 0,
+      "stopping": 0,
+      "finished": 0,
+      "failed": 0,
+      "canceled": 0,
+      "stopped": 0,
+      "oldestQueuedSeconds": null
+    }
+  ],
+  "dead": 1
+}

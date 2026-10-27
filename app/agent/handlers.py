@@ -116,6 +116,8 @@ class RunRecovery(Shape):
     approval_id: UUID | None
     approval_status: Literal["pending", "approved", "rejected", "executed", "failed"] | None
     can_resume: bool
+    # Events in the run's newest stream so far: re-attach with GET /agent/runs/{run}/events.
+    last_event: int | None
 
 
 @operation(SIGNED_IN, get="/conversations/{id}/run")
@@ -215,15 +217,44 @@ def list_tools(caller: Caller) -> list[ToolInfo]:
 
 @operation(SIGNED_IN, post="/agent/runs")
 async def run_agent(caller: Caller, request: RunAgentInput) -> AsyncIterator[AGUIEvent]:
-    """Stream an owned run with server history and reviewed writes; for example a cited fact."""
-    from app.agent.runtime import run
+    """Stream an owned run with server history and reviewed writes; for example a cited fact.
+    The run continues on the agent worker if the connection closes."""
+    from app.agent.runs import stream
+    from app.agent.runtime import _read_only_query
 
-    iterator = run(caller, request)
+    iterator = stream(caller, request, _read_only_query.get())
     try:
         async for event in iterator:
             yield event
     finally:
         await iterator.aclose()
+
+
+class RunEventsRef(Shape):
+    run: UUID
+    after: Annotated[int, msgspec.Meta(ge=0, le=1_000_000)] = 0
+
+
+@operation(SIGNED_IN, get="/agent/runs/{run}/events")
+async def run_events(caller: Caller, request: RunEventsRef) -> AsyncIterator[AGUIEvent]:
+    """Re-attach to an owned run: replay its newest stream after `after` events, then follow
+    it until RUN_FINISHED or RUN_ERROR."""
+    from app.agent.runs import reattach
+
+    iterator = reattach(caller, request.run, request.after)
+    try:
+        async for event in iterator:
+            yield event
+    finally:
+        await iterator.aclose()
+
+
+@operation(SIGNED_IN, post="/agent/runs/{run}/cancel")
+def cancel_run(caller: Caller, request: RunRef) -> None:
+    """Stop an owned queued or running run; its stream ends with RUN_ERROR run_cancelled."""
+    from app.agent import service
+
+    service.cancel_run(caller, request.run)
 
 
 @operation(PUBLIC)

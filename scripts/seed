@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Load the frozen dataset (the library index and the datacube as of 2026-10-21) into an empty
+# database and provider folder. No model calls: the data is restored, never rebuilt.
+#   scripts/seed    restore .local/seed/cube-v1 into the compose db, then apply newer migrations
+# The frozen set is private (never committed): craft_dev.dump, provider.tgz and embedding.
+# To start over: docker compose down -v, remove the provider folder, run this again.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+[ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
+export DOCKER_CONTEXT=${DOCKER_CONTEXT:-colima} UV_NO_PROGRESS=1
+# .env fills in what the environment does not already set.
+while IFS='=' read -r key value; do
+  [[ $key =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
+  [ -n "${!key+x}" ] || export "$key=$value"
+done < .env
+main=$(git rev-parse --path-format=absolute --git-common-dir)/..
+SEED=${CRAFT_SEED:-$main/.local/seed/cube-v1}
+DATABASE=${CRAFT_DATABASE_NAME:-craft_dev}
+PROVIDER=${CRAFT_PROVIDER_ROOT:-.local/runtime/provider}
+
+[ -f "$SEED/craft_dev.dump" ] && [ -f "$SEED/provider.tgz" ] \
+  || { echo "Missing the frozen set: put craft_dev.dump and provider.tgz in $SEED" >&2; exit 1; }
+if [ -f "$SEED/embedding" ] && [ "$(cat "$SEED/embedding")" != "${CRAFT_MODEL_EMBEDDING:-text-embedding-3-large}" ]; then
+  echo "The frozen set's vectors come from $(cat "$SEED/embedding"); set CRAFT_MODEL_EMBEDDING to match" >&2
+  exit 1
+fi
+if [ -n "$(ls -A "$PROVIDER" 2>/dev/null)" ]; then
+  echo "$PROVIDER is not empty; remove it first" >&2; exit 1
+fi
+
+docker compose up -d --wait db >/dev/null
+tables=$(docker compose exec -T db psql -U postgres -d "$DATABASE" -Atc \
+  "select count(*) from pg_tables where schemaname = 'public'")
+[ "$tables" = 0 ] || { echo "$DATABASE already has tables; run docker compose down -v first" >&2; exit 1; }
+
+echo "Restoring the frozen database into $DATABASE"
+docker compose exec -T db pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
+echo "Restoring the provider files into $PROVIDER"
+unpacked=$(mktemp -d)
+tar -xzf "$SEED/provider.tgz" -C "$unpacked"
+mkdir -p "$PROVIDER"
+cp -R "$unpacked/provider/." "$PROVIDER/"
+rm -rf "$unpacked"
+echo "Applying newer migrations"
+CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_NAME=$DATABASE uv run -q alembic upgrade head
+echo "Seeded"

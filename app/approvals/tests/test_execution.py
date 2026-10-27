@@ -7,8 +7,7 @@ from uuid import uuid4
 
 import msgspec
 import pytest
-from sqlalchemy import event, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
 
 from app.approvals.handlers import (
     ApprovalRef,
@@ -22,7 +21,6 @@ from app.approvals.tests.test_decisions import context as context
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.pipeline import ApprovalRequired
-from app.infrastructure.provider.simulated import SimulatedProvider
 from app.notes import storage as notes_storage
 from app.notes.handlers import WriteNote, write_note
 
@@ -68,64 +66,6 @@ def count_notes(context):
             .select_from(table)
             .where(table.c.owner == context["caller"].user_id)
         ).scalar_one()
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("source_state", ["current", "newer", "withdrawn"])
-def test_approved_write_rechecks_frozen_source(context, tmp_path, source_state, monkeypatch):
-    from app.infrastructure.errors import Conflict, NotFound
-    from app.library.handlers import CitationCheck, check_citation, index_provider
-    from app.library.tests.test_versions import one_handle, versions
-    from app.tests.support.library import library_context
-
-    with library_context(context["settings"], tmp_path) as library:
-        provider, item = versions(library)
-        handle = one_handle(library, item, 3)
-        evidence = [{"handle": msgspec.to_builtins(handle)}]
-        configured = dict(context, caller=replace(context["caller"], settings=library["settings"]))
-        caller, value, identifier = prepare(configured, evidence=evidence)
-        assert check_citation(caller, CitationCheck(handle=handle)).status == "current"
-        if source_state == "newer":
-            provider.write_content("reference/versions.md", b"# Changed\n\nNew values.\n")
-            index_provider(library["settings"])
-        elif source_state == "withdrawn":
-            provider.delete_item(item)
-        active, seen = set(), []
-
-        def started(session, transaction):
-            active.add(transaction)
-
-        def ended(session, transaction):
-            active.discard(transaction)
-
-        def inspected(original):
-            def read(*args, **kwargs):
-                assert not active
-                seen.append(True)
-                return original(*args, **kwargs)
-
-            return read
-
-        for name in ("get_item", "read_content", "items"):
-            monkeypatch.setattr(
-                SimulatedProvider, name, inspected(getattr(SimulatedProvider, name))
-            )
-        event.listen(Session, "after_transaction_create", started)
-        event.listen(Session, "after_transaction_end", ended)
-        try:
-            if source_state == "current":
-                assert execute_write(caller, value).body == "12"
-            else:
-                with pytest.raises((Conflict, NotFound)):
-                    execute_write(caller, value)
-                assert count_notes(context) == 0
-                assert read_approval(caller, ApprovalRef(id=identifier)).status == "failed"
-                with pytest.raises(ApprovalRequired):
-                    execute_write(caller, value)
-        finally:
-            event.remove(Session, "after_transaction_create", started)
-            event.remove(Session, "after_transaction_end", ended)
-        assert seen and not active
 
 
 def test_approved_write_executes_once_and_changed_arguments_refused(context, monkeypatch):

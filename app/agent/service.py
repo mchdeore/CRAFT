@@ -31,6 +31,7 @@ def recovery(caller, request):
             approval_id=approval_id,
             approval_status=approval_status,
             can_resume=status == "paused" and approval_status in {"approved", "rejected"},
+            last_event=storage.last_event(session, row["run_id"]) if row["run_id"] else None,
         )
 
 
@@ -155,3 +156,112 @@ def principal(caller, digest):
         "parent_call_id": identifier("parentCallId"),
         "auth_session_id": identifier("authSessionId"),
     }
+
+
+RUN_LOCK = "agent-run:"
+
+
+def queue_run(caller, request, read_only: bool) -> int:
+    """Record the run's next input and queue it on the agent worker; returns its segment."""
+    import msgspec
+
+    from app.infrastructure.operations.context import current_call
+    from app.jobs.handlers import active_job, defer_job
+
+    call = current_call.get()
+
+    with unit_of_work(scope(caller)) as session:
+        if active_job(session, RUN_LOCK + str(request.run_id)) is not None:
+            raise Conflict()
+        segment = storage.add_segment(
+            session, caller.user_id, request.run_id, request.thread_id, msgspec.to_builtins(request)
+        )
+        defer_job(
+            session,
+            "agent_run",
+            {
+                "user": str(caller.user_id),
+                "run": str(request.run_id),
+                "segment": segment,
+                "roles": sorted(caller.roles),
+                "auth_session_id": str(caller.auth_session_id) if caller.auth_session_id else None,
+                "origin": caller.origin,
+                "read_only": read_only,
+                # The worker's run is logged as a child of this request's call.
+                "request_id": str(call.request_id) if call else None,
+                "parent_call_id": str(call.call_id) if call else None,
+            },
+            caller.user_id,
+        )
+        return segment
+
+
+def owned_segment(caller, run) -> int:
+    with unit_of_work(scope(caller), read_only=True) as session:
+        segment = storage.owned_segment(session, caller.user_id, run)
+    if segment is None:
+        raise NotFound()
+    return segment
+
+
+def events_after(caller, run, segment, after):
+    with unit_of_work(scope(caller), read_only=True) as session:
+        return storage.events_after(session, run, segment, after)
+
+
+def run_job_state(caller, run) -> str | None:
+    """The state of the run's queued or running job; None once it has ended."""
+    from app.jobs.handlers import active_job, job_state
+
+    with unit_of_work(scope(caller)) as session:
+        job = active_job(session, RUN_LOCK + str(run))
+        return job_state(session, job) if job is not None else None
+
+
+def cancel_run(caller, run) -> None:
+    """Stop the run's job; one still queued ends here, a running one ends on its worker."""
+    from app.jobs.handlers import active_job, cancel_job_by_id, job_state
+
+    with unit_of_work(scope(caller)) as session:
+        segment = storage.owned_segment(session, caller.user_id, run)
+        if segment is None:
+            raise NotFound()
+        job = active_job(session, RUN_LOCK + str(run))
+        if job is None:
+            raise Conflict()
+        queued = job_state(session, job) in {"queued", "scheduled"}
+        cancel_job_by_id(session, job)
+        if queued:
+            storage.append_event(session, run, segment, CANCELLED)
+
+
+# Worker side: sessions come from the worker, not a request.
+
+
+def run_input(sessions, run, segment):
+    with unit_of_work(sessions, read_only=True) as session:
+        return storage.read_input(session, run, segment)
+
+
+def append_event(sessions, run, segment, event) -> None:
+    with unit_of_work(sessions) as session:
+        storage.append_event(session, run, segment, event)
+
+
+def interrupt(sessions, run, segment) -> None:
+    with unit_of_work(sessions) as session:
+        storage.interrupt(session, run)
+        storage.append_event(session, run, segment, INTERRUPTED)
+
+
+def prune_events(sessions) -> None:
+    with unit_of_work(sessions) as session:
+        storage.prune_events(session, 24)
+
+
+CANCELLED = {"type": "RUN_ERROR", "code": "run_cancelled", "message": "Run stopped."}
+INTERRUPTED = {
+    "type": "RUN_ERROR",
+    "code": "run_interrupted",
+    "message": "The run was interrupted. Retry to run it again.",
+}
