@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Local demo on real models and a freshly built workspace image.
-#   demo go    wipe the demo database and workspace, seed them, start everything, open Chrome
+#   demo go    wipe the demo database and workspace, seed them, start everything, open the
+#              backend's development page in Chrome (the product UI is the craft-frontend repository)
 #              (the workspace also gets app/seed/demo-finance-skill.md as a personal skill)
 #              (restores the saved seed and applies new migrations; no indexing model calls)
 #   demo go --reseed  index every document again with the model instead of restoring the saved seed
-#   demo stop  stop the backend, frontend, workspace and database
+#   demo stop  stop the backend, workspace and database
 # Accounts sign in with password 1 unless DEMO_PASSWORD is set. Generated database
 # passwords live in .local/runtime/demo (ignored by git); nothing secret is printed.
 set -euo pipefail
@@ -12,8 +13,9 @@ set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 STATE=$REPO/.local/runtime/demo
 SNAPSHOT=$STATE/seed-snapshot
-DB_PORT=55470 API_PORT=18766 UI_PORT=5200 JUPYTER_PORT=18881 MCP_PORT=4040 BRIDGE_PORT=18790
-UI=http://localhost:$UI_PORT
+DB_PORT=55470 API_PORT=18766 JUPYTER_PORT=18881 MCP_PORT=4040 BRIDGE_PORT=18790
+ORIGIN=http://localhost:$API_PORT
+UI=$ORIGIN/dev/
 PROJECT=craft-demo
 WS=craft-demo-ws
 IMAGE=craft-user-workspace:demo
@@ -43,7 +45,8 @@ load_env() {
   CRAFT_DATABASE_PORT=$DB_PORT
   CRAFT_DATABASE_NAME=craft_dev
   CRAFT_PROVIDER_ROOT=$STATE/provider
-  CRAFT_ALLOWED_ORIGINS=$UI
+  CRAFT_ALLOWED_ORIGINS=$ORIGIN
+  CRAFT_DEV_PAGE=true
   CRAFT_MCP_URL=http://127.0.0.1:$API_PORT/mcp
   CRAFT_LOG_LEVEL=WARNING
   CRAFT_MODEL_MAX_OUTPUT_TOKENS=12000
@@ -56,11 +59,11 @@ load_env() {
 }
 
 stop() {
-  for name in web api mcp; do
+  for name in api mcp; do
     [ -f "$STATE/$name.pid" ] && kill "$(cat "$STATE/$name.pid")" 2>/dev/null || true
     rm -f "$STATE/$name.pid"
   done
-  for port in $UI_PORT $API_PORT $MCP_PORT; do
+  for port in $API_PORT $MCP_PORT; do
     lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
   done
   if colima status >/dev/null 2>&1; then
@@ -88,7 +91,6 @@ go() {
 
   say "Installing dependencies"
   uv sync -q
-  [ -d web/node_modules ] || npm --prefix web ci --silent
   if [ ! -x "$STATE/mcpctl/bin/jupyter-mcp-server" ]; then
     uv venv -q --python 3.12 "$STATE/mcpctl"
     uv pip install -q --python "$STATE/mcpctl/bin/python" jupyter-mcp-server==2.2.4
@@ -128,17 +130,15 @@ go() {
   say "Starting the demo workspace"
   workspace
 
-  say "Starting the backend and frontend"
+  say "Starting the backend"
   nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" --log-level warning \
     > "$STATE/api.log" 2>&1 & echo $! > "$STATE/api.pid"
-  (cd web && CRAFT_BACKEND_URL=http://127.0.0.1:$API_PORT VITE_USER_WORKSPACES="$(cat "$STATE/vite-workspaces.json")" \
-    nohup node_modules/.bin/vite --host localhost --port "$UI_PORT" --strictPort > "$STATE/web.log" 2>&1 & echo $! > "$STATE/web.pid")
   wait_for "http://127.0.0.1:$API_PORT/health/ready"
-  wait_for "$UI"
 
   open -a "Google Chrome" "$UI" 2>/dev/null || open "$UI"
   say "Demo ready: $UI"
   echo "  Sign in as demo with password $DEMO_PASSWORD. Reload any older tab."
+  echo "  API: $ORIGIN/api (point a local craft-frontend here)."
   echo "  Logs: $STATE. Stop with: demo stop"
 }
 
@@ -166,7 +166,7 @@ workspace() {
     -v "$WS-root:/workspace" \
     -v "$w/workspace-token:/run/craft/workspace-token:ro" \
     -e JUPYTER_TOKEN -e JUPYTER_PASSWORD_HASH \
-    -e CRAFT_UI_ORIGIN="$UI" \
+    -e CRAFT_UI_ORIGIN="$ORIGIN" \
     -e CRAFT_API_URL="http://host.docker.internal:$API_PORT" \
     "$IMAGE" >/dev/null
 
@@ -232,7 +232,6 @@ Path(state, "workspaces.json").write_text(json.dumps({owner: {
         "bridge_port": int(bridge),
     },
 }}, indent=2))
-Path(state, "vite-workspaces.json").write_text(json.dumps({owner: f"http://127.0.0.1:{jupyter}/"}))
 MAP
   )
 }

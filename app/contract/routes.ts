@@ -1,5 +1,5 @@
 import type * as T from "./types";
-import type { RunAgentInput, Event as AGUIEvent } from "@ag-ui/core";
+import type { RunAgentInput, AGUIEvent } from "@ag-ui/core";
 export interface Routes {
   "GET /api/approvals": { query: { status?: T.ApprovalStatus }; response: T.Approval[] };
   "GET /api/approvals/:id": { response: T.ApprovalDetail };

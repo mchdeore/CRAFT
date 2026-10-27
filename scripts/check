@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks for CRAFT. There is no CI; run these yourself.
-#   scripts/check        quick: lint, format, types, fast tests (+ web lint/types when web or the contract changed)
-#   scripts/check full   milestone: lock, migrations, every test except live, the workspace image, compose, web tests and build
+#   scripts/check        quick: lint, format, types, fast tests (+ contract types when the contract changed)
+#   scripts/check full   milestone: lock, migrations, every test except live, the workspace image, compose, contract types
 # Tests use a disposable PostgreSQL container (craft-check-db) on port 55481 and the passwords in .env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -36,14 +36,14 @@ start_db() {
   echo "$DB did not become healthy" >&2; return 1
 }
 
-web_changed() {
+contract_changed() {
   git fetch -q origin main 2>/dev/null || true
-  { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; } 2>/dev/null | grep -qE '^(web|app/contract)/'
+  { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; } 2>/dev/null | grep -q '^app/contract/'
 }
 
-web_deps() { # the frontend compiles against app/contract, which has its own packages
+contract_types() { # the partner frontend compiles against app/contract
   [ -d app/contract/node_modules ] || npm ci --prefix app/contract --ignore-scripts --no-audit --no-fund >/dev/null
-  [ -d web/node_modules ] || npm ci --prefix web --no-audit --no-fund >/dev/null
+  app/contract/node_modules/.bin/tsc -p app/contract
 }
 
 if [ "$mode" = full ]; then
@@ -56,10 +56,8 @@ echo "== database"
 start_db || { echo "== FAILED: database (nothing else can run)"; exit 1; }
 if [ "$mode" = quick ]; then
   step "pytest (quick)" uv run pytest -x --tb=short
-  if web_changed; then
-    step "web deps" web_deps
-    step "web lint" npm --prefix web run -s lint
-    step "web types" bash -c 'cd web && npx tsc -b'
+  if contract_changed; then
+    step "contract types" contract_types
   fi
 else
   step "migrations" bash -c 'uv run alembic upgrade head && uv run alembic check'
@@ -67,10 +65,7 @@ else
   step "pytest (full)" uv run pytest -m 'not live' --tb=short
   step "compose" env -u CRAFT_DATABASE_HOST CRAFT_DATABASE_PORT=55482 \
     bash -c 'docker compose -p craft-check up --build --wait; s=$?; docker compose -p craft-check down -v; exit $s'
-  step "web deps" bash -c 'npm ci --prefix app/contract --ignore-scripts --no-audit --no-fund && npm ci --prefix web --no-audit --no-fund'
-  step "web test" npm --prefix web test
-  step "web lint" npm --prefix web run -s lint
-  step "web build" npm --prefix web run -s build
+  step "contract types" contract_types
 fi
 
 if [ ${#failed[@]} -eq 0 ]; then echo "== all $mode checks passed"; else printf '== FAILED: %s\n' "${failed[@]}"; exit 1; fi
