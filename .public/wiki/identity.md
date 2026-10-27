@@ -22,7 +22,7 @@ OpenID Connect identifies a person by **`(issuer, subject)`**, not email or user
 
 The account, conversation, agent and approval tables already use user foreign keys. Browser sessions store digests of random tokens with idle expiry, absolute expiry and revocation. Workspace tokens are account-scoped HTTP read capabilities. Agent runs have separate short-lived MCP credentials.
 
-Personal Jupyter storage is outside these SQL tables. The backend currently selects a server, kernel and private MCP connection from a trusted user-to-workspace configuration file. The frontend has its own owner-to-URL configuration. Account creation does not provision a workspace, and SQL does not enforce unique volume or server ownership.
+Personal Jupyter storage is outside these SQL tables. The backend currently selects a server, kernel and private MCP connection from a trusted user-to-workspace configuration file. The product interface has its own owner-to-URL configuration. Account creation does not provision a workspace, and SQL does not enforce unique volume or server ownership.
 
 `workspace_files` means **conversation attachments in PostgreSQL**. It does not contain the personal scripts, notebooks, Markdown skills or outputs under `USER_ROOT`. The database also retains a separate saved-skill/revision API, notes and a draft model. Their retirement requires an explicit compatibility and data-migration step; personal Markdown files are the workspace skill source.
 

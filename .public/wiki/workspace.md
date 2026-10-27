@@ -117,8 +117,9 @@ jupyter-mcp-server \
 
 Use distinct ports and credentials for additional owners. Jupyter receives its
 own `JUPYTER_TOKEN` and `JUPYTER_PASSWORD_HASH`. `CRAFT_UI_ORIGIN` is the plain
-loopback frontend origin, such as `http://127.0.0.1:5173`. Keep credentials out of
-URLs, command arguments, model arguments, and frontend configuration.
+loopback origin of the interface that opens the workspace, such as the demo's
+`http://localhost:18766` (the default is `http://127.0.0.1:5173`). Keep credentials
+out of URLs, command arguments, model arguments, and interface configuration.
 
 Set the CRAFT server's `USER_WORKSPACES_FILE` to a private JSON file. Keys must
 match trusted CRAFT owner UUIDs exactly. Replace these example IDs and secret
@@ -175,11 +176,11 @@ Keep automatic restart disabled when the policy is not restored by a supervisor.
 Installing Python packages or reaching external services requires a new reviewed
 image or a supplied CRAFT operation, rather than internet access from user code.
 
-Set the frontend's `VITE_USER_WORKSPACES` to a nonsecret JSON map of the same
-owner UUIDs to plain loopback Jupyter server roots. The app opens `/lab`:
+The product interface opens `/lab` from a nonsecret JSON map of the same owner
+UUIDs to plain loopback Jupyter server roots:
 
-```dotenv
-VITE_USER_WORKSPACES='{"00000000-0000-0000-0000-000000000001":"http://127.0.0.1:18881/","00000000-0000-0000-0000-000000000002":"http://127.0.0.1:18882/"}'
+```json
+{"00000000-0000-0000-0000-000000000001": "http://127.0.0.1:18881/", "00000000-0000-0000-0000-000000000002": "http://127.0.0.1:18882/"}
 ```
 
 The signed-in owner selects the matching entry; an absent entry has no global

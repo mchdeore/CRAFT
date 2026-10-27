@@ -1,18 +1,17 @@
 # Development
 
-How to set up, run and check CRAFT. External services are listed in [dependencies](dependencies.md); exact versions live in `pyproject.toml`, `uv.lock` and `web/package.json`.
+How to set up, run and check CRAFT. External services are listed in [dependencies](dependencies.md); exact versions live in `pyproject.toml`, `uv.lock` and `app/contract/package.json`. CRAFT is the backend only: the product interface is the separate `craft-frontend` repository, which compiles against `app/contract/`.
 
 ## Layout
 
 ```text
 app/                     backend: FastAPI server, craft CLI and worker (Python module `app`)
   Dockerfile             built from the repository root: docker build -f app/Dockerfile .
-  contract/              HTTP contract as code: types.ts, routes.ts, examples/ (the frontend compiles against it)
+  contract/              HTTP contract as code: types.ts, routes.ts, examples/ (the product frontend compiles against it)
   processes/             owned process and container lifecycle (supervisord and Docker backends)
   infrastructure/        access, settings, database (initdb.sh, migrations/), operations, MCP, provider, logging
   agent/ accounts/ conversations/ library/ cube/ approvals/ notes/ skills/ tools/ summarize/ health/ dev/
   seed/                  base seed (base/: accounts, grants, provider Markdown) and the generated demo set
-web/                     frontend: React and Vite
 workspace/               the personal JupyterLab workspace image: Dockerfile, the `craft` package (src/), built-in skills
 .public/wiki/            this wiki, published by GitHub Pages
 .local/                  private and never committed: assistant rules and skills, plans, fake data, demo and provider state, worktrees
@@ -25,7 +24,7 @@ Each folder under `app/` is one feature: `handlers.py` declares operations, `ser
 
 ## Setup
 
-Use Git, uv, a running Docker engine, Compose and Buildx; frontend development also needs Node.js 24 with npm. Run commands from the repository root unless shown otherwise. Keep the checkout outside iCloud or other folders that download file contents on demand.
+Use Git, uv, a running Docker engine, Compose and Buildx; the contract type check also needs Node.js 24 with npm. Run commands from the repository root unless shown otherwise. Keep the checkout outside iCloud or other folders that download file contents on demand.
 
 Copy `.env.example` to an untracked `.env`. Set separate administrative, owner and application database passwords. A previously initialized database volume keeps its original passwords. Choose a free database host port and use a new disposable volume for isolated checks.
 
@@ -51,26 +50,13 @@ Seed and index writes use owner database access. These host commands need the de
 
 Enable `CRAFT_DEV_PAGE=1` for the optional `/dev` page. It supports sign-in, search, chat, approval recovery, rename, archive and conversation file operations. `/summarize` is available independently.
 
-For the tracked frontend, install both npm dependency trees, then start the Vite server with the backend already running:
-
-```bash
-npm ci --prefix app/contract --ignore-scripts --no-audit --no-fund
-npm ci --prefix web --no-audit --no-fund
-cd web
-CRAFT_BACKEND_URL=http://127.0.0.1:8000 npm run dev
-```
-
-The development proxy forwards `/api`, `/health` and `/mcp` to the selected loopback backend. `CRAFT_BACKEND_URL` must be a single HTTP or HTTPS loopback origin without credentials, a path, query or fragment. The backend must allow the frontend Origin. Live mode is the default and uses authenticated sessions.
-
-For a demo, seed the backend before starting the frontend. `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and is never stored in the repository:
+For a demo, `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and is never stored in the repository:
 
 ```bash
 SEED_DEMO_PASSWORD='choose-a-local-password' uv run craft seed demo
 ```
 
-`scripts/demo go` runs the whole local demo on the configured models: it wipes the demo database and workspace, builds the workspace image, migrates and seeds the database, starts one demo workspace, the backend and the frontend, then opens `http://localhost:5200`. `scripts/demo stop` stops them. The seeded accounts sign in with password `1` unless `DEMO_PASSWORD` is set. Model settings come from the checkout's `.env`; generated database passwords live in the ignored `.local/runtime/demo/`.
-
-The production build ignores environment files and includes only curated public assets. Serve its `web/dist/` output with the authenticated backend from the same origin and its `/api/` routes; the development proxy does not configure production serving. Return to the repository root for the following backend commands.
+`scripts/demo go` runs the whole local demo on the configured models: it wipes the demo database and workspace, builds the workspace image, migrates and seeds the database, starts one demo workspace and the backend, then opens the backend's `/dev` page at `http://localhost:18766/dev/`. `scripts/demo stop` stops them. The seeded accounts sign in with password `1` unless `DEMO_PASSWORD` is set. Model settings come from the checkout's `.env`; generated database passwords live in the ignored `.local/runtime/demo/`.
 
 Stop the host server before starting the application container on port 8000:
 
@@ -87,8 +73,8 @@ docker compose down
 There is no CI. Run the checks yourself:
 
 ```bash
-scripts/check        # quick: Ruff, format, Pyright and the fast tests; web lint and types when web/ or the contract changed
-scripts/check full   # milestones: lock, migrations, every test except live ones, both workspace images, Compose, web tests and build
+scripts/check        # quick: Ruff, format, Pyright and the fast tests; contract types when app/contract/ changed
+scripts/check full   # milestones: lock, migrations, every test except live ones, the workspace image, Compose and contract types
 ```
 
 `scripts/check` starts a disposable PostgreSQL container, `craft-check-db`, on port 55481 with the passwords from `.env`. A plain `uv run pytest` runs the quick set: tests marked `docker`, `live` or `slow` are left out. `uv run pytest -m ''` runs everything. In a worktree, link the main checkout's `.env` first.
@@ -111,15 +97,7 @@ Use only `craft_test` or a named disposable database for checks, never a real co
 
 Tests install the scripted model from `app/tests/support/model.py` in place of the configured provider and nothing outside tests uses it. Deterministic checks use real application handlers and isolated PostgreSQL. Database setup failures and missing live prerequisites are recorded separately from assertion failures. A source review or synthetic test does not establish live model quality or browser acceptance.
 
-After installing the API and frontend npm dependencies, run the frontend checks from `web/`:
-
-```bash
-npm test
-npm run lint
-npm run build
-```
-
-Set the backend's `CRAFT_MCP_URL` to its own `/mcp` address when it does not run on port 8000. To keep the production test build at a chosen place, set `CRAFT_RELEASE_TEST_OUTPUT` to a new absolute path outside the source tree. `npm test` selects every `tests/*.test.mjs` file with the TypeScript test loader and retains production artifact test output outside the frontend source tree. `npm run lint` runs `eslint .`. `npm run build` runs `tsc -b && vite build`, so it checks TypeScript before writing the production bundle to `dist/`. There is no separate frontend type-check script.
+Set the backend's `CRAFT_MCP_URL` to its own `/mcp` address when it does not run on port 8000.
 
 ## Services and state
 

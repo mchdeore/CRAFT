@@ -13,7 +13,7 @@ This wiki is the source of truth for what CRAFT is and how it works. It is publi
 | Runs on | Local backend and Docker Compose |
 | Agent | One agent, run inside the CRAFT backend |
 | Approvals | The requester decides effectful agent actions; the agent never decides |
-| Stack | Python, FastAPI, msgspec, PostgreSQL with pgvector, SQLAlchemy; Microsoft Agent Framework with models from Microsoft Foundry; a React frontend built against the API contract |
+| Stack | Python, FastAPI, msgspec, PostgreSQL with pgvector, SQLAlchemy; Microsoft Agent Framework with models from Microsoft Foundry; the product interface is the separate `craft-frontend` repository, built against the API contract |
 | Protocols | HTTP with JSON for ordinary calls, AG-UI over Server-Sent Events for the chat stream, MCP for agent tool calls |
 
 ## Pages

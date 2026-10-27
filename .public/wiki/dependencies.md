@@ -1,6 +1,6 @@
 # Dependencies
 
-The outside services and tools CRAFT relies on, and why. Exact versions are not repeated here: Python packages are in `pyproject.toml` and `uv.lock`, the frontend's in `web/package.json`, the contract's in `app/contract/package.json`, images in `compose.yaml`, `app/Dockerfile` and `workspace/Dockerfile`. Settings are in [`.env.example`](https://github.com/mchdeore/CRAFT/blob/main/.env.example).
+The outside services and tools CRAFT relies on, and why. Exact versions are not repeated here: Python packages are in `pyproject.toml` and `uv.lock`, the contract's in `app/contract/package.json`, images in `compose.yaml`, `app/Dockerfile` and `workspace/Dockerfile`. Settings are in [`.env.example`](https://github.com/mchdeore/CRAFT/blob/main/.env.example).
 
 | Service or tool | Why CRAFT uses it | Configured by |
 |---|---|---|
@@ -11,7 +11,7 @@ The outside services and tools CRAFT relies on, and why. Exact versions are not 
 | JupyterLab | The personal workspace beside chat, in its own image. | `workspace/` |
 | Wolfram Alpha (optional) | Checked calculations when an app ID is configured. | `CRAFT_WOLFRAM_APP_ID` |
 | uv | Python environment, lock and builds. | `pyproject.toml`, `uv.lock` |
-| Node.js 24 with npm | The frontend and the contract's schema checks. | `web/package.json`, `app/contract/package.json` |
+| Node.js 24 with npm | The contract's type check. | `app/contract/package.json` |
 | GitHub Pages | Publishes this wiki from `.public/wiki/` when it changes on `main`. | `.github/workflows/wiki.yml` |
 
 Protocols: HTTP with JSON for ordinary calls, AG-UI events over Server-Sent Events for the chat stream, and MCP for agent tool calls. See [components](components.md) for who talks to whom.
