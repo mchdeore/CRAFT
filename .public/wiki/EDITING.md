@@ -15,7 +15,7 @@ The wiki is the Markdown in `.public/wiki/` on `main`. When a merge changes it, 
 - One `#` title per page, then `##` sections and `###` subsections. No numbers in headings.
 - Link to another page with its file name, such as `[roadmap](roadmap.md)` or `[access](datacube.md#access)`. Anchors are the heading in lower case, punctuation removed, spaces turned into hyphens.
 - Link to code with a full GitHub address, such as `https://github.com/mchdeore/CRAFT/blob/main/app/contract/types.ts`, because the site only contains `.public/wiki/`.
-- Never copy what the code already states. Link to it instead: contract types (`app/contract/`), versions (`pyproject.toml`, `uv.lock`, `web/package.json`), settings (`.env.example`).
+- Never copy what the code already states. Link to it instead: contract types (`app/contract/`), versions (`pyproject.toml`, `uv.lock`, `app/contract/package.json`), settings (`.env.example`).
 - Images go in `.public/wiki/images/` as SVG, with the Mermaid source beside them (`.mmd`).
 - Short sentences, present tense, no private paths, names or credentials.
 

@@ -17,12 +17,21 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 | Chat | Rename, grouping, archive and unarchive | Owned conversations |
 | Workspace | A personal JupyterLab beside chat, the `craft` package, analysis and graphing helpers, editable local copies, and workspace skills | Owned containers and workspace tokens |
 | Background work | A durable worker queue (`craft worker`) for indexing and OCR jobs | Valkey and the `worker` Compose profile |
-| Demo | Generated demo set, a saved seed snapshot and `scripts/demo` | Provider data and the API contract |
+| Demo | Generated demo set, a saved seed snapshot and `scripts/demo` with the backend's `/dev` page | Provider data and the API contract |
+| Interface | No interface in this repository. The product interface is the separate `craft-frontend` repository | It compiles against `app/contract/` |
 
 ### Next
 
-1. **Multilingual documents**: language detection and translation into a separate artifact, such as a French copy, without changing the source. It starts with an endpoint smoke test.
-2. **Azure Container Apps deployment**: one low-cost hosted environment updated from local development through a repeatable pipeline.
+Each item is planned and has a trigger met or close. The maintainer chooses the order; the list is not a sequence.
+
+- **Background jobs on PostgreSQL**: the worker queue moves from Valkey into PostgreSQL, with retries, priorities and a job history. Valkey is removed.
+- **One API contract with the product interface**: `app/contract/` is the single source, published to the partner team's contract repository, with sign-in and the routes the product interface calls.
+- **Document extraction bake-off**: compare the OCR and document-analysis models on the same files, then move OCR from a preview model to a generally available one.
+- **Sign-in shaped like Entra ID**: craft-app signs people in with OpenID Connect through a small identity provider that CRAFT runs and that mirrors Entra ID. Passwords no longer reach craft-app, and CRAFT keeps deciding who has access.
+- **Azure deployment**: staging, then production, on Azure Container Apps with Azure Database for PostgreSQL, Azure Files for the document lake, Key Vault, and Azure Front Door on the project's domain.
+- **Multilingual documents**: language detection, and translation into a separate file, such as a French copy, without changing the source. Then each person's language preferences.
+- **Charts, notebooks and Office files**: charts the agent makes, notebooks worked on with the agent, Word and PowerPoint output, and notebook runs as sandboxed background jobs.
+- **Provider adapters and CRAFT revisions**: one provider interface with several adapters, a LiveLink-shaped test server, and CRAFT-owned revisions of documents (full copies that point at their source version), exported at any point in time and pushed back only after approval.
 
 ## Deferred
 
@@ -30,26 +39,26 @@ Each row stays as it is until its trigger happens.
 
 | What | Now | Deferred | Trigger |
 |---|---|---|---|
-| Sign-in | Local accounts | Entra ID | An application registration is available |
-| Access | Local account roles and operation/resource checks | Expanded governed role mapping | Before real data or larger teams |
+| Sign-in | Local accounts; next, OpenID Connect through a CRAFT-run identity provider | Entra ID, with the same settings shape | An application registration is available |
+| Access | Local account roles and operation/resource checks | Expanded governed role mapping; Entra groups or app roles | Before real data or larger teams |
 | Decisions | The requester approves; the agent never approves | Refusing self-approval, designated approvers, eligibility, escalation, timeouts and request editing | Before real data or larger teams |
 | Model access | Key from `.env`, simulated data | Managed identity; data handling agreed | Before real data |
-| Agent run | In the chat request; indexing and OCR use the worker queue | Agent runs on the worker | Runs must survive disconnects or scale |
+| Agent run | In the chat request (capped at the hosting timeout once on Azure); indexing and OCR use the worker queue | Detachable agent runs on the worker | Runs must survive disconnects or scale |
 | Agent hosting | CRAFT backend | Optionally Foundry hosted agents | Hosting adapter generally available |
 | Agents | One | Sub-agents, then specialists | CRAFT runs end to end |
-| Retrieval | PostgreSQL hybrid | Azure AI Search with the semantic ranker | Azure deployment or a real corpus |
-| Data | Simulated corpus | Connectors, ingestion, source register | A source is approved |
-| Document analysis | Text extraction and OCR | Content Understanding analyzers that feed the datacube | Promoted after multilingual documents |
+| Model routing | Fixed main and check models | A model router | Measured cost or quality need |
+| Retrieval | PostgreSQL hybrid | Azure AI Search with the semantic ranker | A real corpus outgrows PostgreSQL |
+| Data | Simulated corpus; next, a LiveLink-shaped test server | Real LiveLink, then SharePoint and OneDrive through Microsoft Graph | Access and a service account are granted |
+| Document analysis | Text extraction and OCR; next, the extraction bake-off | Structured table intake: document-analysis rows become datacube candidates a person approves | The bake-off shows it beats today's table parsing |
 | Hosting | Docker Compose | Azure Container Apps with continuous deployment | Next (see above) |
-| Security | Local only | Security assessment (Protected B), private endpoints, secret scanning | Azure deployment starts |
+| Security | Local only | Security assessment (Protected B), private endpoints, secret scanning | Before production data |
 | Audit | Append-only approval history | Write-once storage, retention, export | Deployment |
 | Logs | stdout and `call_log` | OpenTelemetry, Azure Monitor, retention | Deployment |
 | Run limits | Starting values | Measured values | Evaluation set exists |
 | Confidence calibration | Six evidence inputs and configured gate | Calibrated weights and thresholds | The labelled evaluation set exists |
-| Language | English | French and detection | Next (see above) |
-| Code execution | Approved `run_code` in the owner's JupyterLab | Hosted sandbox (Container Apps dynamic sessions) | Azure deployment |
+| Code execution | Approved `run_code` in the owner's JupyterLab | Hosted sandbox (Container Apps dynamic sessions) | Azure deployment and a sessions trial |
 | Load | Not sized | Sized to the load profile | Before sizing infrastructure |
-| Database hosting | Local container | Azure Database for PostgreSQL with pgvector, same migrations | Deployment |
+| Database hosting | Local container | Azure Database for PostgreSQL with pgvector, same migrations | Next (see above) |
 | Database logins | Logins created by `initdb.sh` | Logins and grants from infrastructure code; managed identity | Deployment |
 | Database recovery | Simulated data, no backups | Managed backups, retention and recovery | Before real data |
 | Document permissions | Mission grants ([access](datacube.md#access)) | Source-system permissions | Real connectors |

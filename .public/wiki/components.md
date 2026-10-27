@@ -6,8 +6,8 @@
 |---|---|---|
 | Application | Authenticated chat, saved skills, approvals, document and cube tools, conversation files and PostgreSQL records | `app/` |
 | Process lifecycle | Controller-owned child processes and containers, with an optional application lifespan attachment | `app/processes/` |
-| Contract | Executable TypeScript forms, routes and examples the frontend compiles against | `app/contract/` |
-| Frontend | The signed-in React interface | `web/` |
+| Contract | Executable TypeScript forms, routes and examples the product interface compiles against | `app/contract/` |
+| Product interface | The signed-in web interface, built by the partner team in the separate `craft-frontend` repository | Not in this repository |
 | JupyterLab workspace | The personal workspace image, its `craft` package and built-in skills | `workspace/` |
 | Worker | Background indexing and OCR jobs from the queue | `craft worker` in `app/` |
 
