@@ -54,7 +54,9 @@ def runtime_client(context):
         with live_server(app), TestClient(app, base_url="https://testserver") as http:
             http.headers["Origin"] = "https://testserver"
             login(http, context)
-            yield http
+            # Runs execute on the agent worker, which calls this app's MCP endpoint.
+            with context["worker"].using(app.state.settings):
+                yield http
     finally:
         app.state.engine.dispose()
 

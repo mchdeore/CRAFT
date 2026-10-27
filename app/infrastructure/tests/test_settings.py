@@ -127,50 +127,11 @@ def test_disabled_cross_origin_browser_mode_retains_local_origin() -> None:
     assert configured.allowed_origins == "http://localhost:8000"
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        "http://localhost:6379/0",
-        "redis://localhost",
-        "redis://user:secret@localhost:6379/0",
-        "redis://localhost:70000/0",
-        "redis://localhost:6379/not-a-db",
-    ],
-)
-def test_queue_url_validation_has_safe_diagnostics(value: str) -> None:
-    with pytest.raises(SystemExit) as stopped:
-        Settings.from_env({**VALID, "CRAFT_QUEUE_URL": value})
-    diagnostic = str(stopped.value)
-    assert "queue_url" in diagnostic
-    assert value not in diagnostic and SECRET not in diagnostic
-
-
-def test_ocr_policy_settings_from_environment() -> None:
+def test_worker_queues_and_retired_settings() -> None:
     configured = Settings.from_env(
-        {
-            **VALID,
-            "CRAFT_OCR_MAX_BYTES": "2048",
-            "CRAFT_OCR_ATTEMPT_LIMIT": "4",
-            "CRAFT_OCR_RETRY_SECONDS": "60",
-        }
+        {**VALID, "CRAFT_WORKER_QUEUES": "bulk, agent", "CRAFT_OCR_MAX_BYTES": "2048"}
     )
-    assert (
-        configured.ocr_max_bytes,
-        configured.ocr_attempt_limit,
-        configured.ocr_retry_seconds,
-    ) == (2048, 4, 60)
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("OCR_MAX_BYTES", "0"),
-        ("OCR_MAX_BYTES", "52428801"),
-        ("OCR_ATTEMPT_LIMIT", "11"),
-        ("OCR_RETRY_SECONDS", "0"),
-    ],
-)
-def test_ocr_policy_settings_reject_invalid_values(field: str, value: str) -> None:
+    assert configured.queue_names() == ["bulk", "agent"]
     with pytest.raises(SystemExit) as stopped:
-        Settings.from_env({**VALID, f"CRAFT_{field}": value})
-    assert field.lower() in str(stopped.value)
+        Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "agent,urgent"})
+    assert "worker_queues" in str(stopped.value) and "urgent" not in str(stopped.value)

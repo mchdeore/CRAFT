@@ -14,8 +14,8 @@ Requesters are engineers and finance staff working on simulated missions. Most r
 | Analyse an imported or @ file (statistics, largest items, a quick script) | Quick table analysis below: one run_code in a new analysis folder |
 | Correlation, trend or chart across missions | Quick datacube analysis below: one run_code in a new analysis folder |
 | A new notebook or analysis folder | Analysis folders below: inputs, script, notebook, outputs and short notes in one labelled folder |
-| A / workspace skill such as /workspace/skills/demo-finance-skill.md | Propose a run_code read of it at once, then follow it: usually one more run_code |
-| Cost, reserve or budget review of a cost model | the demo finance skill if referenced, otherwise Quick table analysis |
+| A / workspace skill such as /workspace/skills/finance.md | Propose a run_code read of it at once, then follow it: usually one more run_code |
+| Cost, reserve or budget review of a cost model | a referenced finance skill, otherwise Quick table analysis |
 | Follow-up on a result ("which dominates?", "what should I tell finance?") | Answer from the earlier output without new tool calls unless new data is needed |
 
 After an approved run, answer from its printed output: figures, what they mean in plain words, and links to saved files.

@@ -5,18 +5,18 @@ How to set up, run and check CRAFT. External services are listed in [dependencie
 ## Layout
 
 ```text
-app/                     backend: FastAPI server, craft CLI and worker (Python module `app`)
+app/                     backend: FastAPI server, craft CLI and workers (Python module `app`)
   Dockerfile             built from the repository root: docker build -f app/Dockerfile .
   contract/              HTTP contract as code: types.ts, routes.ts, examples/ (the product frontend compiles against it)
   processes/             owned process and container lifecycle (supervisord and Docker backends)
   infrastructure/        access, settings, database (initdb.sh, migrations/), operations, MCP, provider, logging
-  agent/ accounts/ conversations/ library/ cube/ approvals/ notes/ skills/ tools/ summarize/ health/ dev/
-  seed/                  base seed (base/: accounts, grants, provider Markdown) and the generated demo set
+  agent/ accounts/ conversations/ library/ cube/ approvals/ jobs/ notes/ skills/ tools/ summarize/ health/
+  seed/                  synthetic test data (base/: accounts, grants, provider Markdown)
 workspace/               the personal JupyterLab workspace image: Dockerfile, the `craft` package (src/), built-in skills
 .public/wiki/            this wiki, published by GitHub Pages
-.local/                  private and never committed: assistant rules and skills, plans, fake data, demo and provider state, worktrees
+.local/                  private and never committed: assistant rules and skills, plans, fake data, the frozen dataset, provider state, worktrees
 scripts/check            quick and full checks
-scripts/demo             the local demo
+scripts/seed             loads the frozen dataset
 compose.yaml  pyproject.toml  uv.lock  .env.example
 ```
 
@@ -31,32 +31,15 @@ Copy `.env.example` to an untracked `.env`. Set separate administrative, owner a
 ```bash
 cp .env.example .env
 uv sync --locked
-docker compose up -d --wait db
-uv run alembic upgrade head
-uv run alembic check
-uv run craft seed base
-uv run craft index
+scripts/seed
 uv run craft users reset demo --as admin
 uv run uvicorn app.main:app --reload
+uv run craft worker
 ```
 
-Base seeding creates synthetic accounts, grants, two missions and five provider documents. It sets no account password and does not index. Password reset uses a private prompt. The generated demo command performs its own indexing and seeded-value loading:
+The library index and the datacube are frozen until a second version of the datacube. `scripts/seed` loads the frozen set into an empty database and provider folder, then applies newer migrations; it makes no model call. The set is private and not in the repository: it holds a database dump, the provider files and the name of the embedding model its vectors came from, which `CRAFT_MODEL_EMBEDDING` must match. To start over, run `docker compose down -v`, remove the provider folder and run `scripts/seed` again.
 
-```bash
-uv run craft seed demo --seed 1
-```
-
-Seed and index writes use owner database access. These host commands need the development dependencies, including the generated-PDF library. The application reads the provider folder; it does not seed or migrate at startup.
-
-Enable `CRAFT_DEV_PAGE=1` for the optional `/dev` page. It supports sign-in, search, chat, approval recovery, rename, archive and conversation file operations. `/summarize` is available independently.
-
-For a demo, `SEED_DEMO_PASSWORD` gives the seeded accounts `demo`, `restricted` and `admin` that password; it needs at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and is never stored in the repository:
-
-```bash
-SEED_DEMO_PASSWORD='choose-a-local-password' uv run craft seed demo
-```
-
-`scripts/demo go` runs the whole local demo on the configured models: it wipes the demo database and workspace, builds the workspace image, migrates and seeds the database, starts one demo workspace and the backend, then opens the backend's `/dev` page at `http://localhost:18766/dev/`. `scripts/demo stop` stops them. The seeded accounts sign in with password `1` unless `DEMO_PASSWORD` is set. Model settings come from the checkout's `.env`; generated database passwords live in the ignored `.local/runtime/demo/`.
+Password reset uses a private prompt. `craft worker` runs chat turns and other background jobs; without it, chat waits and then fails. The application reads the provider folder; it does not seed or migrate at startup. `/summarize` is a separate page.
 
 Stop the host server before starting the application container on port 8000:
 
@@ -86,22 +69,21 @@ Use only `craft_test` or a named disposable database for checks, never a real co
 | Registry and logging | `uv run pytest -q app/infrastructure/operations/tests app/tests/test_architecture.py` | Checked boundaries, short transactions and metadata-only logs |
 | Contract | `uv run pytest -q app/tests/test_contract.py` | Built routes/tools, Python/TypeScript shapes, examples and stream schemas |
 | Sessions | `uv run pytest -q app/accounts/tests` | Cookie, Origin, expiry, revocation and account ownership |
-| Sources and retrieval | `uv run pytest -q app/infrastructure/provider/tests app/library/tests` | Immutable versions, conversion, current access, ranking and citations |
-| Cube | `uv run pytest -q app/cube/tests` | Units, dated values, comparisons, candidate evidence and approved publication |
-| Generated data | `uv run pytest -q app/seed/tests/test_demo.py` | Reproducible bytes, ground truth, versions and withdrawals |
-| Chat and recovery | `uv run pytest -q app/agent/tests` | Events, owned history, limits, cancellation and persisted approval resume |
+| Sources | `uv run pytest -q app/infrastructure/provider/tests app/library/tests` | Immutable versions, conversion and version differences |
+| Background jobs | `uv run pytest -q app/jobs/tests` | Deduplication, retries, stopping, queue separation and recovery after a killed worker |
+| Chat and recovery | `uv run pytest -q app/agent/tests` | Events, owned history, limits, cancellation, re-attach and persisted approval resume |
 | Native MCP | `uv run pytest -q app/infrastructure/mcp/tests` | Transport parity, run-token checks, tool links and effect refusal |
 | Conversations/files | `uv run pytest -q app/conversations/tests` | Nonblank titles, list order, archive behavior and bounded exact files |
 | Skills and notes | `uv run pytest -q app/skills/tests app/notes/tests` | Owner scope, immutable revisions, save conflicts and mutation replay |
 | Tools and summary | `uv run pytest -q app/tools/tests app/summarize/tests` | Chart/expression bounds, source extracts and confidence behavior |
 
-Tests install the scripted model from `app/tests/support/model.py` in place of the configured provider and nothing outside tests uses it. Deterministic checks use real application handlers and isolated PostgreSQL. Database setup failures and missing live prerequisites are recorded separately from assertion failures. A source review or synthetic test does not establish live model quality or browser acceptance.
+Tests install the scripted model from `app/tests/support/model.py` in place of the configured provider and nothing outside tests uses it; no check calls a paid model. Chat tests run an in-process agent worker, and tests that need a source document load its rows directly. Deterministic checks use real application handlers and isolated PostgreSQL. Database setup failures and missing live prerequisites are recorded separately from assertion failures. A source review or synthetic test does not establish live model quality or browser acceptance.
 
 Set the backend's `CRAFT_MCP_URL` to its own `/mcp` address when it does not run on port 8000.
 
 ## Services and state
 
-Compose starts `db`, `queue` (Valkey) and `app`; the `worker` profile adds the background worker. The optional `mcp` profile uses the same application image, database settings and read-only provider mount, and starts `craft mcp --as <account>` over standard input and output in the app's network namespace. HTTP MCP is already mounted inside the app at `/mcp`; neither transport is a code runner or durable queue.
+Compose starts `db`, `app` and three workers, `worker-agent`, `worker-interactive` and `worker-bulk` ([background jobs](processes.md#background-jobs)). `worker-agent` shares the app's network so the agent runtime reaches `/mcp` on loopback. Workers started before the migrations wait for them. The optional `mcp` profile uses the same application image, database settings and read-only provider mount, and starts `craft mcp --as <account>` over standard input and output in the app's network namespace. HTTP MCP is already mounted inside the app at `/mcp`; neither transport is a code runner or a job queue.
 
 Database initialization runs once on an empty volume. It creates owner/application logins, development/test databases and the vector extension. Migrations run as the owner; application requests use the application login and per-table grants. Readiness checks database access and migration head; liveness checks the running process.
 
@@ -111,15 +93,15 @@ The application agent uses PostgreSQL conversations and sessions with native HTT
 
 The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding.
 
-## Provider and generated data
+## Provider and frozen data
 
 `CRAFT_PROVIDER_ROOT` defaults to `.local/runtime/provider` on the host. Compose mounts it read-only at `/provider`. It stores generated originals and immutable versions outside PostgreSQL. The database keeps derived chunks, summaries, vectors, differences and approved cube values.
 
-Indexing converts sources and makes model/embedding requests before short writes. Summaries and vectors come from the configured models, and each row records the model that made it. `craft index --rebuild` rebuilds representations when that model changes. Source availability and mission/silo grants constrain search and evidence reads.
+The library's summaries and vectors are frozen; each row records the model that made it. Source availability and mission/silo grants constrain search and evidence reads.
 
 Search combines keyword and vector candidates with normalized 0.7 semantic and 0.3 lexical weights. Ranking scores order hits; answer confidence stays zero and low. Exact citation handles and source checks are described in the specification.
 
-The generated demo set has 125 source items, twelve missions in four families and 48 planted questions. It includes changed versions, moves, copies, mixed units, bilingual headers, unknown cells and three withdrawn cited sources. Ground truth lives at `<provider root>/.provider/ground-truth.json`. An unchanged completed seed adds no version or value; a changed baseline preserves earlier generations.
+The frozen set has twelve simulated missions in four families, about 125 source items and the cube values that cite them. It includes changed versions, moves, copies, mixed units, bilingual headers, unknown cells and withdrawn cited sources. Ground truth lives at `<provider root>/.provider/ground-truth.json`.
 
 
 ## Backend conventions

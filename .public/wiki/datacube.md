@@ -13,10 +13,10 @@ The datacube runs on labelled simulated data. Every mission, document and value 
 | Part | Holds | Owns the truth for | Rebuildable |
 |---|---|---|---|
 | Document provider | The original files and every version of them | What a document says | No; it is the source |
-| Library | Text chunks, summaries, facet texts, vectors and version differences | Nothing; it mirrors the provider | Yes, from the provider |
+| Library | Text chunks, summaries, facet texts, vectors and version differences | Nothing; it mirrors the provider | Frozen; restored by `scripts/seed` |
 | Cube | Missions, silos, stages, elements, the parameter dictionary and approved values | What CRAFT has accepted as a mission's parameters | No; approvals are records |
 
-The library and cube never store provider original bytes. The local provider folder stores generated originals and immutable versions; application operations read them when indexing, checking a citation or opening a preview. Document content changes enter through the provider command line, and indexing records the new version and differences.
+The library and cube never store provider original bytes. The local provider folder stores generated originals and immutable versions; application operations read them when checking a citation or opening a preview. The library and cube are frozen ([Frozen library](datacube.md#frozen-library)): nothing indexes new provider content.
 
 ## Document provider
 
@@ -51,7 +51,7 @@ The provider is a folder on disk with a sidecar record. The setting `CRAFT_PROVI
 | Delete | The item is marked deleted. Its versions stay | `deleted_at` is set |
 | Labels | `simulated` and `classification` (`unclassified`, `protected-a`, `protected-b`) from `items.jsonl`; new items are simulated and unclassified | |
 
-The provider offers six functions. CRAFT's indexing and preview use the first four. People and demo scripts use the last two through the command line.
+The provider offers six functions. CRAFT's previews and citation checks use the first four. People use the last two through the command line.
 
 | Function | Does | Never does |
 |---|---|---|
@@ -75,7 +75,7 @@ The command line wraps them: `craft provider scan`, `craft provider put <path> <
 | One vector per chunk, document version and facet text | Semantic search | A vector without its model and recipe |
 | Block differences between versions | What changed | A full copy of each version |
 
-One converter turns each allowed format into chunks. A format not listed is refused with a reason. Without OCR opt-in, a PDF without a text layer is refused with the reason `no text layer`. With `--enrich-ocr`, a scanned PDF or image without convertible text can instead have an OCR-only version record, with no chunks or embeddings ([Missions, silos and stages](datacube.md#missions-silos-and-stages)).
+One converter turns each allowed format into chunks. The frozen library was built with it, and file inspection still uses it. A format not listed is refused with a reason; a PDF without a text layer is refused with the reason `no text layer`.
 
 | Format | One chunk is | Locator |
 |---|---|---|
@@ -90,7 +90,7 @@ Tables use pipe-delimited rows with repeated headers. Cell line breaks become sp
 
 Each chunk keeps three text fields: `text` (the words exactly as in the source), `heading_path` (the headings above it, such as `2 Power > 2.3 Margins`, or the slide title, or the sheet name) and `locator`.
 
-Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. The summary says what the document is and which mission, subsystem, review or decision it concerns, and gives its key requirements, findings, figures with units and open issues. Indexing summarizes and embeds up to eight documents at once and writes them in source order. Optional OCR enrichment is queued and stores plain extracted text on the document version; it does not change ranking or embedding inputs.
+Each document version has one summary of at most 150 words, made by one model call and labelled `generated`. The summary says what the document is and which mission, subsystem, review or decision it concerns, and gives its key requirements, findings, figures with units and open issues. The frozen library's summaries were made this way; no model call makes new ones.
 
 A citation handle names everything needed to show and re-check a quote. It survives a rebuild of the library; chunk identifiers do not.
 
@@ -112,7 +112,7 @@ Thick blue arrows go into `vectors`: chunks, document versions and facet texts a
 | Record | Tags | Embeddings | What is embedded |
 |---|---|---|---|
 | Chunk | Mission, silo, stage, simulated, from its document | 1 | `chunk-v1`: title, heading path and text |
-| Document version | Mission, silo, stage from the path; simulated and classification from the provider | 1 | `doc-v1`: title and summary (stored OCR text is not embedded) |
+| Document version | Mission, silo, stage from the path; simulated and classification from the provider | 1 | `doc-v1`: title and summary |
 | Facet text | Mission and facet | 1 | `facet-v1`: the facet text |
 | Mission | Simulated; current stage | None; its facet texts carry its vectors | |
 | Cube value | Mission, silo, stage | None; found by filters and by the chunk it cites | |
@@ -160,32 +160,20 @@ create table cube_values (id, mission_key text not null references missions,
 create index on cube_values (mission_key, parameter, valid_from desc, recorded_at desc);
 -- seeded values have no approval request; every other value names the request that accepted it
 
--- 0011_create_facet_texts                          craft_app: SELECT (indexing writes as craft_owner)
+-- 0011_create_facet_texts                          craft_app: SELECT (the seed writes as craft_owner)
 create table facet_texts (id, mission_key text not null references missions,
   facet text not null check (facet in ('purpose','design','operations','program','cost_and_risk')),
   text text not null, sources text[] not null, model text not null, built_at ts,
   unique (mission_key, facet));
 ```
 
-## Indexing and changes
+## Frozen library
 
-`craft index` brings the library up to date. It runs as `craft_owner`, like the seed, because the library is derived data.
+The library and the cube are frozen until a second version of the datacube. Nothing indexes new provider content, and no model call rebuilds summaries, vectors or facet texts. `scripts/seed` restores the frozen set ([Seed data](datacube.md#seed-data)).
 
-1. Scan the provider.
-2. Read the change feed after the stored cursor.
-3. For each new version: convert it to chunks, write the summary, embed chunks and the document version, and record the block differences from the previous version by chunk text hash.
-4. For each move: update the item's path and tags. For each delete: mark the item deleted.
-5. Rebuild the facet texts and facet vectors of every mission whose documents changed.
-6. Store the new cursor.
-7. If `--enrich-ocr` is set, enqueue OCR for each active item's current PDF or image version only when it has no converted chunks and no stored OCR. Text-native and historical versions are not automatically submitted. Workers write `ocr_text`, `ocr_model` and `ocr_updated_at` on `doc_versions`.
+Each frozen version keeps its block differences from the previous version, matched by chunk text hash. Block matching preserved repeated text: equal hashes at the same position are unchanged; remaining equal hashes pair in ascending position order and are moved; remaining pairs at the same position are changed; unmatched blocks are added or removed.
 
-Block matching preserves repeated text. Equal hashes at the same position are unchanged; remaining equal hashes pair in ascending position order and are moved. Remaining pairs at the same position are changed; unmatched blocks are added or removed. Differences are stored with the new version in the same transaction.
-
-Running `craft index` twice in a row adds nothing. `craft index --rebuild` prepares converted text and model results before atomically replacing derived chunks, vectors and differences. Document-version identifiers and OCR for matching source hashes survive; failed preparation or replacement leaves the existing search index intact. Existing facet texts and vectors survive later OCR enqueue or facet-model failures, and are replaced only after facet preparation succeeds. The ingestion cursor advances only after those steps complete, allowing a later run to recover. Cube values and their citations are untouched.
-
-`craft index --enrich-ocr` recovers eligible current versions after an enqueue outage. A scanned PDF or image without convertible text can have an OCR-only version record, with no chunks or embeddings. OCR stays outside retrieval ranking and embeddings. Explicit version requests can enrich historical PDF or image versions. Enqueue and retry atomically share one active OCR attempt per version, including forced attempts. Persisted text prevents normal re-enqueue even after job records expire.
-
-OCR reads at most `CRAFT_OCR_MAX_BYTES` plus one byte before rejecting an oversized source; the default limit is 10 MiB. PDFs use the provider's document payload and images its image payload. Permanent source/provider rejections block automatic retry while their policy is retained. Transient failures use an exponential cooldown starting at `CRAFT_OCR_RETRY_SECONDS` (one hour by default), capped at one day, and stop after `CRAFT_OCR_ATTEMPT_LIMIT` automatic attempts (three by default). Terminal jobs, version claims, and retry policies expire after seven days; active claims do not expire. After terminal policy expiry, a later indexing request may start a new attempt budget. Persisted OCR text still prevents ordinary re-enqueue. A lost worker or missing persisted result also observes a cooldown; an administrator can request `POST /api/library/documents/{item}/versions/{version}/ocr` to recover a readable version even after job expiry or policy corruption. Explicit recovery may override retry limits but never source provenance, size limits, or active-job deduplication. Inference runs outside database transactions; final OCR persistence locks the active provider row and requires the indexed version hash to still match the captured source.
+The frozen set records provider changes like this:
 
 | Change in the provider | Library | Cube |
 |---|---|---|
@@ -208,9 +196,9 @@ A facet is one way of describing a mission. Each mission has at most one facet t
 | `program` | Schedule, stages, reviews and decisions | reviews, requirements |
 | `cost_and_risk` | Estimates, contingency and risks | budget, reviews |
 
-One model call per mission reads the summaries of the mission's documents and writes the facet texts. Each sentence ends with the item it came from in square brackets, such as `[itm_4f9c2a0b1c2d]`. A validator removes any sentence that names no item or names an item outside the mission. A facet with no remaining sentence has no row and counts as missing, never as zero. `sources` lists the items the facet text names.
+The frozen facet texts came from one model call per mission that read the summaries of the mission's documents. Each sentence ends with the item it came from in square brackets, such as `[itm_4f9c2a0b1c2d]`. A validator removes any sentence that names no item or names an item outside the mission. A facet with no remaining sentence has no row and counts as missing, never as zero. `sources` lists the items the facet text names.
 
-Facet texts use active sources and their latest indexed summaries, with at most 80 words per facet. Changed versions, moves and withdrawals rebuild the affected missions. Each text has a `facet-v1` vector labeled with the embedding model. Reads recheck every cited source against indexed and live mission and silo grants. A withdrawn source, changed mission or missing current-model vector cannot contribute to a similarity score. Read operations make no conversational model call.
+Facet texts use active sources and their latest indexed summaries, with at most 80 words per facet. Each text has a `facet-v1` vector labeled with the embedding model. Reads recheck every cited source against indexed and live mission and silo grants. A withdrawn source, changed mission or missing current-model vector cannot contribute to a similarity score. Read operations make no conversational model call.
 
 ## Missions, silos and stages
 
@@ -353,10 +341,9 @@ Facet selections contain one to five distinct names. Missing or unreadable facet
 
 | Step | Approval | Why |
 |---|---|---|
-| Library indexing | None | Derived from the provider and rebuildable |
 | Candidate values from a table chunk (`prepare_values`) | None | A read: nothing is written |
 | Values into the cube (`submit_values`) | The requester approves the batch | The cube is CRAFT's accepted record |
-| Seeded values | None; loaded as simulated | Demonstration data |
+| Seeded values | None; loaded as simulated | Part of the frozen set |
 
 `prepare_values` reads one table chunk. Each header maps to a parameter through the header synonyms. Each cell becomes a candidate with its row citation, source number and unit, converted value and any problem. The mission comes from the chunk's tags unless the request names it. Problems: unknown header, no unit, unknown unit, not a number, outside the allowed bounds, mission not resolved, no valid-from date.
 
@@ -407,20 +394,11 @@ The API contract defines the request and response forms. Logs record handles, sc
 
 ## Seed data
 
-| Command | Loads |
-|---|---|
-| `craft seed base` | Demo accounts and their mission grants, and a small provider folder of Markdown documents in two missions and the reference folder |
-| `craft seed demo` | The demo set: 12 simulated missions in four families of three, about 120 documents in every allowed format across silos and stages, the cube records, header synonyms and seeded values, and a ground-truth file |
+`scripts/seed` loads the frozen set into an empty database and provider folder, then applies newer migrations. It makes no model call. The set is private and not in the repository: a database dump, the provider files and the name of the embedding model its vectors came from. `CRAFT_MODEL_EMBEDDING` must match that model.
 
-`seed base` leaves indexing to `craft index` and provisions no account password. `seed demo --seed 1` performs indexing and seeded-value loading itself, then refreshes the index after its source withdrawals. These host commands use owner database access and preserve existing versions and values.
+The frozen set has 12 simulated missions in four families of three, 125 source items in every allowed format across silos and stages, the cube records, header synonyms and seeded values, and a ground-truth file. It includes version pairs, renamed copies, moved and deleted documents, mixed units, English and French headers, unknown values and values whose sources are withdrawn. Every mission, document and value is labelled simulated. No name, value or document number comes from a real source.
 
-The demo set is generated, not stored: the same seed number gives the same bytes. It includes version pairs, renamed copies, moved and deleted documents, mixed units, English and French headers, unknown values and a value whose source is withdrawn. Every mission, document and value is labelled simulated. No name, value or document number comes from a real source.
-
-The ground-truth file, `<provider root>/.provider/ground-truth.json`, lists what the generator planted: questions with the citation handles that answer them, the mission families, the version changes and the aliases. [Retrieval](documents.md#retrieval)'s evaluation reads it.
-
-A fresh demo set has 125 source items and 48 planted questions. Twelve sources have changed versions with later valid dates; two sources move between stage folders; three copies keep matching cells with different bytes. Three cited sources are withdrawn after seeded values name them. Mission-total rows load aggregate values. A unitless cell is not loaded, and TBD is unknown.
-
-The ground-truth file at `.provider/ground-truth.json` records source handles, families, changes and dated values. File properties and package order are fixed. Repeating an unchanged completed seed adds nothing. Changing its baseline creates a new generation and preserves earlier versions and values.
+The ground-truth file, `<provider root>/.provider/ground-truth.json`, lists what the generator planted: 48 questions with the citation handles that answer them, the mission families, the version changes and the aliases. [Retrieval](documents.md#retrieval)'s evaluation reads it.
 
 ## Document summary and owned inspection
 
@@ -523,7 +501,7 @@ create unique index on approval_events (request_id) where kind in ('executed','f
 create view approval_status as select distinct on (request_id) request_id, kind, actor_id, at
   from approval_events order by request_id, at desc, id desc;
 
--- 0006_create_library                              craft_app: SELECT (indexing writes as craft_owner);
+-- 0006_create_library                              craft_app: SELECT (the seed writes as craft_owner);
 --                                                  mission_grants: INSERT, DELETE
 create table provider_items (item text primary key check (item ~ '^itm_[0-9a-f]{12}$'),
   path text not null, title text not null, mission_key text null, silo text null, stage text null,
@@ -579,9 +557,9 @@ create index on workspace_files (conversation_id, created_at desc);    -- delete
 | Accounts | Session token digests and password hashes only. Accounts by CLI. Roles = rows in `user_roles` |
 | Call log | Holds linked account, sign-in session, conversation, run and tool-call identifiers without content. Approval records hold decisions separately. |
 | Conversations | Owned by an account. Sign-out deletes nothing. History comes from `messages` as stream-protocol messages. A later run restores `agent_sessions.state` with `AgentSession.from_dict`. |
-| Agent runs | Only the run-token digest is stored. A running run finishes, fails, cancels or pauses; a decision can resume a paused run. |
+| Agent runs | Only the run-token digest is stored. A running run finishes, fails, cancels or pauses; a decision can resume a paused run. A run's inputs and events (`agent_run_inputs`, `agent_run_events`) are deleted a day after it ends; messages stay the lasting record. |
 | Approvals | Every step a new row; current state = latest event; the database refuses edits and deletes |
-| Library | Derived from the document provider and rebuilt by `craft index` ([Indexing and changes](datacube.md#indexing-and-changes)). Never holds an original file. A chunk is the unit of search and citation; a citation names item, version, block, locator and quote hash. `simulated` and `classification` label every chunk and citation. Access comes from `mission_grants` ([Access](datacube.md#access)) |
+| Library | Derived from the document provider and frozen ([Frozen library](datacube.md#frozen-library)). Never holds an original file. A chunk is the unit of search and citation; a citation names item, version, block, locator and quote hash. `simulated` and `classification` label every chunk and citation. Access comes from `mission_grants` ([Access](datacube.md#access)) |
 | Workspace | The files of one conversation, uploaded or made by the agent. A file is simulated only if all its inputs are, and takes the highest classification among them. Deleted when the conversation is archived; keeping one or sending it outside CRAFT is an export, which needs approval. Every download is in the call log |
 | User documents | `drafts` belong to their owner. Append-only. Shared documents (Vision) build on this pattern |
 
@@ -591,8 +569,10 @@ Migration 0012 adds owner-scoped working notes. Migration 0013 adds owned skill 
 
 Migration 0015 adds `workspace_tokens` ([Workspace tokens](access.md#workspace-tokens)) and records each call's workspace token in `call_log.workspace_token_id`, with the origin `workspace`. Only token digests are stored. Existing workspace call rows make the downgrade fail rather than remove audit rows.
 
+Migration 0019 adds the background job queue: Procrastinate's tables from its pinned schema, `job_attempt_errors` (the error class of each failed attempt, never its message) and the `job_overview` view ([Background jobs](processes.md#background-jobs)). Migration 0020 adds `agent_run_inputs` and `agent_run_events` for chat turns on the agent worker. Both grant `craft_app` the rows it needs; there is no separate worker login.
+
 ### Seed and health
 
-- Seed is a host command, separate from migrations. `uv run craft seed base` loads synthetic accounts, grants, two missions and a small provider folder; it does not set account passwords or build the index. `uv run craft index` builds the derived library. `uv run craft seed demo --seed 1` generates the larger set, indexes it, loads seeded values, records withdrawals and refreshes the index ([Seed data](datacube.md#seed-data)). Owner database access handles seed and index writes. An unchanged completed seed adds no source version or value. Account creation and grants through `craft users` use the application login.
+- Seeding is a host script, separate from migrations: `scripts/seed` restores the frozen set into an empty database ([Seed data](datacube.md#seed-data)). Account creation and grants through `craft users` use the application login.
 - Liveness returns HTTP 200 with an ok body while the process runs. Readiness returns HTTP 200 when the database reports the expected migration within three seconds; otherwise it returns HTTP 503 with an unavailable body. Its separate connection has a three-second deadline. Both routes are anonymous, outside `/api`, and reveal no protected information. Hosted probes use the same split.
 - [Deferred](roadmap.md#deferred) defines database deployment, permission, backup, retention and audit extensions. [wiki home](README.md) defines the workspace and sandbox scope.

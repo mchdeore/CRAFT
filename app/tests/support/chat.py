@@ -1,11 +1,54 @@
 """Owned synthetic conversations shared by streaming and transport tests."""
 
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.infrastructure.database import metadata as m
+
+
+class AgentWorker:
+    """Chat turns run on an in-process agent worker with this test's settings."""
+
+    def __init__(self, owner, settings):
+        self.owner, self.settings = owner, settings
+        self.stack = ExitStack()
+
+    def start(self, settings):
+        from app.infrastructure.queue import worker_thread
+
+        with self.owner.begin() as connection:
+            # A job left queued by an earlier test would run with these settings.
+            connection.execute(
+                text("update procrastinate_jobs set status = 'cancelled' where status = 'todo'")
+            )
+        self.stack.enter_context(worker_thread(settings, ["agent"]))
+
+    def stop(self):
+        self.stack.close()
+
+    @contextmanager
+    def using(self, settings):
+        """Run turns with other settings (the worker's settings, not the caller's, apply)."""
+        self.stop()
+        self.start(settings)
+        try:
+            yield
+        finally:
+            self.stop()
+            self.start(self.settings)
+
+
+@contextmanager
+def agent_worker(owner, settings):
+    worker = AgentWorker(owner, settings)
+    worker.start(settings)
+    try:
+        yield worker
+    finally:
+        worker.stop()
 
 
 @pytest.fixture
@@ -26,13 +69,16 @@ def chat(cube_source):
 
         with live_server(source["app"]):
             configured = source["app"].state.settings
-            yield source | {
-                "thread": identifier,
-                "settings": configured,
-                "caller": replace(source["caller"], settings=configured),
-            }
+            with agent_worker(source["owner"], configured) as worker:
+                yield source | {
+                    "thread": identifier,
+                    "settings": configured,
+                    "caller": replace(source["caller"], settings=configured),
+                    "worker": worker,
+                }
     else:
-        yield source | {"thread": identifier}
+        with agent_worker(source["owner"], source["settings"]) as worker:
+            yield source | {"thread": identifier, "worker": worker}
     with source["owner"].begin() as connection:
         connection.execute(
             m.metadata.tables["messages"]

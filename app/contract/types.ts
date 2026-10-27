@@ -29,14 +29,12 @@ export interface DocumentRef { item: string; version?: number }
 export interface DocumentList { limit?: number }
 export interface CatalogDocument { item: string; title: string; version: number; classification: Classification; simulated: boolean }
 export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
-export type JobState = "queued" | "started" | "deferred" | "scheduled" | "finished" | "failed" | "stopped" | "canceled" | "unknown";
-export interface IndexJobRequest { rebuild?: boolean; enrichOcr?: boolean }
-export interface OcrJobRequest { item: string; version: number }
-export interface IndexJobPageRequest { status?: Exclude<JobState, "unknown">; offset?: number; limit?: number }
-export interface IndexJob { jobId: string; status: JobState; queue: string; rebuild: boolean; enrichOcr: boolean; kind?: "index" | "ocr"; item?: string | null; version?: number | null; force?: boolean; requestedBy?: string | null; retryOf?: string | null; enqueuedAt?: string | null; startedAt?: string | null; endedAt?: string | null; result?: Record<string, string | number> | null; error?: string | null }
-export interface IndexJobPage { jobs: IndexJob[]; nextOffset: number | null }
-export interface QueueWorker { name: string; state: string; queues: string[]; successfulJobs: number; failedJobs: number; lastHeartbeat?: string | null }
-export interface IndexQueueHealth { queue: string; queued: number; started: number; deferred: number; scheduled: number; failed: number; finished: number; canceled: number; workers: QueueWorker[] }
+export type JobState = "queued" | "scheduled" | "started" | "stopping" | "finished" | "failed" | "canceled" | "stopped";
+export interface JobPageRequest { status?: JobState | null; offset?: number; limit?: number }
+export interface Job { jobId: string; kind: string; queue: string; status: JobState; attempts: number; requestedBy: string | null; enqueuedAt: string | null; startedAt: string | null; finishedAt: string | null; error: string | null }
+export interface JobPage { jobs: Job[]; nextOffset: number | null }
+export interface QueueCounts { queue: string; queued: number; scheduled: number; started: number; stopping: number; finished: number; failed: number; canceled: number; stopped: number; oldestQueuedSeconds: number | null }
+export interface QueueHealth { queues: QueueCounts[]; dead: number }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
@@ -140,6 +138,8 @@ export interface RunRecovery {
   status: "none" | "running" | "paused" | "finished" | "failed" | "cancelled";
   runId: Id | null; startedAt: string | null; endedAt: string | null;
   approvalId: Id | null; approvalStatus: ApprovalStatus | null; canResume: boolean;
+  /** Events in the run's newest stream; re-attach with GET /api/agent/runs/:run/events?after=N. */
+  lastEvent: number | null;
 }
 export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
 export type RetrievalPath = RetrievalStep[];

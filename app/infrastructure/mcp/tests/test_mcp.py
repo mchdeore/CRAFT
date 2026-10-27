@@ -309,6 +309,9 @@ def test_mcp_log_links_run_tool_call_operation(chat, capsys):
             connection.execute(select(logs).where(logs.c.run_id == data.run_id)).mappings().all()
         )
     root = next(r for r in records if r["name"] == "agent.run_agent")
+    worker = next(r for r in records if r["name"] == "agent.agent_run")
+    assert worker["parent_call_id"] == root["call_id"]
+    root = worker  # tool calls run under the agent worker's run
     tool = next(r for r in records if r["name"] == "library.search")
     assert tool["origin"] == "mcp" and tool["user_id"] == chat["caller"].user_id
     assert tool["conversation_id"] == data.thread_id and tool["tool_call_id"] == identifier

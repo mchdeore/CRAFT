@@ -12,9 +12,6 @@ from sqlalchemy import select
 from app.agent.handlers import AskAgent, ask_agent
 from app.infrastructure.database import metadata as m
 from app.infrastructure.operations.registry import registry, tool_operations
-from app.library.tests.conftest import library as library
-from app.library.tests.test_catalog import catalog as documents
-from app.library.tests.test_catalog import catalog_source as catalog_source
 from app.tests.support.chat import chat as chat
 from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
@@ -67,22 +64,6 @@ def test_scripted_formats_actual_capabilities_and_explains_empty_saved_skills(ch
     skills = response("List skills", result).text.lower()
     assert "saved skills" in skills and "no saved skills yet" in skills
     assert not any(tool.name in skills for tool in result.tools)
-
-
-def test_scripted_formats_actual_current_document_catalog_and_escapes_titles(catalog_source):
-    library, provider, item, _ = catalog_source
-    records = provider.items()
-    records[item]["title"] = "Catalog [launch](command:unsafe) <script>alert(1)</script> \u202e\x00"
-    provider.save(records)
-    checked = documents(library["callers"]["demo"])
-    row = next(row for row in checked.documents if row.item == item)
-    text = response("List readable documents", checked).text
-    assert "Catalog" in text and str(row.version) in text and "simulated" in text.lower()
-    assert "readable" in text.lower() and ("limit" in text.lower() or "bounded" in text.lower())
-    assert len(text) <= 12000
-    assert "](command:" not in text and "<script>" not in text
-    assert "\u202e" not in text and "\x00" not in text
-    assert library["settings"].provider_root not in text
 
 
 @pytest.mark.parametrize(

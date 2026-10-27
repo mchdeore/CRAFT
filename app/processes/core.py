@@ -101,24 +101,28 @@ class ProcessManager:
             health = "unchecked"
         return ServiceStatus(spec.id, state, health)
 
-    @serialized
     def start(self, service_id: str) -> ServiceStatus:
-        spec = self.owned(service_id)
-        self.health[spec.id] = "unchecked"
-        if self.backend(spec).state(spec) not in {"starting", "running"}:
-            self.backend(spec).start(spec)
+        # The lock is held per step, not across the readiness wait, so status calls stay quick.
+        with self.lock:
+            spec = self.owned(service_id)
+            self.health[spec.id] = "unchecked"
+            if self.backend(spec).state(spec) not in {"starting", "running"}:
+                self.backend(spec).start(spec)
         deadline = time.monotonic() + spec.ready_seconds
         while time.monotonic() < deadline:
             status = self.status(spec.id)
             if status.state == "running" and status.health != "failed":
-                self.health[spec.id] = status.health
+                with self.lock:
+                    self.health[spec.id] = status.health
                 return status
             if status.state in {"failed", "exited"}:
-                self.health[spec.id] = "failed"
+                with self.lock:
+                    self.health[spec.id] = "failed"
                 raise LifecycleError("startup_failed")
             time.sleep(0.02)
-        self.health[spec.id] = "failed"
-        self.stop(spec.id)
+        with self.lock:
+            self.health[spec.id] = "failed"
+            self.stop(spec.id)
         raise LifecycleError("readiness_timeout")
 
     @serialized
@@ -176,6 +180,7 @@ class ProcessManager:
                 backend.close()
             except Exception as error:
                 errors.append(error)
+        # Closed even after a partial cleanup: backends are not closed twice.
+        self.closed = True
         if errors:
             raise LifecycleError("cleanup_incomplete") from None
-        self.closed = True

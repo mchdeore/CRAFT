@@ -35,10 +35,12 @@ def test_ask_agent_returns_cited_answer(chat):
         )
     root = next(row for row in rows if row["name"] == "agent.ask_agent")
     run = next(row for row in rows if row["name"] == "agent.run_agent")
+    worker = next(row for row in rows if row["name"] == "agent.agent_run")
     tool = next(row for row in rows if row["name"] == "library.search")
     assert (
         run["parent_call_id"] == root["call_id"]
-        and tool["parent_call_id"] == run["call_id"]
+        and worker["parent_call_id"] == run["call_id"]
+        and tool["parent_call_id"] == worker["call_id"]
         and tool["tool_call_id"]
     )
 

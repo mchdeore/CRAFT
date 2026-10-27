@@ -1,17 +1,12 @@
 """Synthetic files verify source order, locators, inactive cells and indexing."""
 
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
 
-from app.infrastructure.database import metadata as m
 from app.library.convert import convert
-from app.library.index import build
 from app.library.tests.files import (
     csv_file,
-    office_files,
     pdf_file,
     slides_file,
     word_file,
@@ -100,40 +95,6 @@ def test_mismatched_extension(filename) -> None:
 def test_office_package_type_must_match(tmp_path) -> None:
     with pytest.raises(ValueError, match="^unsupported format$"):
         convert(word_file(tmp_path / "simulated.docx").read_bytes(), "simulated.xlsx")
-
-
-def test_index_office_files(library) -> None:
-    prefix = "reference/" + uuid4().hex
-    paths = office_files(library["root"] / prefix)
-    counts = build(library["settings"])
-    assert counts["versions"] == 5 and counts["chunks"] >= 5
-    with library["sessions"].begin() as session:
-        rows = session.execute(
-            select(
-                m.doc_versions.c.id,
-                m.doc_versions.c.summary,
-                m.doc_versions.c.summary_kind,
-                m.provider_items.c.path,
-                m.provider_items.c.simulated,
-            )
-            .join(m.provider_items)
-            .where(m.provider_items.c.path.in_([prefix + "/" + p.name for p in paths]))
-        ).all()
-        assert len(rows) == 5
-        for row in rows:
-            assert (
-                row.simulated
-                and row.summary_kind == "generated"
-                and 0 < len(row.summary.split()) <= 150
-            )
-            assert session.execute(
-                select(m.chunks.c.id).where(m.chunks.c.doc_version_id == row.id)
-            ).first()
-            assert session.execute(
-                select(m.vectors.c.id).where(
-                    m.vectors.c.owner_kind == "doc_version", m.vectors.c.owner_id == row.id
-                )
-            ).first()
 
 
 def test_paragraph_split_and_deterministic_handles(tmp_path) -> None:

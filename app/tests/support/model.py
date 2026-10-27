@@ -28,7 +28,6 @@ from agent_framework import (
 
 from app.agent import model
 from app.infrastructure.operations import observe
-from app.library import facets, summaries
 
 ENDPOINT = "https://scripted-model.test"
 KEY = "scripted"
@@ -46,31 +45,6 @@ def embedding(text: str) -> list[float]:
         vector[int.from_bytes(digest[:4]) % 1536] += 1.0 if digest[4] & 1 else -1.0
     norm = math.sqrt(sum(v * v for v in vector))
     return [v / norm for v in vector] if norm else vector
-
-
-def summary_answer(text: str) -> str:
-    return " ".join(text.split()[:150])
-
-
-FACET_SILOS = {
-    "requirements": "purpose",
-    "engineering": "design",
-    "quality": "design",
-    "launch": "operations",
-    "reviews": "program",
-    "budget": "cost_and_risk",
-}
-
-
-def facet_answer(text: str) -> str:
-    """Each facet takes the first summary sentence of every document whose silo feeds it."""
-    result = {facet: [] for facet in facets.FACETS}
-    for document in json.loads(text):
-        facet = FACET_SILOS.get(document["silo"])
-        sentence = re.split(r"(?<=[.!?])\s+", document["summary"].strip())[0]
-        if facet and sentence:
-            result[facet].append(sentence + " [" + document["item"] + "]")
-    return json.dumps({facet: " ".join(parts) for facet, parts in result.items()})
 
 
 def evidence(value):
@@ -271,12 +245,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
         ).hexdigest()
         task = summary_task(question)
         catalog_kind = catalog_task(question)
-        system = next((message.text for message in messages if message.role == "system"), "")
-        if system == summaries.INSTRUCTIONS:
-            contents = [Content.from_text(summary_answer(question))]
-        elif system == facets.INSTRUCTIONS:
-            contents = [Content.from_text(facet_answer(question))]
-        elif task is not None:
+        if task is not None:
             contents = [Content.from_text(json.dumps(task))]
         elif self.role == "check":
             contents = [

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -16,6 +17,8 @@ from sqlalchemy import select
 from app.agent import model
 from app.agent.tests.test_approval_resume import clear_run_approvals, events, runtime_client
 from app.approvals.tests.test_decisions import context as context
+from app.infrastructure import queue
+from app.infrastructure.database.engine import make_engine
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.registry import registry, tool_named
@@ -201,14 +204,27 @@ def test_selected_revision_and_fresh_client_edit_execute_different_actual_tools(
 def test_automatic_mcp_discovery_reads_and_records_exact_revision(context, monkeypatch):
     selected = SkillClient("discovery")
     monkeypatch.setattr(model, "client", lambda _: selected)
+    engines = []
+
+    def engine(settings):
+        engines.append(make_engine(settings))
+        return engines[-1]
+
+    def drained():
+        # The agent worker's pool: no transaction spans the model call (a previous event's
+        # short write may still be finishing on another thread).
+        deadline = time.monotonic() + 1
+        while engines[-1].pool.checkedout() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if engines[-1].pool.checkedout():
+            pytest.fail("Transaction spans model call")
+
+    monkeypatch.setattr(queue, "make_engine", engine)
     identifier = uuid4()
     with runtime_client(context) as http:
         save(http, identifier)
         assert isinstance(http.app, FastAPI)
-        engine = http.app.state.engine
-        selected.check_connections = lambda: (
-            None if engine.pool.checkedout() == 0 else pytest.fail("Transaction spans model call")
-        )
+        selected.check_connections = drained
         response = events(http.post("/api/agent/runs", json=run_body(context)))
         assert response[-1]["type"] == "RUN_FINISHED"
         assert {"list_skills", "read_skill_version", "list_parameters"} <= set(selected.calls)
@@ -535,7 +551,7 @@ def test_native_recovery_load_failure_finishes_run_without_effect(context, monke
         assert http.post("/api/agent/runs", json=resume).status_code in (404, 409)
 
 
-def test_selected_skill_http_disconnect_retains_run_history_and_cancels(context):
+def test_selected_skill_http_disconnect_keeps_running_and_records_history(context):
     with runtime_client(context) as http:
         assert isinstance(http.app, FastAPI)
         app = http.app
@@ -592,13 +608,18 @@ def test_selected_skill_http_disconnect_retains_run_history_and_cancels(context)
 
         asyncio.run(execute())
         runs = metadata.tables["agent_runs"]
-        with context["owner"].connect() as db:
-            assert (
-                db.execute(
+
+        def status():
+            with context["owner"].connect() as db:
+                return db.execute(
                     select(runs.c.status).where(runs.c.id == UUID(body["runId"]))
-                ).scalar_one()
-                == "cancelled"
-            )
+                ).scalar_one_or_none()
+
+        # The run keeps going on the agent worker after the browser leaves.
+        deadline = time.monotonic() + 10
+        while status() != "finished" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert status() == "finished"
         assert pins(context) == [reference]
         history = http.get("/api/conversations/" + body["threadId"]).json()["messages"]
         assert any(

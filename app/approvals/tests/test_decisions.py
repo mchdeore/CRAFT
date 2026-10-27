@@ -19,6 +19,7 @@ from app.infrastructure.errors import Conflict, Forbidden, NotFound
 from app.infrastructure.operations import DATA, operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.shapes import Shape
+from app.tests.support.chat import agent_worker
 
 
 class MutationInput(Shape):
@@ -88,19 +89,26 @@ def context(settings, owner_engine):
         )
 
     try:
-        yield {
-            "caller": caller,
-            "proposal": proposal,
-            "owner": owner_engine,
-            "settings": configured,
-            "users": users,
-            "password": password,
-            "run": run,
-            "conversation": conversation,
-            "operation": operation_name,
-        }
+        with agent_worker(owner_engine, configured) as worker:
+            yield {
+                "caller": caller,
+                "proposal": proposal,
+                "owner": owner_engine,
+                "settings": configured,
+                "users": users,
+                "password": password,
+                "run": run,
+                "conversation": conversation,
+                "operation": operation_name,
+                "worker": worker,
+            }
     finally:
         with owner_engine.begin() as db:
+            inputs = metadata.tables["agent_run_inputs"]
+            events = metadata.tables["agent_run_events"]
+            owned = select(inputs.c.run_id).where(inputs.c.owner_id.in_([u for u, _ in users]))
+            db.execute(events.delete().where(events.c.run_id.in_(owned)))
+            db.execute(inputs.delete().where(inputs.c.owner_id.in_([u for u, _ in users])))
             db.execute(
                 metadata.tables["notes"]
                 .delete()

@@ -38,7 +38,10 @@ The server reads the conversation and run identifiers, the newest user message o
 
 ```text
 POST /api/agent/runs RunAgentInput: threadId, runId, and the new user message or resume
- 1  caller from the cookie; the conversation must be theirs, else 404
+ 0  caller from the cookie; the conversation must be theirs, else 404; store the input
+    and queue an agent_run job; the request now follows the run's stored events
+    (on worker-agent:)
+ 1  rebuild the caller from the job (IDs only); the input comes from agent_run_inputs
  2  insert agent_runs (status running) and issue a short-lived run token
  3  load the agent state from agent_sessions, or create it
  4  build the input on the server: history from messages, tools from the allowlist,
@@ -50,11 +53,13 @@ POST /api/agent/runs RunAgentInput: threadId, runId, and the new user message or
     paused:     save the approval request and state; status paused; revoke the token;
                 RUN_FINISHED with an interrupt
     failed:     status failed; RUN_ERROR with a safe code
-    disconnect: status cancelled; saved state kept
+    cancelled:  POST /api/agent/runs/{run}/cancel; status cancelled; RUN_ERROR run_cancelled
+    worker died: status failed; RUN_ERROR run_interrupted; never re-run by itself
+ 8  every event is written to agent_run_events; a closed page does not stop the run
 ```
 
 ```python
-# app/agent/runtime.py: the one function that changes if runs move to a worker
+# app/agent/runtime.py: the turn itself; app/agent/jobs.py runs it on worker-agent
 async def run(caller: Caller, request: RunAgentInput) -> AsyncIterator[AguiEvent]:
     conversation = conversations.own(caller, request.thread_id)         # 404 if not theirs
     run = runs.start(caller, conversation)                              # issues the run token
@@ -84,11 +89,11 @@ MCP (Model Context Protocol): the standard way an agent lists and calls tools. I
 - Server side: the low-level `mcp` `Server`, mounted at `/mcp` in the same FastAPI app. Stateless, JSON responses.
 - Auth: `Authorization: Bearer <run token>`. The token is random, short-lived and bound to the signed-in account and the run. Only its digest is stored on `agent_runs`; it is revoked at run end or pause. The agent never holds the cookie or a password.
 - Allowlist: `allowed_tools` per agent. A tool not on it doesn't exist for that agent.
-- Current local transport: stateless JSON HTTP at `/mcp`. The token is 32 random bytes; its SHA-256 digest and expiry are stored. Paused, finished, failed, cancelled, expired or disabled principals are refused. Completion and disconnect revoke the token before the runtime exits.
+- Current local transport: stateless JSON HTTP at `/mcp`. The token is 32 random bytes; its SHA-256 digest and expiry are stored. Paused, finished, failed, cancelled, expired or disabled principals are refused. Completion, cancellation and an interrupted run revoke the token.
 - Trusted log context: parent request/call and sign-in session identifiers come from server-owned run state. MCP metadata supplies the model tool-call identifier only; it grants no identity or parent authority. The private outbound tool observation and checked operation share that identifier.
 - The loopback target defaults to `http://127.0.0.1:8000/mcp`, configurable through `CRAFT_MCP_URL`. Remote hosts, credentials, query strings and fragments are refused. DNS rebinding protection stays enabled.
 - The application's `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. It retains native result metadata, parsing, error and cancellation behavior, input filtering, authentication and run/tool-call identity. Approved local effects consume their matching approval in the effect transaction.
-- HTTP MCP runs inside the CRAFT app. The optional Compose MCP service starts the same image and registry over standard input and output. MCP transports carry tool calls; they are separate from code execution and worker queues.
+- HTTP MCP runs inside the CRAFT app; the agent runtime on `worker-agent` calls it, which is why that worker shares the app's network in Compose. The optional Compose MCP service starts the same image and registry over standard input and output. MCP transports carry tool calls; they are separate from code execution and the job queue.
 
 ## Human approval
 
@@ -147,7 +152,7 @@ Runs execute inside the CRAFT backend. The model adapter uses the configured pro
 
 AG-UI: an open protocol of typed events that streams an agent run to a web page.
 
-- `POST /api/agent/runs` returns `text/event-stream`. Other operations return HTTP JSON responses.
+- `POST /api/agent/runs` returns `text/event-stream`, and so does `GET /api/agent/runs/{run}/events`. Other operations return HTTP JSON responses.
 - Packages:
   - server: the agent-framework stream adapter;
   - browser: the AG-UI event libraries.
@@ -163,11 +168,16 @@ instructions and identity cannot replace server records. Only the newest user te
 is appended. Run identifiers are globally unique; reuse and an active conversation
 return conflict, while a fourth active run for an account returns rate limited.
 Starts use a short account-serialized transaction. Model and tool waits occur after
-it ends. Terminal events follow durable message and session saves. Disconnects close
-the primed stream and cancel the run, including before the first body chunk. A
-bounded in-request producer keeps native MCP connection, calls and close on their
-owning task. The consumer cancels and awaits it on disconnect. This lifetime has no
-work that continues after the request.
+it ends. Terminal events follow durable message and session saves.
+
+The turn runs as an `agent_run` job on the `agent` queue ([background jobs](processes.md#background-jobs)), so a user can leave the page and come back to the answer or the approval request. The request stores the input in `agent_run_inputs` and streams events as the worker writes them to `agent_run_events`; one `LISTEN` connection per app process wakes the open streams. A closed connection no longer stops the run. Each POST (a start or a resume) is one numbered stream of events:
+
+- `GET /api/agent/runs/{run}/events?after=N` re-attaches: it replays the run's newest stream after the first N events, then follows it until `RUN_FINISHED` or `RUN_ERROR`. `GET /api/conversations/{id}/run` returns `lastEvent`, the number of events so far.
+- `POST /api/agent/runs/{run}/cancel` stops a queued or running turn; the stream ends with `RUN_ERROR` `run_cancelled`.
+- A turn whose worker died ends `failed` with `RUN_ERROR` `run_interrupted`. It is never retried automatically: tools can change things and every attempt costs model money.
+- A turn no worker takes within 60 seconds fails instead of waiting.
+
+Events and inputs are deleted a day after the run ends; the conversation's messages stay the lasting record. Inside the worker, a bounded producer keeps native MCP connection, calls and close on their owning task.
 
 Each model call uses the configured output limit, at most 4,000 tokens.
 A run allows 20 tool calls and 120 seconds. Handled stream errors record failed
@@ -199,7 +209,7 @@ The application programming interface (API) gives confidence as a score, level a
 - `CRAFT_MODEL_MAX_OUTPUT_TOKENS` accepts 16 to 16,000 tokens and defaults to 4,000. Reasoning tokens count toward it, so agents that propose code need more than the default. Main and groundedness calls retain their selected model, effort, budget and storage setting.
 - `CRAFT_AGENT_RUN_SECONDS` accepts 30 to 900 seconds and defaults to 120. It caps one agent run's active time; time spent waiting for an approval does not count, but active time before and after it does.
 - Service-owned conversation references and software development kit (SDK) console payload logging are refused. Model requests run outside database transactions through private observations.
-- Embeddings use the selected embedding model and 1,536 dimensions. Indexing sends each document's texts in batches of up to 64. Changing the embedding model requires `craft index --rebuild`. Semantic queries use matching-model vectors only.
+- Embeddings use the selected embedding model and 1,536 dimensions. The frozen library's vectors come from `text-embedding-3-large`; semantic queries use matching-model vectors only, so keep that model.
 - Instructions live in `app/agent/instructions.md`; each run records their version.
 
 ### Confidence

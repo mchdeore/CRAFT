@@ -17,7 +17,6 @@ from app.agent import model
 from app.agent.handlers import EmbeddingInput, embed
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.config.settings import Settings
-from app.infrastructure.database import metadata as m
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import ApiError
 from app.infrastructure.logging import configure_logging
@@ -25,7 +24,6 @@ from app.infrastructure.operations import operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.operations.storage import call_log
 from app.tests.support import model as scripted_model
-from app.tests.support.demo import demo as demo
 
 
 @pytest.fixture(autouse=True)
@@ -369,93 +367,6 @@ def test_embedding(app, intercepted):
     assert intercepted.received[-1]["dimensions"] == 1536
     scripted = embed(caller(app), EmbeddingInput(text="Synthetic embedding input"))
     assert scripted.model == app.state.settings.model_embedding
-
-
-def test_embedding_rebuild(demo, intercepted, monkeypatch, tmp_path, capsys):
-    from app.cli import main
-    from app.infrastructure.provider.simulated import SimulatedProvider
-
-    provider = SimulatedProvider(tmp_path)
-    provider.write_content("reference/budget.md", b"# Synthetic budget\n\nSimulated evidence only.")
-    configured = msgspec.structs.replace(
-        intercepted.settings,
-        provider_root=str(tmp_path),
-        database_port=demo["settings"].database_port,
-    )
-    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, env=None: configured))
-    main(["index", "--rebuild"])
-    capsys.readouterr()
-    items = list(provider.items())
-    documents = select(m.doc_versions.c.id).where(m.doc_versions.c.item.in_(items))
-    chunks = select(m.chunks.c.id).where(m.chunks.c.doc_version_id.in_(documents))
-    owned_vectors = m.vectors.c.owner_id.in_(documents.union_all(chunks))
-    with demo["sessions"].begin() as connection:
-        models = set(
-            connection.execute(
-                select(m.vectors.c.model).where(
-                    m.vectors.c.owner_kind.in_(["chunk", "doc_version"]), owned_vectors
-                )
-            ).scalars()
-        )
-    assert models == {configured.model_embedding}
-    with demo["sessions"].begin() as session:
-        assert set(
-            session.execute(
-                select(m.doc_versions.c.summary_kind).where(m.doc_versions.c.item.in_(items))
-            ).scalars()
-        ) == {"generated"}
-    assert sum(row["model"] == configured.model_main for row in intercepted.received) == 1
-    local = msgspec.structs.replace(
-        configured,
-        model_endpoint=scripted_model.ENDPOINT,
-        model_key=scripted_model.KEY,
-        model_embedding="scripted-embedding",
-    )
-    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, env=None: local))
-    main(["index", "--rebuild"])
-    capsys.readouterr()
-    with demo["sessions"].begin() as connection:
-        models = set(
-            connection.execute(
-                select(m.vectors.c.model).where(
-                    m.vectors.c.owner_kind.in_(["chunk", "doc_version"]), owned_vectors
-                )
-            ).scalars()
-        )
-    assert models == {"scripted-embedding"}
-    with demo["sessions"].begin() as session:
-        assert set(
-            session.execute(
-                select(m.doc_versions.c.summary_kind).where(m.doc_versions.c.item.in_(items))
-            ).scalars()
-        ) == {"generated"}
-    # A query from another model must not score these deliberately matching vectors.
-    from math import isclose
-
-    from app import create_app
-    from app.library.handlers import search
-
-    with demo["sessions"].begin() as session:
-        session.execute(
-            m.vectors.update()
-            .where(m.vectors.c.owner_kind.in_(["chunk", "doc_version"]), owned_vectors)
-            .values(embedding=[1.0] + [0.0] * 1535)
-        )
-        users = m.metadata.tables["users"]
-        user = session.execute(select(users.c.id).where(users.c.username == "demo")).scalar_one()
-    running = create_app(configured)
-    try:
-        trusted = Caller(
-            user_id=user,
-            roles=frozenset({"member"}),
-            sessions=running.state.sessions,
-            settings=configured,
-        )
-        found = search(trusted, {"query": "evidence"})
-        exact = bool(found.hits) and all(isclose(hit.score, 0.3) for hit in found.hits)
-        assert exact
-    finally:
-        running.state.engine.dispose()
 
 
 def test_scripted_framework_tool_invocation(settings):

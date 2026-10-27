@@ -117,8 +117,8 @@ jupyter-mcp-server \
 
 Use distinct ports and credentials for additional owners. Jupyter receives its
 own `JUPYTER_TOKEN` and `JUPYTER_PASSWORD_HASH`. `CRAFT_UI_ORIGIN` is the plain
-loopback origin of the interface that opens the workspace, such as the demo's
-`http://localhost:18766` (the default is `http://127.0.0.1:5173`). Keep credentials
+loopback origin of the interface that opens the workspace (the default is
+`http://127.0.0.1:5173`). Keep credentials
 out of URLs, command arguments, model arguments, and interface configuration.
 
 Set the CRAFT server's `USER_WORKSPACES_FILE` to a private JSON file. Keys must
@@ -166,7 +166,7 @@ integer port; the default `0` retains ephemeral allocation. Configure distinct
 fixed ports per owner for a network allowlist. An occupied port fails without
 falling back. No native bearer belongs in this configuration.
 
-The demo network boundary is managed outside the user image. Give each owner a
+The workspace network boundary is managed outside the user image. Give each owner a
 dedicated bridge network, disable IPv6 and external DNS, and permit only that
 owner's fixed CRAFT bridge destination and established Jupyter responses. Block
 other outbound traffic and host access. Enforce both routed traffic and traffic

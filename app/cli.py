@@ -1,4 +1,4 @@
-"""The craft command. S0: --version. Later: seed, users, operations, call."""
+"""The craft command: mcp, worker, operations, call, provider, users and missions."""
 
 import argparse
 from importlib.metadata import version
@@ -11,14 +11,8 @@ def main(argv: list[str] | None = None) -> None:
     mcp = commands.add_parser("mcp")
     mcp.add_argument("--as", dest="username", required=True)
     commands.add_parser("operations")
-    seed = commands.add_parser("seed")
-    seed.add_argument("set", choices=["base", "demo"])
-    seed.add_argument("--seed", type=int, default=1)
-    index = commands.add_parser("index")
-    index.add_argument("--rebuild", action="store_true")
-    index.add_argument("--enrich-ocr", action="store_true")
     worker = commands.add_parser("worker")
-    worker.add_argument("--burst", action="store_true")
+    worker.add_argument("--check", action="store_true", help="exit 1 without a recent heartbeat")
     call = commands.add_parser("call")
     call.add_argument("operation")
     call.add_argument("--as", dest="username", required=True)
@@ -56,7 +50,11 @@ def main(argv: list[str] | None = None) -> None:
                 operation.access,
                 operation.effects,
             )
-    elif args.command in {"seed", "index", "worker", "provider", "call", "users", "missions"}:
+    elif args.command == "worker" and args.check:
+        from app.infrastructure.queue import check_worker
+
+        raise SystemExit(0 if check_worker() else 1)
+    elif args.command in {"worker", "provider", "call", "users", "missions"}:
         import json
         import sys
         from pathlib import Path
@@ -72,23 +70,10 @@ def main(argv: list[str] | None = None) -> None:
             from app.cube.handlers import change_stage
 
             change_stage(settings, args.mission, args.stage)
-        elif args.command == "seed":
-            if args.set == "demo":
-                from app.seed.demo import seed as seed_demo
-
-                print(json.dumps(seed_demo(settings, args.seed)))
-            else:
-                from app.seed.base import seed as seed_base
-
-                print(json.dumps(seed_base(settings)))
-        elif args.command == "index":
-            from app.library.handlers import index_provider
-
-            print(json.dumps(index_provider(settings, args.rebuild, enrich_ocr=args.enrich_ocr)))
         elif args.command == "worker":
-            from app.library.queue import run_worker
+            from app.infrastructure.queue import run_worker
 
-            run_worker(settings, burst=args.burst)
+            run_worker(settings)
         elif args.command == "provider":
             from app.infrastructure.provider import get_provider
 

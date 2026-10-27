@@ -45,11 +45,17 @@ def register_tables() -> None:
         "app.conversations.storage",
         "app.agent.storage",
         "app.approvals.storage",
+        "app.jobs.storage",
     ):
         import_module(module)
 
 
 register_tables()
+
+
+def include_name(name, type_, parent_names) -> bool:
+    """Alembic compares only CRAFT's tables: Procrastinate owns its own (pinned SQL)."""
+    return not (type_ == "table" and (name or "").startswith("procrastinate_"))
 
 
 # Library and file tables have no storage-side transaction lifecycle.
