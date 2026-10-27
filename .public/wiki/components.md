@@ -9,7 +9,7 @@
 | Contract | Executable TypeScript forms, routes and examples the product interface compiles against | `app/contract/` |
 | Product interface | The signed-in web interface, built by the partner team in the separate `craft-frontend` repository | Not in this repository |
 | JupyterLab workspace | The personal workspace image, its `craft` package and built-in skills | `workspace/` |
-| Worker | Background indexing and OCR jobs from the queue | `craft worker` in `app/` |
+| Workers | Background jobs from the PostgreSQL queue, including chat turns ([background jobs](processes.md#background-jobs)) | `craft worker` in `app/` |
 
 ## Application boundaries
 
@@ -24,12 +24,12 @@ The application agent uses `app/agent/` and PostgreSQL state. Backend chart rend
 | # | Sender | Receiver | Protocol | Carries |
 |---|---|---|---|---|
 | 1 | Browser | Backend | HTTP + JSON under `/api` | Sign-in, conversations, tools list, library, cube, drafts, approvals |
-| 2 | Backend | Browser | AG-UI events over SSE (one-way server stream) | One agent run: text, tool progress, approval pause, answer metadata |
-| 3 | Agent runtime | Backend | MCP over HTTP at `/mcp` + run token | Tool calls only |
+| 2 | Backend | Browser | AG-UI events over SSE (one-way server stream) | One agent run, read from the run's stored events: text, tool progress, approval pause, answer metadata |
+| 3 | Agent runtime (on `worker-agent`) | Backend | MCP over HTTP at `/mcp` + run token | Tool calls only |
 | 4 | Agent runtime | Foundry | Responses API | Model and embedding calls |
 | 5 | Local MCP application | Backend | MCP over standard input and output through `craft mcp --as <username>` | Tool calls only |
 | 6 | Backend | Document provider | Python functions over the provider folder ([document provider](datacube.md#document-provider)) | Changes and original files |
-| 7 | Backend | Worker | Jobs on the Valkey queue | Indexing and OCR |
+| 7 | Backend | Workers | Jobs in PostgreSQL (`LISTEN`/`NOTIFY`) | Chat turns and other background jobs; run events back to the backend |
 
 - One entry point: every route and tool is an `@operation` handler ([backend conventions](development.md#backend-conventions)). A person, a script and the agent get the same checks and log line.
 - Services aren't agent-only: every tool is also a route.

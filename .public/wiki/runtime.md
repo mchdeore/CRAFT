@@ -2,7 +2,7 @@
 
 ## Application runs and tools
 
-The application agent uses the framework agent, registered operations and the [API contract](api-contract.md). Conversation history, session state and approval interrupts live in PostgreSQL. An active run belongs to its chat request; disconnect cancels it. A saved approval pause can be recovered after a restart.
+The application agent uses the framework agent, registered operations and the [API contract](api-contract.md). Conversation history, session state and approval interrupts live in PostgreSQL. An active run is a job on the agent worker; a closed page or an app restart does not stop it, and the browser re-attaches to its stored events ([chat stream](agent.md#chat-stream-ag-ui)). A saved approval pause can be recovered after a restart.
 
 Tools expose typed input and output. The controller supplies the allowed catalog and the decision boundary. Model output is validated before it changes run or stored state.
 
@@ -12,7 +12,7 @@ Signed-in accounts own their conversations and runs. `GET /api/tools` describes 
 
 The registry derives tool bindings and approval requirements from declared operations. Root runs can propose writes; the `ask_agent` helper sees read tools only and returns a combined answer with citations and confidence. The application's `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local writes consume their matching approval in the effect transaction; a repeated invocation cannot consume it again.
 
-MCP is the tool protocol. The app serves HTTP MCP at `/mcp`; `craft mcp --as <username>` serves the same registry over standard input and output. Compose starts services and has an optional MCP profile using the application image. Workspace code execution uses registered approval-gated operations; durable jobs use the worker queue.
+MCP is the tool protocol. The app serves HTTP MCP at `/mcp`; `craft mcp --as <username>` serves the same registry over standard input and output. Compose starts services and has an optional MCP profile using the application image. Workspace code execution uses registered approval-gated operations; durable jobs use the [job queue](processes.md#background-jobs).
 
 Configured owners also have [workspace](workspace.md) list/notebook read tools. Plain files and selected Markdown skill contents need a small approved `run_code` read when a Jupyter kernel is configured; without one, workspace actions are unavailable. Plain `craft.search`, `craft.document`, `craft.chunks` and `craft.cube.*` access points use the independently provisioned workspace-token read API and return table/citation views. Named async `native()` SDK reads return MCP results and borrow the active chat run's identity, call budget, deadline, retrieval trace and audit records. Native access is confined to its selected notebook kernel and ends when the run finishes or pauses; workspace-token access is independent of that binding. The SDK refuses approval-gated operations before dispatch; chat keeps its approval and resume workflow.
 

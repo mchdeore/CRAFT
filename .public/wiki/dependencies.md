@@ -4,10 +4,10 @@ The outside services and tools CRAFT relies on, and why. Exact versions are not 
 
 | Service or tool | Why CRAFT uses it | Configured by |
 |---|---|---|
-| Microsoft Foundry project | Every model call: the main and check chat models, embeddings for search, and OCR for scanned PDFs and images. Model features refuse to run until the endpoint and key are set. | `CRAFT_MODEL_ENDPOINT`, `CRAFT_MODEL_KEY`, `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK`, `CRAFT_MODEL_EMBEDDING`, `CRAFT_MODEL_OCR` |
-| PostgreSQL 18 with pgvector | All records: accounts, conversations, runs, approvals, the document library with its vectors, and the datacube. | `CRAFT_DATABASE_*` and the three database passwords |
-| Valkey (Redis protocol) | The durable job queue the background worker reads, used for indexing and OCR jobs. | `CRAFT_QUEUE_URL`, `CRAFT_QUEUE_NAME` |
-| Docker with Compose and Buildx | Runs the database, queue, app and worker, and each owner's JupyterLab and restricted Python workspace containers. On macOS this is Colima. | `compose.yaml`, `DOCKER_CONTEXT` |
+| Microsoft Foundry project | Every model call: the main and check chat models and query embeddings for search. Model features refuse to run until the endpoint and key are set. | `CRAFT_MODEL_ENDPOINT`, `CRAFT_MODEL_KEY`, `CRAFT_MODEL_MAIN`, `CRAFT_MODEL_CHECK`, `CRAFT_MODEL_EMBEDDING` |
+| PostgreSQL 18 with pgvector | All records: accounts, conversations, runs, approvals, the document library with its vectors, the datacube, and the background job queue. | `CRAFT_DATABASE_*` and the three database passwords |
+| Procrastinate | The job queue on PostgreSQL that the three workers read ([background jobs](processes.md#background-jobs)). | `CRAFT_WORKER_QUEUES`, `CRAFT_WORKER_CONCURRENCY` |
+| Docker with Compose and Buildx | Runs the database, app and three workers, and each owner's JupyterLab and restricted Python workspace containers. On macOS this is Colima. | `compose.yaml`, `DOCKER_CONTEXT` |
 | JupyterLab | The personal workspace beside chat, in its own image. | `workspace/` |
 | Wolfram Alpha (optional) | Checked calculations when an app ID is configured. | `CRAFT_WOLFRAM_APP_ID` |
 | uv | Python environment, lock and builds. | `pyproject.toml`, `uv.lock` |

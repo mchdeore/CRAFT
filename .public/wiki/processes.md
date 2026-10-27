@@ -22,25 +22,34 @@ Container lifecycle uses the Docker SDK. A container requires a pinned digest or
 
 Backend refusal, failed startup, unsupported limits and incomplete cleanup return fixed error codes. They never report a healthy service or expose backend diagnostics. Original lifecycle ownership remains available when cleanup fails.
 
-## Worker queue runtime
+## Background jobs
 
-Library indexing can run out-of-band through a Redis-compatible queue. Queue control and health operations require the administrator-only `library.manage` permission:
+Background jobs live in PostgreSQL, run by [Procrastinate](https://procrastinate.readthedocs.io/) ([`app/infrastructure/queue.py`](https://github.com/mchdeore/CRAFT/blob/main/app/infrastructure/queue.py)). There is no separate queue service. Three queues each have their own worker, so a long job never holds up a person who is waiting:
 
-- `POST /api/library/index/jobs` to enqueue (`rebuild` and `enrich_ocr` optional)
-- `GET /api/library/index/jobs/{jobId}` for status and result
-- `GET /api/library/index/jobs` for job discovery (`status`, `offset` up to 100000, `limit` 1-100)
-- `POST /api/library/index/jobs/{jobId}/retry` to queue another attempt
-- `POST /api/library/index/jobs/{jobId}/cancel` to cancel an attempt still waiting in the queue; a worker-claimed attempt returns a conflict
-- `GET /api/library/index/queue` for operator health (depth, failures, started jobs, worker heartbeats)
+| Worker | Queue | Jobs at once | Automatic retries | Stop grace |
+|---|---|---|---|---|
+| `worker-agent` | `agent`: chat turns | 20 | None; a crash marks the run interrupted | 900 s |
+| `worker-interactive` | `interactive`: someone is waiting | 4 | 5 s, 30 s, 2 min | 120 s |
+| `worker-bulk` | `bulk`: long batch work | 1 | 1 min, 5 min, 30 min | 120 s |
 
-`compose.yaml` includes `queue` (Valkey) plus an optional `worker` profile service (`craft worker`). This keeps the app process focused on request validation and enqueue/status operations while the worker process owns long-running indexing execution. Queue storage remains durable across app restarts as long as the queue volume persists.
+All three run the same image and command, `craft worker`. `CRAFT_WORKER_QUEUES` and `CRAFT_WORKER_CONCURRENCY` choose the queues and the number of jobs at once; on a laptop one worker can take all three queues. Each worker is one process; more capacity means more containers. Inside, async jobs run on one event loop and blocking jobs in threads.
 
-Job pages scan at most `limit + 1` raw queue/registry entries. Missing or foreign jobs are skipped without scanning to fill a page. Follow `nextOffset` even after an empty page. Pagination is mutable: concurrent enqueue, dequeue, or cleanup can move entries, so it is not an audit snapshot. Health counts can include expired entries until worker maintenance runs; API reads do not perform registry cleanup.
+- **Claiming:** a worker claims a job with `FOR UPDATE SKIP LOCKED`, so two workers never take the same job. `LISTEN`/`NOTIFY` wakes a worker as soon as a job arrives.
+- **Retries:** only transient failures are retried: timeouts, 408, 429, 5xx and connection errors. A `Retry-After` wins over the queue's wait. Kinds that change things or cost model money (chat turns, notebook runs) are never retried.
+- **Crashes:** each worker writes a heartbeat every 10 s. Any worker retries or fails the jobs of a worker silent for 30 s, records `WorkerLost`, and for a chat turn marks the run `run_interrupted`.
+- **Shutdown:** on SIGTERM a worker takes no new jobs and finishes its current ones within the grace period. A worker started before the migrations waits for them.
+- **Arguments:** job arguments are JSON and hold IDs only, never document text, prompts or tokens. The worker logs one line per job outcome.
 
-Keep queue storage on a trusted internal network with no public listener or untrusted writers. RQ uses pickle serialization, so access to write queue data is equivalent to code execution in the owner-capable worker.
+A job kind is one `register_job(kind, func, queue=…, retry=…, lock_key=…)` call. Effects must be idempotent: a job may run more than once. A `lock_key` makes a second request while one is queued or running return that job.
 
-Start the queue and worker with `docker compose --profile worker up --build --wait`. The worker alone receives `CRAFT_OWNER_DB_PASSWORD`. Source files remain mounted read-only; only the provider's `.provider` metadata and immutable version snapshots are writable. Before starting the worker, create that metadata directory and give container UID 10001 write access to it; preserve any existing metadata and snapshots. The health endpoint is the local operator surface; a separate dashboard is not required.
+Signed-in users see and manage their own jobs; administrators see all of them:
 
-Job status includes a `kind` of `index` or `ocr`. OCR jobs expose their source `item`, `version`, and `force` flag, with extraction counts in their result. Retry preserves the job type and arguments. Normal OCR work skips persisted text; `force` requests replacement, not a second concurrent attempt. Enqueue and retry share an atomic per-version active-job claim, so retrying an old failure returns an already active attempt rather than duplicating inference. Terminal jobs, claims, and retry policies expire after seven days; active claims remain persistent. Policy expiry allows a later indexing request to start a new attempt budget. Administrators can recover a readable historical or current version with `POST /api/library/documents/{item}/versions/{version}/ocr`, even after job expiry or policy corruption; source provenance and byte limits still apply. Status inspection fails closed with 503 if one job has more than 32 execution records. Redis outages also return 503, not a missing-job response.
+- `GET /api/jobs` lists jobs, newest first (`status`, `offset`, `limit` 1–100)
+- `GET /api/jobs/{jobId}` reads one job: kind, queue, status, attempts and the last error class
+- `POST /api/jobs/{jobId}/retry` runs a failed, canceled or stopped job again as a new job
+- `POST /api/jobs/{jobId}/cancel` cancels a queued job or asks a running one to stop (`stopping`, then `stopped`)
+- `GET /health/queue` counts jobs per queue and state, with the oldest queued job's age and the dead (failed) count
+
+There is no admin panel. The `job_overview` view gives one row per job for a database client; every state change is also a row in `procrastinate_events`. `craft worker --check` is the container health check: it passes while the worker has written a heartbeat in the last minute.
 
 Related interfaces: [components](components.md), [runtime](runtime.md), [workspace](workspace.md) and [code layout](development.md).

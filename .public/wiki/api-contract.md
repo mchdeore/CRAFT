@@ -225,9 +225,11 @@ The server reads run identifiers, the newest input message and optional owned sk
 
 The complete synthetic stream is `app/contract/examples/chat-answer.sse`.
 
+The run continues on the agent worker when the connection closes. `GET /api/agent/runs/:run/events?after=N` re-attaches to the run's newest stream (one stream per POST, a start or a resume): it replays every event after the first N, then follows the run until `RUN_FINISHED` or `RUN_ERROR`. `POST /api/agent/runs/:run/cancel` stops a queued or running run and returns 204; its stream ends with `RUN_ERROR` code `run_cancelled`. A run whose worker died ends with `run_interrupted` and is not retried automatically.
+
 `GET /api/conversations/:id/run` returns the latest requester-owned recorded run for an active owned conversation. Running or paused records take precedence over terminal history; within either group, `startedAt` and then run UUID descend. With no run, `status` is `none`, identifiers and timestamps are null, and `canResume` is false. A recorded `running` status does not establish worker liveness. Timestamps describe the stored run: `endedAt` can be present for a paused stream and does not make that run terminal.
 
-The response contains status, run UUID, timestamps, optional approval UUID/status and `canResume`. It projects no native snapshot, model settings, credentials, messages, tool arguments or document content. A paused approval appears only when one well-formed native interrupt links to the actual requester/run/conversation approval record. Its persisted interrupt identity includes the run UUID. Missing or malformed linkage leaves approval fields null and `canResume` false. Pending approvals require a human decision; only approved or rejected records are eligible for explicit resume. Executed and failed approvals cannot invite replay. The GET makes no changes and starts no worker. The decision and run POST routes recheck the current stored approval and native state when used.
+The response contains status, run UUID, timestamps, optional approval UUID/status, `canResume` and `lastEvent`, the number of events in the run's newest stream (null before any). It projects no native snapshot, model settings, credentials, messages, tool arguments or document content. A paused approval appears only when one well-formed native interrupt links to the actual requester/run/conversation approval record. Its persisted interrupt identity includes the run UUID. Missing or malformed linkage leaves approval fields null and `canResume` false. Pending approvals require a human decision; only approved or rejected records are eligible for explicit resume. Executed and failed approvals cannot invite replay. The GET makes no changes and starts no worker. The decision and run POST routes recheck the current stored approval and native state when used.
 
 ### Recover a paused run
 
@@ -367,7 +369,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 
 ## 16. Stand-ins and contract tests
 
-`app/contract/examples/` holds synthetic responses and the complete chat stream. JSON examples are stand-ins with the same response forms as the real endpoints. Demonstrations use the real backend and a synthetic seed set.
+`app/contract/examples/` holds synthetic responses and the complete chat stream. JSON examples are stand-ins with the same response forms as the real endpoints. Local runs use the real backend and the frozen synthetic dataset.
 
 1. `app/contract/*.ts` converts to JSON Schema with the held TypeScript generator.
 2. Built route rows equal the app's method/path pairs in both directions. Tool rows equal the registry's tool names.

@@ -67,10 +67,9 @@ Each request resolves its session, checks the operation permission, applies the 
 | `CRAFT_SIGN_IN_ATTEMPTS_PER_MINUTE` | 5 |
 | `CRAFT_PASSWORD_MIN_LENGTH` | 12 |
 | `CRAFT_ALLOWED_ORIGINS` | `http://localhost:8000` |
-| `CRAFT_DEV_PAGE` | 0 (disabled) |
 | `CRAFT_MCP_URL` | `http://127.0.0.1:8000/mcp` (loopback only) |
 
-Settings validate at startup. `CRAFT_DEV_PAGE=1` mounts the single temporary `/dev` page for same-origin sign-in, current-account lookup, library search and sign-out. The page uses text nodes for document content and stores no session token. The keep-alive update extends idle expiry by eight hours, at most once a minute, and never beyond the twelve-hour absolute expiry.
+Settings validate at startup. The keep-alive update extends idle expiry by eight hours, at most once a minute, and never beyond the twelve-hour absolute expiry.
 
 ## Conversation storage
 
@@ -96,7 +95,7 @@ HTTP MCP uses its own short-lived run credential. A session cookie alone is refu
 The token binds an enabled account and a running, unarchived owned conversation;
 current roles load again for each request and tool call. Only its SHA-256 digest is
 stored, and replacement revokes the previous value. Expiry, pause, run end and
-disconnect stop later use. The browser never receives this credential. Tokens remain
+cancellation stop later use. The browser never receives this credential. Tokens remain
 outside model arguments and server logs. Tool metadata cannot replace the trusted
 user, conversation, run or parent-call context.
 

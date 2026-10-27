@@ -12,7 +12,7 @@ For document discovery in Chat, request titles and short sentence previews in a 
 
 A whole-document summary reads the selected version's outline and every indexed block in batches of at most 20. The stored index summary is a generated summary of at most 150 words. Missing blocks or run limits require a partial-coverage label; extracted text does not guarantee coverage of images or unsupported content in the original. The existing agent budget remains 20 tool calls and 120 seconds per run.
 
-Document versions expose **Last indexed** through `versions[].indexedAt`. This records index creation for that version, not the provider's last update or synchronization. The demo uses local simulated originals and retains their simulation labels; it does not imply a live external tenant. Supported conversion stores every extracted block and an embedding for each block, but actual original, block and matching-model vector coverage must be verified for the selected snapshot.
+Document versions expose **Last indexed** through `versions[].indexedAt`. This records index creation for that version, not the provider's last update or synchronization. The frozen dataset uses local simulated originals and retains their simulation labels; it does not imply a live external tenant. Supported conversion stores every extracted block and an embedding for each block, but actual original, block and matching-model vector coverage must be verified for the selected snapshot.
 
 Provider metadata and original bytes are read outside database transactions. Protected operation responses, including metadata, files, authentication and errors, use `Cache-Control: no-store`. Citation checks can report withdrawal without returning source text. Cube value evidence keeps withdrawn provenance, marks the value unknown with cleared bounds, and returns an empty quote and a nonnumeric conversion message. Current resource permissions still apply.
 
@@ -20,7 +20,7 @@ Permission checks constrain visible rows before counts and ranking. A partial pr
 
 ## Values
 
-Advanced Cube analysis is deferred for this demo. Existing source-backed values and their approval checks retain their current behavior.
+Advanced Cube analysis is deferred. Existing source-backed values and their approval checks retain their current behavior.
 
 The application publishes a bounded source-candidate batch through `cube.submit_values` and the existing native MCP approval transaction. It rechecks current source chunks, mission and silo access, candidate identity and exact Decimal conversion. Every append-only value records its approval identifier. A failed batch rolls back all values; rejection and replay produce no additional value. The [API contract](api-contract.md) describes the request and receipt.
 
@@ -32,7 +32,7 @@ Document retrieval runs in PostgreSQL over the library ([Library: chunks, summar
 
 | Step | Now |
 |---|---|
-| Corpus | Labelled, simulated; written to the provider by `craft seed`, indexed by `craft index`; one chunk per heading section, page, slide or table region |
+| Corpus | Labelled, simulated and frozen; restored by `scripts/seed` ([Seed data](datacube.md#seed-data)); one chunk per heading section, page, slide or table region |
 | Permission filter | Mission grants first ([Access](datacube.md#access)). Metadata filters alone don't count as authorization |
 | Keyword | `websearch_to_tsquery` on chunk and summary `tsv`, `ts_rank_cd`, top 50 |
 | Vector | Query embedding (1536 dimensions), cosine, HNSW, top 50 |
