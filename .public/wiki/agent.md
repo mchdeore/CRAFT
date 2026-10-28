@@ -187,6 +187,10 @@ six-input calibration exists; cited extracts remain visible and drafting is stop
 
 Each completed text answer also saves a `craft.retrieval` activity. It names the answer message, run, selected model, instruction version and ordered tool/arguments/time path. The record is append-only conversation history. Later runs preserve it. Public and newly saved message envelopes exclude private transport fields.
 
+## Reply language
+
+Each person chooses English or French replies with `PATCH /api/me` (`Me.language`, English by default). The run instructions name that language. A French reply also saves a `craft.originals` activity with the English quote behind each citation, so a reader can check the wording; a link to a verified source counts as a citation, because a paraphrase never matches the quote word for word. Every source is English for now.
+
 ## Combined answer
 
 `POST /api/agent/ask`, also the `ask_agent` MCP tool, runs the same runtime with read tools only. It uses an owned supplied conversation or creates one, and returns the final answer text, citations, confidence and run ID as one JSON result. It cannot be called recursively from an active agent run.

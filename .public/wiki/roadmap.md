@@ -8,6 +8,7 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 
 | Area | What works | Foundation |
 |---|---|---|
+| Sign-in | OpenID Connect code flow through craft-id, a CRAFT-run identity provider shaped like Entra ID; craft-app never sees a password, and CRAFT approves who gets in | Same flow, claims and settings shape as Entra ID |
 | Platform | Settings, database initialization, short transactions, request IDs, logs and health | Locked dependencies and the non-root application image |
 | Records | Accounts, conversations, runs, approvals, library, drafts, files, notes and skills | Numbered migrations with explicit grants |
 | Operations | One registry for HTTP routes, MCP tools and checked Python calls, with access checks | Trusted caller context and strict shapes |
@@ -15,8 +16,9 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 | Datacube | Missions, parameters, values, facets, comparisons, similarity and approved value publication | Library evidence and requester approval |
 | Agent | Model adapter, chat stream, saved history, approval recovery, working notes, saved skills, chart and calculation tools; turns run on the agent worker and survive a closed page or an app restart | Native HTTP MCP, server-owned state and requester decisions |
 | Chat | Rename, grouping, archive and unarchive | Owned conversations |
+| Languages | Each person picks English or French replies; French replies show the English originals of what they cite | `PATCH /api/me` |
 | Workspace | A personal JupyterLab beside chat, the `craft` package, analysis and graphing helpers, editable local copies, and workspace skills | Owned containers and workspace tokens |
-| Background work | Jobs on PostgreSQL with three workers (agent, interactive, bulk), retries for transient failures, crash recovery and job routes | Procrastinate; no separate queue service |
+| Background work | Jobs on PostgreSQL with three workers (agent, interactive, bulk), retries for transient failures, crash recovery and job routes; a job is declared on its operation | Procrastinate; no separate queue service |
 | Dataset | A frozen library index and datacube, loaded by `scripts/seed` with no model calls | The private frozen set and the numbered migrations |
 | Interface | No interface in this repository. The product interface is the separate `craft-frontend` repository | It compiles against `app/contract/` |
 
@@ -25,21 +27,17 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 Each item is planned and has a trigger met or close. The maintainer chooses the order; the list is not a sequence.
 
 - **One API contract with the product interface**: `app/contract/` is the single source, published to the partner team's contract repository, with sign-in and the routes the product interface calls.
-- **Document extraction bake-off**: compare OCR and document-analysis models on the same files and choose one that is generally available.
-- **Sign-in shaped like Entra ID**: craft-app signs people in with OpenID Connect through a small identity provider that CRAFT runs and that mirrors Entra ID. Passwords no longer reach craft-app, and CRAFT keeps deciding who has access.
 - **Azure deployment**: staging, then production, on Azure Container Apps with Azure Database for PostgreSQL, Azure Files for the document lake, Key Vault, and Azure Front Door on the project's domain.
-- **Multilingual documents**: language detection, and translation into a separate file, such as a French copy, without changing the source. Then each person's language preferences.
 - **Charts, notebooks and Office files**: charts the agent makes, notebooks worked on with the agent, Word and PowerPoint output, and notebook runs as sandboxed background jobs.
 - **Provider adapters and CRAFT revisions**: one provider interface with several adapters, a LiveLink-shaped test server, and CRAFT-owned revisions of documents (full copies that point at their source version), exported at any point in time and pushed back only after approval.
 
 ## Deferred
 
-Each row stays as it is until its trigger happens.
+Each row stays as it is until its trigger happens. Not planned: moving sign-in to Entra ID itself, because craft-id is permanent, and an extraction model bake-off, because the dataset is frozen.
 
 | What | Now | Deferred | Trigger |
 |---|---|---|---|
-| Sign-in | Local accounts; next, OpenID Connect through a CRAFT-run identity provider | Entra ID, with the same settings shape | An application registration is available |
-| Access | Local account roles and operation/resource checks | Expanded governed role mapping; Entra groups or app roles | Before real data or larger teams |
+| Access | Local account roles and operation/resource checks | Expanded governed role mapping | Before real data or larger teams |
 | Decisions | The requester approves; the agent never approves | Refusing self-approval, designated approvers, eligibility, escalation, timeouts and request editing | Before real data or larger teams |
 | Model access | Key from `.env`, simulated data | Managed identity; data handling agreed | Before real data |
 | Agent hosting | CRAFT backend | Optionally Foundry hosted agents | Hosting adapter generally available |
@@ -47,7 +45,7 @@ Each row stays as it is until its trigger happens.
 | Model routing | Fixed main and check models | A model router | Measured cost or quality need |
 | Retrieval | PostgreSQL hybrid | Azure AI Search with the semantic ranker | A real corpus outgrows PostgreSQL |
 | Data | Simulated corpus; next, a LiveLink-shaped test server | Real LiveLink, then SharePoint and OneDrive through Microsoft Graph | Access and a service account are granted |
-| Document analysis | Text extraction; next, the extraction bake-off | Structured table intake: document-analysis rows become datacube candidates a person approves | The bake-off shows it beats today's table parsing |
+| Document analysis | Text extraction and optional OCR over the frozen dataset | Structured table intake: document-analysis rows become datacube candidates a person approves | The dataset is unfrozen and reindexed |
 | Hosting | Docker Compose | Azure Container Apps with continuous deployment | Next (see above) |
 | Security | Local only | Security assessment (Protected B), private endpoints, secret scanning | Before production data |
 | Audit | Append-only approval history | Write-once storage, retention, export | Deployment |

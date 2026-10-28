@@ -6,11 +6,11 @@ The command-line interface (CLI) creates local accounts. Agent-User Interaction 
 
 | Item | Now | Deferred |
 |---|---|---|
-| Sign-in | Local accounts with Argon2id password hashes, passwords of at least `CRAFT_PASSWORD_MIN_LENGTH` characters (12 by default) and creation through the CLI. No sign-up, default account or email recovery | Microsoft Entra ID |
-| Roles | `member` uses CRAFT; `admin` also manages accounts through `craft users promote`. Operation and resource permissions apply to both | Expanded role mapping and Entra group grants. New values in a database check constraint (`CHECK`) require a migration |
+| Sign-in | People sign in at craft-id, the identity provider CRAFT runs, through the OpenID Connect code flow ([identity](identity.md)). craft-app receives a signed ID token and links the person to a CRAFT user by tenant and object ID. Someone without an account sees "no access yet" until an admin runs `craft users approve`. Passwords live only in craft-id (Argon2id, at least `CRAFT_PASSWORD_MIN_LENGTH` characters), and accounts are created with `craft id users add`. No sign-up or email recovery | None: craft-id mirrors Entra ID's flow and claims and is permanent |
+| Roles | `member` uses CRAFT; `admin` also manages accounts through `craft users promote`. Operation and resource permissions apply to both | Expanded role mapping. New values in a database check constraint (`CHECK`) require a migration |
 | Approvals | The requester decides an effectful action under [Human approval](agent.md#human-approval). The agent cannot decide | Expanded decision policy in [Deferred](roadmap.md#deferred) |
 
-Rehash passwords at sign-in when the `argon2-cffi` defaults change.
+Rehash passwords at sign-in when the `argon2-cffi` defaults change. Password sign-in at `POST /api/session` is off unless `CRAFT_LOCAL_PASSWORD_SIGNIN` is set, which only tests do.
 
 ## Cookie and session row
 
