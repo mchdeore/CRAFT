@@ -40,7 +40,7 @@ All three run the same image and command, `craft worker`. `CRAFT_WORKER_QUEUES` 
 - **Shutdown:** on SIGTERM a worker takes no new jobs and finishes its current ones within the grace period. A worker started before the migrations waits for them.
 - **Arguments:** job arguments are JSON and hold IDs only, never document text, prompts or tokens. The worker logs one line per job outcome.
 
-A job kind is one `register_job(kind, func, queue=…, retry=…, lock_key=…)` call. Effects must be idempotent: a job may run more than once. A `lock_key` makes a second request while one is queued or running return that job.
+A job is declared on its operation: `@operation(…, job=Job(queue=…, retry=…, lock=…, interrupted=…))` ([`app/infrastructure/operations/registry.py`](https://github.com/mchdeore/CRAFT/blob/main/app/infrastructure/operations/registry.py)). Calling it, from a route, Python or `craft call`, runs the usual access checks, queues the job and returns `Queued {jobId}`. The worker checks access again and logs its run as a child of the call that queued it, with the same request ID. Effects must be idempotent: a job may run more than once. A `lock` makes a second call while one is queued or running return that job; `interrupted` runs when a worker died and the job will not be retried.
 
 Signed-in users see and manage their own jobs; administrators see all of them:
 

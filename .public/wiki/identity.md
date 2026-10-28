@@ -183,7 +183,7 @@ Arrows name actual FK columns. `vectors` owner references, `facet_texts` source 
 | Container, kernel and native bridge binding | Configured service and in-process runtime state | Workspace-owned runtime/lease when concurrent controllers require it |
 | Executable tools | Code operation registry | Reuse registry; store only necessary user/workspace grants or connector metadata |
 | External MCP connection credentials | Private service configuration | Workspace-owned connection with protected secret reference and lifecycle |
-| External login | Deferred | User-owned unique issuer/subject link when OIDC is introduced |
+| External login | `users.idp_tenant_id` and `users.idp_object_id`, unique together, set at the first craft-id sign-in; unknown people wait in `access_requests` | Kept: craft-id uses Entra ID's `tid`/`oid` claims |
 
 
 
