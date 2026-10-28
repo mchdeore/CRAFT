@@ -10,6 +10,7 @@ import hmac
 import secrets
 import time
 from urllib.parse import urlencode
+from uuid import UUID
 
 import jwt
 import requests
@@ -35,9 +36,12 @@ def _get(url: str) -> dict:
     try:
         response = http.get(url, timeout=5)
         response.raise_for_status()
-        return response.json()
+        document = response.json()
     except (requests.RequestException, ValueError):
         raise ApiError("The identity provider is not reachable.") from None
+    if not isinstance(document, dict):
+        raise ApiError("The identity provider is misconfigured.")
+    return document
 
 
 def metadata(authority: str) -> dict:
@@ -46,7 +50,10 @@ def metadata(authority: str) -> dict:
     if cached and cached[0] > time.monotonic():
         return cached[1]
     document = _get(authority + "/.well-known/openid-configuration")
-    if document.get("issuer") != authority:
+    endpoints = ("authorization_endpoint", "token_endpoint", "jwks_uri")
+    if document.get("issuer") != authority or not all(
+        isinstance(document.get(name), str) for name in endpoints
+    ):
         raise ApiError("The identity provider is misconfigured.")
     _metadata[authority] = (time.monotonic() + 3600, document)
     return document
@@ -128,6 +135,10 @@ def finish(settings, flow: dict, state: str | None, code: str | None) -> dict:
         raise SignInFailed() from None
     if not hmac.compare_digest(str(claims["nonce"]), flow["nonce"]):
         raise SignInFailed()
+    try:
+        claims["tid"], claims["oid"] = UUID(str(claims["tid"])), UUID(str(claims["oid"]))
+    except ValueError:
+        raise SignInFailed() from None
     if f"/{claims['tid']}/" not in authority + "/":  # Entra's issuer names its tenant
         raise SignInFailed()
     return claims
