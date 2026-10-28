@@ -43,8 +43,10 @@ class _RunBearer:
 class WorkspaceRunBridge:
     """Borrow exactly one adapter; its bearer and manager cannot be restarted."""
 
-    def __init__(self, session: RunBoundSession):
+    def __init__(self, session: RunBoundSession, host: str = "127.0.0.1"):
         self._session: RunBoundSession | None = session
+        # The Host the kernel connects with: loopback, or this pod's address on the cluster.
+        self._hosts = sorted({*_HOSTS, host})
         # The adapter owns this absolute deadline; do not issue a fresh bridge TTL.
         self._deadline = session._deadline
         self._bearer: _RunBearer | None = _RunBearer(secrets.token_urlsafe(32))
@@ -98,7 +100,7 @@ class WorkspaceRunBridge:
             json_response=True,
             stateless=True,
             security_settings=TransportSecuritySettings(
-                allowed_hosts=[*_HOSTS, *(host + ":*" for host in _HOSTS)],
+                allowed_hosts=[*self._hosts, *(host + ":*" for host in self._hosts)],
             ),
         )
         try:

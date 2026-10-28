@@ -119,3 +119,36 @@ class JupyterConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HubConfigTest(unittest.TestCase):
+    def test_under_the_hub_no_token_is_needed_and_the_control_server_gets_its_own(self):
+        settings = SimpleNamespace(
+            ServerApp=SimpleNamespace(),
+            IdentityProvider=SimpleNamespace(),
+            PasswordIdentityProvider=SimpleNamespace(),
+            FileContentsManager=SimpleNamespace(),
+            Application=SimpleNamespace(),
+        )
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as control:
+            with patch.dict(
+                os.environ,
+                {
+                    "USER_ROOT": str(Path(root).resolve()),
+                    "JUPYTERHUB_API_TOKEN": "generated-server-token",
+                    "JUPYTERHUB_SERVICE_PREFIX": "/user/generated/",
+                    "CRAFT_CONTROL_DIR": control,
+                },
+                clear=True,
+            ):
+                runpy.run_path(
+                    str(Path(__file__).parents[1] / "jupyter_server_config.py"),
+                    init_globals={"get_config": lambda: settings},
+                )
+            token = Path(control, "token")
+            self.assertEqual(token.read_text(), "generated-server-token")
+            self.assertEqual(token.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                Path(control, "url").read_text(), "http://127.0.0.1:8888/user/generated/"
+            )
+        self.assertFalse(hasattr(settings.IdentityProvider, "token"))

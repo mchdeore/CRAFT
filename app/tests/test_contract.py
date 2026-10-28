@@ -31,6 +31,7 @@ from app.skills.handlers import (
     SkillVersionRef,
 )
 from app.tools.handlers import Capability, CapabilityCatalog
+from app.workspace.handlers import Workspace
 
 
 def test_session_contract() -> None:
@@ -115,6 +116,7 @@ def test_python_shapes_match_compiled_typescript() -> None:
         SkillRef,
         SkillSummary,
         SkillVersionRef,
+        Workspace,
     ]:
         compiled = typescript_schema(shape.__name__)
         declared = root_schema(compiled)

@@ -1,19 +1,18 @@
-"""Each owner's private Jupyter workspace, selected only from the trusted server configuration.
+"""Each owner's private Jupyter server, reached through the Hub (app/infrastructure/hub.py).
 
-The private file named by ``USER_WORKSPACES_FILE`` maps owner identifiers to their
-workspace endpoints. Nothing here is chosen by request or model arguments.
+The server address comes from the caller's own user ID. Nothing here is chosen by request or
+model arguments.
 """
 
 import asyncio
 import base64
 import binascii
+import ipaddress
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from http.cookiejar import CookieJar, DefaultCookiePolicy
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 from uuid import UUID
@@ -28,11 +27,21 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _channel_logger = logging.Logger("craft.kernel-actions", level=logging.CRITICAL + 1)
 
 
+def bridge_host_allowed(host: str) -> bool:
+    """Loopback names, or a private address: the API pod's own on the cluster."""
+    if host in {"127.0.0.1", "localhost", "host.docker.internal"}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class JupyterTarget:
     url: str = field(repr=False)
     token: str = field(repr=False)
-    kernel_id: str
+    kernel_id: str = ""  # only code runs need one
     bridge_host: str = "127.0.0.1"
     bridge_port: int = 0
 
@@ -47,9 +56,8 @@ class JupyterTarget:
             or target.fragment
             or not self.token
             or any(value.isspace() for value in self.token)
-            or str(UUID(self.kernel_id)) != self.kernel_id
-            # "app": the compose app container, which the workspace reaches on its network.
-            or self.bridge_host not in {"127.0.0.1", "localhost", "host.docker.internal", "app"}
+            or (self.kernel_id and str(UUID(self.kernel_id)) != self.kernel_id)
+            or not bridge_host_allowed(self.bridge_host)
             or not isinstance(self.bridge_port, int)
             or isinstance(self.bridge_port, bool)
             or not 0 <= self.bridge_port <= 65535
@@ -58,39 +66,6 @@ class JupyterTarget:
                 "Expected a private Jupyter root, token, selected kernel and bridge port"
             )
         object.__setattr__(self, "url", self.url.rstrip("/") + "/")
-
-
-def owner_entry(user_id: UUID | None) -> dict | None:
-    """The owner's private workspace entry, or None when none is configured."""
-    path = os.environ.get("USER_WORKSPACES_FILE")
-    if not path or user_id is None:
-        return None
-    if not Path(path).is_file():
-        return None  # no workspace has been started (scripts/workspace up writes the file)
-    endpoints = json.loads(Path(path).read_text())
-    if not isinstance(endpoints, dict):
-        raise ValueError("Invalid private workspace configuration")
-    entry = endpoints.get(str(user_id))
-    if entry is not None and not isinstance(entry, dict):
-        raise ValueError("Invalid private workspace configuration")
-    return entry
-
-
-def jupyter_target(entry: dict) -> JupyterTarget:
-    config = entry.get("jupyter")
-    if (
-        not isinstance(config, dict)
-        or any(not isinstance(config.get(key), str) for key in ("url", "token", "kernel_id"))
-        or not isinstance(config.get("bridge_host", "127.0.0.1"), str)
-    ):
-        raise ValueError("Invalid private Jupyter configuration")
-    return JupyterTarget(
-        config["url"],
-        config["token"],
-        config["kernel_id"],
-        config.get("bridge_host", "127.0.0.1"),
-        bridge_port=config.get("bridge_port", 0),
-    )
 
 
 def owned_name(path: str) -> str:
@@ -121,6 +96,8 @@ def jupyter_http(target: JupyterTarget) -> httpx.AsyncClient:
 
 async def run_in_kernel(target: JupyterTarget, code: str, seconds: float = 120) -> dict[str, Any]:
     """Execute code once in the owner's selected kernel and collect its visible outputs."""
+    if not target.kernel_id:
+        raise ValueError("No kernel is selected")
     from jupyter_client.session import Session
     from websockets.asyncio.client import connect as open_channel
 

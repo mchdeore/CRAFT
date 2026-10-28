@@ -3,6 +3,7 @@
 CRAFT on Colima's built-in Kubernetes (k3s), with one Helm chart: the API, the workers, craft-id and PostgreSQL. Colima's Docker engine builds the image and k3s uses it directly, so there is no registry. Compose keeps working beside it.
 
 - `craft/` the chart. Each setting comes from the `craft-env` Secret, made from `.env`; a container reads only the keys it needs, the same `CRAFT_*` variables compose passes.
+- `jupyterhub/` the workspaces: JupyterHub's own chart beside this one (`jupyterhub/README.md`).
 - `local.yaml` the local values: `worker-agent`, `worker-interactive` and `worker-bulk`, as compose has them, each with its queues, jobs at once per queue and memory limit.
 - `worker-agent` runs inside the API's pod because chat turns call the API's MCP on `127.0.0.1`. The other workers have their own Deployments.
 - PostgreSQL first boots with `app/infrastructure/database/initdb.sh` (`craft/initdb.sh` links to it).

@@ -39,12 +39,9 @@ services:
       CRAFT_OIDC_CLIENT_ID: ${CRAFT_OIDC_CLIENT_ID:-}
       CRAFT_OIDC_CLIENT_SECRET: ${CRAFT_OIDC_CLIENT_SECRET:-}
       CRAFT_OIDC_REDIRECT_URI: ${CRAFT_OIDC_REDIRECT_URI:-http://localhost:8000/api/auth/callback}
-      USER_WORKSPACES_FILE: /run/craft/workspaces/workspaces.json   # written by scripts/workspace up
     volumes: &provider_mount
       - ${CRAFT_PROVIDER_ROOT:-./.local/runtime/provider}:/provider:ro
-      - ./.local/runtime/workspace/map:/run/craft/workspaces:ro
     ports: ["8000:8000", "8100:8100"]                  # 8100: craft-id, which shares this network
-    networks: [default, workspace]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://localhost:8000/health/live', timeout=2)"]
       interval: 2s
@@ -135,50 +132,5 @@ services:
       app:
         condition: service_healthy
 
-  # One person's JupyterLab workspace and its notebook control server (scripts/workspace up).
-  # The workspace network is internal: the workspace reaches the app and nothing else.
-  workspace:
-    image: craft-user-workspace:local
-    build: { context: workspace }
-    profiles: ["workspace"]
-    restart: "no"
-    networks: [workspace]
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges]
-    mem_limit: 2g
-    cpus: 2
-    pids_limit: 256
-    environment:
-      JUPYTER_TOKEN: ${WORKSPACE_JUPYTER_TOKEN:?run scripts/workspace up}
-      JUPYTER_PASSWORD_HASH: ${WORKSPACE_JUPYTER_HASH:-}
-      CRAFT_UI_ORIGIN: http://localhost:18881
-      CRAFT_API_URL: http://app:8000
-    ports: ["127.0.0.1:18881:8888"]
-    volumes:
-      - workspace-root:/workspace
-      - ./.local/runtime/workspace/workspace-token:/run/craft/workspace-token:ro
-      - ./.local/templates/csa:/workspace/templates/csa:ro
-  workspace-mcp:
-    build: { context: workspace, dockerfile: mcp.Dockerfile }
-    profiles: ["workspace"]
-    restart: "no"
-    networks: [workspace]
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges]
-    environment:
-      JUPYTER_URL: http://workspace:8888
-      JUPYTER_TOKEN: ${WORKSPACE_JUPYTER_TOKEN:?run scripts/workspace up}
-      MCP_TOKEN: ${WORKSPACE_MCP_TOKEN:?run scripts/workspace up}
-    depends_on: [workspace]
-
-networks:
-  workspace:
-    internal: true
-
 volumes:
   db: {}
-  workspace-root: {}

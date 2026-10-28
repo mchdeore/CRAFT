@@ -13,6 +13,7 @@ export interface NewWorkspaceToken { label: string; hours?: number }
 export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
 /** `notebook`: the notebook this code works on; approving it grants that notebook for the conversation. */
+export interface Workspace { state: "stopped" | "starting" | "ready"; url: string | null }
 export interface RunCode { code: string; notebook?: string | null }
 export interface GrantedRun { notebook: string; code: string }
 export interface KernelImage { mediaType: "image/png" | "image/jpeg"; dataBase64: string }

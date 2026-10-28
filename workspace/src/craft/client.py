@@ -1,6 +1,7 @@
 """Small official-MCP client seam; credentials never become tool arguments."""
 
 import asyncio
+import ipaddress
 import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -165,6 +166,16 @@ def _unbind_run(binding_id: str) -> bool:
     return True
 
 
+def _bridge_host(host: str | None) -> bool:
+    """Loopback names, or a private address: the CRAFT API pod's own on the cluster."""
+    if host in {"127.0.0.1", "localhost", "host.docker.internal"}:
+        return True
+    try:
+        return ipaddress.ip_address(host or "").is_private
+    except ValueError:
+        return False
+
+
 def _bind_run(
     url: str, run_token: str, run_id: str, seconds: float, *, binding_id: str | None = None
 ) -> None:
@@ -175,7 +186,7 @@ def _bind_run(
     target = urlsplit(url)
     if (
         target.scheme != "http"
-        or target.hostname not in {"127.0.0.1", "localhost", "host.docker.internal"}
+        or not _bridge_host(target.hostname)
         or target.username is not None
         or target.password is not None
         or target.query

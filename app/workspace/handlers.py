@@ -1,15 +1,21 @@
-"""Agent actions in the owner's own workspace; each one waits for the requester's approval."""
+"""The owner's own workspace: start, stop and status, and agent actions that wait for approval."""
 
 from typing import Annotated, Any, ClassVar, Literal
 
 import msgspec
 
 from app.infrastructure.access import SIGNED_IN, Caller
-from app.infrastructure.operations import EXTERNAL, operation
+from app.infrastructure.operations import EXTERNAL, NONE, operation
 from app.infrastructure.shapes import Shape
 from app.workspace import service
 
 NotebookPath = Annotated[str, msgspec.Meta(min_length=1, max_length=255, pattern=r"\.ipynb$")]
+
+
+class Workspace(Shape):
+    state: Literal["stopped", "starting", "ready"]
+    # JupyterLab to embed; null while stopped.
+    url: str | None
 
 
 class RunCode(Shape):
@@ -81,6 +87,24 @@ class SavedFile(Shape):
 class EditedNotebook(Shape):
     path: str
     cells: int
+
+
+@operation(SIGNED_IN, get="/workspace", effects=NONE)
+async def read_workspace(caller: Caller) -> Workspace:
+    """The requester's workspace: stopped, starting or ready, and where JupyterLab opens."""
+    return Workspace(**await service.read_workspace(caller))
+
+
+@operation(SIGNED_IN, post="/workspace/start", effects=EXTERNAL)
+async def start_workspace(caller: Caller) -> Workspace:
+    """Start the requester's workspace if it is stopped and return at once; files are kept."""
+    return Workspace(**await service.start_workspace(caller))
+
+
+@operation(SIGNED_IN, post="/workspace/stop", effects=EXTERNAL)
+async def stop_workspace(caller: Caller) -> Workspace:
+    """Stop the requester's workspace; its files stay on the person's volume."""
+    return Workspace(**await service.stop_workspace(caller))
 
 
 @operation(SIGNED_IN, post="/workspace/run", tool=True, effects=EXTERNAL, grants="notebook")
