@@ -67,13 +67,8 @@ def cancel_job(caller: Caller, request: JobRef) -> Job:
     return Job(**service.cancel(caller, int(request.job_id)))
 
 
-def defer_job(session, kind: str, args: dict, requested_by=None) -> int:
-    """Queue a registered job kind in the caller's transaction (for other features)."""
-    return service.defer(session, kind, args, requested_by)
-
-
 def active_job(session, lock: str) -> int | None:
-    """The queued or running job holding a lock key (see register_job)."""
+    """The queued or running job holding a lock key (see Job.lock)."""
     return service.active(session, lock)
 
 

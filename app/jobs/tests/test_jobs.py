@@ -1,24 +1,25 @@
-"""The PostgreSQL job queue with test-only job kinds: no model calls."""
+"""The PostgreSQL job queue with test-only job operations: no model calls."""
 
 import os
 import signal
 import subprocess
 import sys
 import time
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.infrastructure import queue
+from app.infrastructure.access import Caller
 from app.infrastructure.database.engine import make_engine, make_sessions
-from app.infrastructure.errors import NotFound
+from app.infrastructure.errors import Forbidden
+from app.infrastructure.operations.jobs import enqueue
 from app.infrastructure.paths import ROOT
-from app.jobs.handlers import defer_job
 from app.tests.support import jobs as test_jobs
 from app.tests.support.cube import cube_source as cube_source
 
-test_jobs.register()
 ORIGIN = {"Origin": "https://testserver"}
 
 
@@ -32,13 +33,21 @@ def jobs(settings, owner_engine, monkeypatch):
             text("update procrastinate_jobs set status = 'cancelled' where status = 'todo'")
         )
     engine = make_engine(settings)
-    sessions = make_sessions(engine)
+    sessions = made = make_sessions(engine)
 
     class Jobs:
+        caller = Caller(user_id=uuid4(), roles=frozenset({"member"}), sessions=made)
+        sessions = made
+
         @staticmethod
-        def defer(kind, requested_by=None, **args):
+        def defer(operation, requested_by=None, **values):
+            caller = Jobs.caller
+            if requested_by is not None:
+                caller = Caller(user_id=requested_by, roles=caller.roles, sessions=sessions)
+            declared = operation.__operation__
+            request = declared.input(**values) if declared.input else None
             with sessions.begin() as session:
-                return defer_job(session, kind, args, requested_by)
+                return enqueue(session, caller, operation, request)
 
         @staticmethod
         def row(job_id):
@@ -69,20 +78,43 @@ def jobs(settings, owner_engine, monkeypatch):
     engine.dispose()
 
 
-def test_unknown_kind_is_refused_and_a_lock_returns_the_active_job(jobs):
-    with pytest.raises(NotFound):
-        jobs.defer("test.unknown")
+def test_a_lock_returns_the_active_job(jobs):
     key = "lock-" + str(time.time_ns())
-    held = jobs.defer("test.sleep", key=key)
-    assert jobs.defer("test.sleep", key=key) == held
+    held = jobs.defer(test_jobs.sleep, key=key)
+    assert jobs.defer(test_jobs.sleep, key=key) == held
     jobs.cancel(held)
-    assert jobs.defer("test.sleep", key=key) != held
+    # A worker may have started it already; cancelling then takes effect when it stops.
+    jobs.wait(held, {"canceled", "stopped", "finished", "failed"})
+    assert jobs.defer(test_jobs.sleep, key=key) != held
+
+
+def test_calling_a_job_operation_queues_it_and_the_worker_logs_a_child_call(settings, jobs):
+    caller = jobs.caller
+    with queue.worker_thread(settings, ["interactive"]):
+        job = int(test_jobs.sleep(caller, test_jobs.Sleep()).job_id)
+        assert jobs.wait(job, {"finished", "failed"}).state == "finished"
+        with pytest.raises(Forbidden):
+            test_jobs.managed(caller)
+        # Queued past the check (as if roles changed): the worker checks access again.
+        refused = jobs.defer(test_jobs.managed)
+        assert jobs.wait(refused, {"finished", "failed"}).error == "Forbidden"
+    with jobs.sessions.begin() as session:
+        rows = session.execute(
+            text(
+                "select call_id, parent_call_id, request_id, outcome, error_code from call_log"
+                " where name = 'tests.sleep' and user_id = :user order by at"
+            ),
+            {"user": caller.user_id},
+        ).all()
+    queued, ran = rows
+    assert ran.parent_call_id == queued.call_id and ran.request_id == queued.request_id
+    assert (queued.outcome, ran.outcome) == ("ok", "ok")
 
 
 def test_transient_failures_retry_and_permanent_ones_fail_once(settings, jobs):
     with queue.worker_thread(settings, ["interactive"]):
-        transient = jobs.defer("test.sleep", fail="transient", times=2)
-        permanent = jobs.defer("test.sleep", fail="permanent")
+        transient = jobs.defer(test_jobs.sleep, fail="transient", times=2)
+        permanent = jobs.defer(test_jobs.sleep, fail="permanent")
         done = jobs.wait(transient, {"finished", "failed"})
         failed = jobs.wait(permanent, {"finished", "failed"})
     assert (done.state, done.attempts) == ("finished", 3)  # every run counts, success too
@@ -95,10 +127,10 @@ def test_running_jobs_stop_through_the_api(settings, jobs, cube_source):
         TestClient(cube_source["app"], base_url="https://testserver") as http,
     ):
         assert cube_source["sign_in"](http).status_code == 200
-        user = str(cube_source["caller"].user_id)
-        running = jobs.defer("test.sleep", requested_by=user, seconds=30)
-        blocking = jobs.defer("test.blocking", requested_by=user, seconds=30)
-        other = jobs.defer("test.sleep", seconds=0)
+        user = cube_source["caller"].user_id
+        running = jobs.defer(test_jobs.sleep, requested_by=user, seconds=30)
+        blocking = jobs.defer(test_jobs.blocking, requested_by=user, seconds=30)
+        other = jobs.defer(test_jobs.sleep, seconds=0)
         jobs.wait(running, {"started"})
         jobs.wait(blocking, {"started"})
         listed = http.get("/api/jobs").json()["jobs"]
@@ -121,9 +153,9 @@ def test_a_long_bulk_job_never_delays_the_agent_queue(settings, jobs):
         queue.worker_thread(settings, ["bulk"], concurrency=1),
         queue.worker_thread(settings, ["agent"]),
     ):
-        long = jobs.defer("test.bulk", seconds=30)
+        long = jobs.defer(test_jobs.bulk, seconds=30)
         jobs.wait(long, {"started"})
-        quick = jobs.defer("test.agent")
+        quick = jobs.defer(test_jobs.agent)
         started = time.monotonic()
         jobs.wait(quick, {"finished"}, seconds=5)
         assert time.monotonic() - started < 3
@@ -138,10 +170,10 @@ def test_a_killed_workers_job_is_retried_and_finishes(settings, jobs, monkeypatc
         "CRAFT_WORKER_QUEUES": "interactive",
     }
     worker = subprocess.Popen(
-        [sys.executable, "-m", "app.tests.support.jobs"], cwd=ROOT, env=environment
+        [sys.executable, "-m", "app.tests.support.job_worker"], cwd=ROOT, env=environment
     )
     try:
-        job = jobs.defer("test.sleep", seconds=60)
+        job = jobs.defer(test_jobs.sleep, seconds=60)
         jobs.wait(job, {"started"}, seconds=30)
     finally:
         os.kill(worker.pid, signal.SIGKILL)

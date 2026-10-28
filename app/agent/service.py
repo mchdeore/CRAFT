@@ -165,10 +165,9 @@ def queue_run(caller, request, read_only: bool) -> int:
     """Record the run's next input and queue it on the agent worker; returns its segment."""
     import msgspec
 
-    from app.infrastructure.operations.context import current_call
-    from app.jobs.handlers import active_job, defer_job
-
-    call = current_call.get()
+    from app.agent.jobs import AgentRunJob, agent_run
+    from app.infrastructure.operations.jobs import enqueue
+    from app.jobs.handlers import active_job
 
     with unit_of_work(scope(caller)) as session:
         if active_job(session, RUN_LOCK + str(request.run_id)) is not None:
@@ -176,23 +175,8 @@ def queue_run(caller, request, read_only: bool) -> int:
         segment = storage.add_segment(
             session, caller.user_id, request.run_id, request.thread_id, msgspec.to_builtins(request)
         )
-        defer_job(
-            session,
-            "agent_run",
-            {
-                "user": str(caller.user_id),
-                "run": str(request.run_id),
-                "segment": segment,
-                "roles": sorted(caller.roles),
-                "auth_session_id": str(caller.auth_session_id) if caller.auth_session_id else None,
-                "origin": caller.origin,
-                "read_only": read_only,
-                # The worker's run is logged as a child of this request's call.
-                "request_id": str(call.request_id) if call else None,
-                "parent_call_id": str(call.call_id) if call else None,
-            },
-            caller.user_id,
-        )
+        job = AgentRunJob(run=request.run_id, segment=segment, read_only=read_only)
+        enqueue(session, caller, agent_run, job)
         return segment
 
 

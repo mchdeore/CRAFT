@@ -13,6 +13,21 @@ from app.infrastructure.shapes import Shape
 
 
 @dataclass(frozen=True)
+class Job:
+    """Run the operation on a worker queue: calling it queues a job and returns its ID.
+
+    lock maps the input to a key: a second call while one is queued or running returns that
+    job. interrupted(sessions, input) runs when a worker died and the job will not be retried.
+    """
+
+    queue: str
+    retry: bool = True
+    timeout: float | None = None
+    lock: Callable[[Any], str] | None = None
+    interrupted: Callable[[Any, Any], None] | None = None
+
+
+@dataclass(frozen=True)
 class Operation:
     name: str
     function: Any
@@ -24,6 +39,9 @@ class Operation:
     input: type[Shape] | None
     output: Any
     prepare_approved: Callable[[Caller, Any], object] | None = None
+    job: Job | None = None
+    # The checked function a worker runs; the declared function queues it.
+    run: Any = None
 
     @property
     def tool_name(self) -> str:
@@ -74,6 +92,7 @@ def declare(
     tool: bool,
     effects: str,
     prepare_approved: Callable[[Caller, Any], object] | None = None,
+    job: Job | None = None,
 ) -> Operation:
     if getattr(function, "__observed__", False):
         raise ValueError("Observation cannot decorate an operation")
@@ -125,6 +144,13 @@ def declare(
         raise ValueError("Duplicate operation name or route")
     if tool and any(o.tool and o.tool_name == function.__name__ for o in registry.values()):
         raise ValueError("Duplicate tool name")
+    if job is not None and (
+        tool
+        or effects != "NONE"
+        or hints["return"] is not type(None)
+        or inspect.isasyncgenfunction(function)
+    ):
+        raise ValueError("A job returns nothing, needs no approval and is not a tool")
     return Operation(
         name,
         function,
@@ -136,6 +162,7 @@ def declare(
         input_shape,
         hints["return"],
         prepare_approved,
+        job,
     )
 
 
