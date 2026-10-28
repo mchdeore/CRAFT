@@ -3,7 +3,11 @@ import base64
 from dataclasses import replace
 from xml.etree import ElementTree
 
+import msgspec
+import pytest
+
 from app.conversations.handlers import ConversationRef, list_files
+from app.infrastructure.errors import InvalidInput
 from app.tools.handlers import ChartInput, make_chart
 
 SPEC = {
@@ -61,5 +65,59 @@ def test_chart_saved_to_workspace(chat):
     result = asyncio.run(make_chart(caller, ChartInput(spec=SPEC, format="png")))
     assert result.file is not None and result.content_base64 is None
     files = list_files(caller, ConversationRef(id=chat["thread"]))
-    assert len(files) == 1 and files[0].id == result.file.id
-    assert files[0].origin == "agent" and files[0].state == "ready"
+    assert len(files) == 4 and result.file.id in {f.id for f in files}
+    assert all(f.origin == "agent" and f.state == "ready" for f in files)
+
+
+def a_source(chat):
+    from app.library.handlers import LibrarySearch, search
+
+    hits = search(chat["caller"], LibrarySearch(query="power", kinds=["chunk"], limit=1)).hits
+    assert hits
+    return hits[0].handle
+
+
+def test_chart_keeps_four_files_with_its_sources(chat):
+    handle = a_source(chat)
+    caller = replace(chat["caller"], origin="python", conversation_id=chat["thread"])
+    result = asyncio.run(
+        make_chart(caller, ChartInput(spec=SPEC, title="Power by item", sources=[handle]))
+    )
+    assert result.title == "Power by item" and result.citations == [handle]
+    assert result.simulated is handle.simulated
+    assert result.files is not None and result.file == result.files.svg
+    stems = {f.name.split(".", 1)[0] for f in files_of(result)}
+    assert len(stems) == 1
+    stored = {f.id: f for f in list_files(caller, ConversationRef(id=chat["thread"]))}
+    assert {f.id for f in files_of(result)} <= set(stored)
+    assert [f.media_type for f in files_of(result)] == [
+        "image/svg+xml",
+        "image/png",
+        "application/json",
+        "text/csv",
+    ]
+
+
+def files_of(result):
+    assert result.files is not None
+    return [result.files.svg, result.files.png, result.files.spec, result.files.csv]
+
+
+def test_chart_refuses_a_source_that_does_not_match(chat):
+    handle = a_source(chat)
+    forged = replace_handle(handle, quote_sha256="0" * 64)
+    with pytest.raises(InvalidInput):
+        asyncio.run(make_chart(chat["caller"], ChartInput(spec=SPEC, sources=[forged])))
+
+
+def replace_handle(handle, **fields):
+    return msgspec.structs.replace(handle, **fields)
+
+
+def test_chart_table_lists_inline_rows():
+    from app.tools.service import chart_table, titled
+
+    layered = {"layer": [SPEC, {**SPEC, "data": {"values": [{"x": "d", "z": [1]}]}}]}
+    assert chart_table(layered).splitlines() == ["x,y,z", "a,1,", "b,2,", "c,3,", "d,,[1]"]
+    assert titled(SPEC, None)[1] == "Chart"
+    assert titled({**SPEC, "title": {"text": "Mass"}}, None)[1] == "Mass"

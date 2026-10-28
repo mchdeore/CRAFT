@@ -21,6 +21,7 @@ analysis = [
   "pyarrow==26.0.0",
   "sympy==1.14.0",
   "pint==0.26.2",
+  "vl-convert-python==1.9.0.post1",
 ]
 lab = [
   "jupyterlab==4.6.4",

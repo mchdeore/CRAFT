@@ -1,7 +1,10 @@
 """Bound local rendering and transmit only an allowlisted numeric expression."""
 
 import base64
+import csv
 import inspect
+import io
+import json
 import math
 import re
 from datetime import UTC, datetime
@@ -12,7 +15,7 @@ import vl_convert
 from starlette.concurrency import run_in_threadpool
 
 from app.conversations.handlers import WorkspaceUpload, store_generated_file
-from app.infrastructure.errors import ApiError, InvalidInput, TooLarge
+from app.infrastructure.errors import ApiError, InvalidInput, NotFound, TooLarge
 from app.infrastructure.operations import observe
 
 
@@ -108,25 +111,130 @@ def render(spec, kind):
     return result
 
 
+def chart_table(spec):
+    """The chart's inline rows as CSV, columns in first-seen order."""
+    rows = []
+
+    def collect(value):
+        if isinstance(value, dict):
+            data = value.get("data")
+            if isinstance(data, dict) and isinstance(data.get("values"), list):
+                rows.extend(
+                    row if isinstance(row, dict) else {"value": row} for row in data["values"]
+                )
+            for key, child in value.items():
+                if key != "data":
+                    collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    collect(spec)
+    columns = list(dict.fromkeys(key for row in rows for key in row))
+    out = io.StringIO()
+    writer = csv.DictWriter(out, columns, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                key: json.dumps(value) if isinstance(value, dict | list) else value
+                for key, value in row.items()
+            }
+        )
+    return out.getvalue()
+
+
+def titled(spec, title):
+    """The spec with its title set, and the title shown for it."""
+    if title is not None:
+        return {**spec, "title": title}, title
+    shown = spec.get("title")
+    if isinstance(shown, dict):
+        shown = shown.get("text")
+    if isinstance(shown, list):
+        shown = " ".join(str(part) for part in shown)
+    return spec, str(shown or "Chart")[:200]
+
+
+def checked_sources(caller, sources):
+    """Readable cited sources whose quotes still match; a withdrawn or changed one is refused."""
+    from app.library.handlers import CitationCheck, check_citation
+
+    for handle in sources:
+        try:
+            status = check_citation(caller, CitationCheck(handle=handle))
+        except NotFound:
+            raise InvalidInput() from None
+        if status.status not in {"current", "newer_version"}:
+            raise InvalidInput()
+    return list(sources)
+
+
+def chart_files(spec):
+    """SVG, PNG, Vega-Lite spec and CSV for one validated chart."""
+    return {
+        "svg": render(spec, "svg"),
+        "png": render(spec, "png"),
+        "spec": (json.dumps(spec, indent=2, ensure_ascii=False) + "\n").encode(),
+        "csv": chart_table(spec).encode(),
+    }
+
+
+def workspace_chart(spec, title):
+    spec, _ = titled(spec, title)
+    return {
+        "svg": render(spec, "svg").decode(),
+        "vl.json": json.dumps(spec, indent=2, ensure_ascii=False) + "\n",
+        "csv": chart_table(spec),
+    }
+
+
+MEDIA = {"svg": "image/svg+xml", "png": "image/png", "spec": "application/json", "csv": "text/csv"}
+SUFFIX = {"svg": "svg", "png": "png", "spec": "vl.json", "csv": "csv"}
+
+
 async def chart(caller, request):
-    image = await run_in_threadpool(render, request.spec, request.format)
-    media = "image/svg+xml" if request.format == "svg" else "image/png"
-    saved = None
-    if caller.conversation_id is not None:
-        saved = await store_generated_file(
+    spec, title = titled(request.spec, request.title)
+    sources = await run_in_threadpool(checked_sources, caller, request.sources)
+    simulated = any(handle.simulated for handle in sources)
+    media = MEDIA[request.format]
+    if caller.conversation_id is None:
+        image = await run_in_threadpool(render, spec, request.format)
+        return {
+            "title": title,
+            "format": request.format,
+            "media_type": media,
+            "content_base64": base64.b64encode(image).decode(),
+            "file": None,
+            "files": None,
+            "citations": sources,
+            "simulated": simulated,
+        }
+    from app.tools.handlers import ChartFiles
+
+    made = await run_in_threadpool(chart_files, spec)
+    stem = f"chart-{uuid4().hex}"
+    saved = {}
+    for kind, content in made.items():
+        saved[kind] = await store_generated_file(
             caller,
             WorkspaceUpload(
                 id=caller.conversation_id,
-                content=image,
-                file_name=f"chart-{uuid4().hex}.{request.format}",
-                media_type=media,
+                content=content,
+                file_name=f"{stem}.{SUFFIX[kind]}",
+                media_type=MEDIA[kind],
+                simulated=simulated,
             ),
         )
     return {
+        "title": title,
         "format": request.format,
         "media_type": media,
-        "content_base64": base64.b64encode(image).decode() if saved is None else None,
-        "file": saved,
+        "content_base64": None,
+        "file": saved[request.format],
+        "files": ChartFiles(**saved),
+        "citations": sources,
+        "simulated": simulated,
     }
 
 

@@ -31,6 +31,21 @@ async def write_file(caller, path: str, content: str) -> dict[str, Any]:
     return {"path": name, "size": len(content.encode())}
 
 
+async def save_chart(caller, request) -> dict[str, Any]:
+    from starlette.concurrency import run_in_threadpool
+
+    from app.tools.handlers import workspace_chart
+
+    made = await run_in_threadpool(workspace_chart, request.spec, request.title)
+    target = _target(caller)
+    saved = {}
+    for suffix, content in made.items():
+        path = f"outputs/charts/{request.name}.{suffix}"
+        await workspaces.write_text(target, path, content)
+        saved[suffix.removeprefix("vl.").replace("json", "spec")] = path
+    return saved
+
+
 async def edit_notebook(caller, request) -> dict[str, Any]:
     name = _name(request.path)
     target = _target(caller)

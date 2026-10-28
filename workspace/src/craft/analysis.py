@@ -1,5 +1,8 @@
 """Opinionated table and chart helpers for common notebook workflows."""
 
+import csv
+import io
+import json
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -8,6 +11,7 @@ from craft import files
 
 _AGGREGATIONS = {"sum", "mean", "min", "max", "count", "median"}
 _CHART_KINDS = {"line", "bar", "scatter"}
+_VEGA_MARKS = {"line": {"type": "line", "point": True}, "bar": "bar", "scatter": "point"}
 
 
 def table(
@@ -72,10 +76,35 @@ def chart(
     ylabel: str | None = None,
     figsize: tuple[float, float] = (8, 4),
     save_as: str | Path | None = None,
-):
-    """A quick chart from table columns; returns a Figure or saved path."""
+    engine: str = "matplotlib",
+) -> Any:
+    """A quick chart from table columns; returns a Figure, a Vega chart or saved path.
+
+    With ``engine="vega"`` the chart is a Vega-Lite spec rendered offline, and
+    ``save_as="outputs/charts/name.svg"`` also saves ``name.vl.json`` and ``name.csv``.
+    """
     if kind not in _CHART_KINDS:
         raise ValueError(f"kind must be one of {', '.join(sorted(_CHART_KINDS))}")
+    if engine == "vega":
+        columns = [x, y] + ([by] if by is not None else [])
+        encoding: dict[str, Any] = {
+            "x": {"field": x, "type": _vega_type(frame[x]), "title": xlabel or x},
+            "y": {"field": y, "type": _vega_type(frame[y]), "title": ylabel or y},
+        }
+        if by is not None:
+            encoding["color"] = {"field": by, "type": "nominal", "title": by}
+        spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+            "title": title or f"{y} by {x}",
+            "width": int(figsize[0] * 75),
+            "height": int(figsize[1] * 75),
+            "data": {"values": json.loads(frame.loc[:, columns].to_json(orient="records"))},
+            "mark": _VEGA_MARKS[kind],
+            "encoding": encoding,
+        }
+        return vega(spec, save_as=save_as)
+    if engine != "matplotlib":
+        raise ValueError("engine must be matplotlib or vega")
     plt = import_module("matplotlib.pyplot")
 
     figure, axes = plt.subplots(figsize=figsize)
@@ -104,3 +133,79 @@ def _draw(axes: Any, x_values: Any, y_values: Any, kind: str, *, label: str | No
         axes.bar(x_values, y_values, label=label)
     else:
         axes.scatter(x_values, y_values, label=label)
+
+
+class VegaChart:
+    """A Vega-Lite chart rendered offline; shows as SVG in a notebook."""
+
+    def __init__(self, spec: dict[str, Any], svg: str):
+        self.spec = spec
+        self.svg = svg
+
+    def _repr_svg_(self) -> str:
+        return self.svg
+
+    def png(self, scale: float = 2) -> bytes:
+        convert = import_module("vl_convert")
+        return convert.vegalite_to_png(self.spec, scale=scale, allowed_base_urls=[])
+
+    def csv(self) -> str:
+        return _spec_table(self.spec)
+
+
+def vega(spec: dict[str, Any], *, save_as: str | Path | None = None):
+    """Render a Vega-Lite spec without network access; returns a chart or saved path.
+
+    Data must be inline (``data.values``). ``save_as`` ending in ``.svg`` also saves
+    the spec beside it as ``.vl.json`` and its rows as ``.csv``; ``.png`` saves an image.
+    """
+    if "url" in json.dumps(spec.get("data", {})):
+        raise ValueError("Give chart data inline as data.values; URLs are not loaded")
+    convert = import_module("vl_convert")
+    result = VegaChart(spec, convert.vegalite_to_svg(spec, allowed_base_urls=[]))
+    if save_as is None:
+        return result
+    target = files.path(save_as)
+    suffix = target.suffix.lower()
+    if suffix == ".png":
+        return files.save(result.png(), target)
+    if suffix != ".svg":
+        raise ValueError("Vega charts save as .svg (with .vl.json and .csv) or .png")
+    files.save(result.csv(), target.with_suffix(".csv"))
+    files.save(
+        json.dumps(spec, indent=2, ensure_ascii=False) + "\n", target.with_suffix(".vl.json")
+    )
+    return files.save(result.svg, target)
+
+
+def _vega_type(column: Any) -> str:
+    kind = getattr(column, "dtype", None)
+    name = getattr(kind, "kind", "O")
+    return "temporal" if name == "M" else "quantitative" if name in "iuf" else "nominal"
+
+
+def _spec_table(spec: dict[str, Any]) -> str:
+    rows: list[dict[str, Any]] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            data = value.get("data")
+            if isinstance(data, dict) and isinstance(data.get("values"), list):
+                rows.extend(
+                    row if isinstance(row, dict) else {"value": row} for row in data["values"]
+                )
+            for key, child in value.items():
+                if key != "data":
+                    collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    collect(spec)
+    out = io.StringIO()
+    writer = csv.DictWriter(
+        out, list(dict.fromkeys(k for row in rows for k in row)), lineterminator="\n"
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()

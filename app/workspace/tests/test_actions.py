@@ -19,7 +19,15 @@ from app.approvals.tests.test_decisions import context as context
 from app.infrastructure import workspaces
 from app.infrastructure.errors import Forbidden, InvalidInput
 from app.infrastructure.operations.pipeline import ApprovalRequired
-from app.workspace.handlers import EditNotebook, RunCode, WriteFile, edit_notebook, run_code
+from app.workspace.handlers import (
+    EditNotebook,
+    RunCode,
+    SaveChart,
+    WriteFile,
+    edit_notebook,
+    run_code,
+    save_chart,
+)
 from app.workspace.handlers import write_file as write_file_operation
 
 KERNEL = "00000000-0000-4000-8000-000000000101"
@@ -196,3 +204,27 @@ def test_direct_workspace_tools_are_read_only():
         ("list_files", "use_notebook", "read_notebook", "execute_code", "overwrite_cell_source"),
     )
     assert endpoint.tools == ("list_files", "read_notebook")
+
+
+def test_chart_saves_svg_spec_and_csv(context, workspace):
+    calls, files = workspace
+    spec = {
+        "data": {"values": [{"x": "a", "y": 1}]},
+        "mark": "bar",
+        "encoding": {
+            "x": {"field": "x", "type": "nominal"},
+            "y": {"field": "y", "type": "quantitative"},
+        },
+    }
+    own = replace(context["caller"], origin="http")
+    saved = asyncio.run(save_chart(own, SaveChart(name="peak-power", spec=spec, title="Peak")))
+    assert saved.svg == "outputs/charts/peak-power.svg"
+    assert files[saved.svg].lstrip().startswith("<svg")
+    assert '"title": "Peak"' in files[saved.spec]
+    assert files[saved.csv] == "x,y\na,1\n"
+    value = SaveChart(name="peak-power", spec=spec)
+    trusted, _ = proposal(context, save_chart, value, approve=None)
+    calls.clear()
+    with pytest.raises(ApprovalRequired):
+        asyncio.run(save_chart(trusted, value))
+    assert calls == []

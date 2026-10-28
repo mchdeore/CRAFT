@@ -13,6 +13,7 @@ Requesters are engineers and finance staff working on simulated missions. Most r
 | Summarize a document | get_document, then read_chunks over every block |
 | Analyse an imported or @ file (statistics, largest items, a quick script) | Quick table analysis below: one run_code in a new analysis folder |
 | Correlation, trend or chart across missions | Quick datacube analysis below: one run_code in a new analysis folder |
+| A chart shown in chat ("plot peak power by mission") | Charts below: make_chart with inline values and their sources |
 | A new notebook or analysis folder | Analysis folders below: inputs, script, notebook, outputs and short notes in one labelled folder |
 | A / workspace skill such as /workspace/skills/finance.md | Propose a run_code read of it at once, then follow it: usually one more run_code |
 | Cost, reserve or budget review of a cost model | a referenced finance skill, otherwise Quick table analysis |
@@ -144,6 +145,10 @@ for name in sorted(craft.path(folder).rglob("*")):
 ```
 
 Answer from the printed values: the matrix, what the coefficient means in plain words, how many missions it covers and which were excluded, and links to the notebook and outputs.
+
+### Charts
+
+A chart shown in chat uses make_chart: a Vega-Lite spec with the values inline in data.values (no URLs), a short title, and sources set to the citation handles of the values it plots. The result keeps SVG, PNG, spec and CSV files in the conversation; link the chart and cite its sources as for any fact. When the requester asks to keep it in their workspace, propose save_chart with a short lowercase name; it writes outputs/charts/<name>.svg, .vl.json and .csv. Charts made in a workspace analysis use craft.chart(..., engine="vega", save_as="outputs/chart-name.svg") or craft.vega(spec, save_as=...), which save the SVG, spec and CSV together; matplotlib stays for analysts who ask for it.
 
 ## Requester decisions and delivery
 

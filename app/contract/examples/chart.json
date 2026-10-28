@@ -1,6 +1,79 @@
 {
+  "title": "Peak power by mission",
   "format": "svg",
   "mediaType": "image/svg+xml",
-  "contentBase64": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=",
-  "file": null
+  "contentBase64": null,
+  "file": {
+    "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e68",
+    "conversationId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61",
+    "name": "chart-5d1c.svg",
+    "mediaType": "image/svg+xml",
+    "sizeBytes": 4210,
+    "origin": "agent",
+    "state": "ready",
+    "simulated": true,
+    "classification": "unclassified",
+    "createdAt": "2026-10-16T00:00:00Z"
+  },
+  "files": {
+    "svg": {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e68",
+      "conversationId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61",
+      "name": "chart-5d1c.svg",
+      "mediaType": "image/svg+xml",
+      "sizeBytes": 4210,
+      "origin": "agent",
+      "state": "ready",
+      "simulated": true,
+      "classification": "unclassified",
+      "createdAt": "2026-10-16T00:00:00Z"
+    },
+    "png": {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e68",
+      "conversationId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61",
+      "name": "chart-5d1c.png",
+      "mediaType": "image/png",
+      "sizeBytes": 18034,
+      "origin": "agent",
+      "state": "ready",
+      "simulated": true,
+      "classification": "unclassified",
+      "createdAt": "2026-10-16T00:00:00Z"
+    },
+    "spec": {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e68",
+      "conversationId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61",
+      "name": "chart-5d1c.vl.json",
+      "mediaType": "application/json",
+      "sizeBytes": 612,
+      "origin": "agent",
+      "state": "ready",
+      "simulated": true,
+      "classification": "unclassified",
+      "createdAt": "2026-10-16T00:00:00Z"
+    },
+    "csv": {
+      "id": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e68",
+      "conversationId": "0199e7c2-5b1e-7a40-9f0e-3c1d2b8a4e61",
+      "name": "chart-5d1c.csv",
+      "mediaType": "text/csv",
+      "sizeBytes": 64,
+      "origin": "agent",
+      "state": "ready",
+      "simulated": true,
+      "classification": "unclassified",
+      "createdAt": "2026-10-16T00:00:00Z"
+    }
+  },
+  "citations": [
+    {
+      "item": "itm_9093eac57693",
+      "version": 1,
+      "block": 3,
+      "locator": "p:2",
+      "quoteSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "simulated": true
+    }
+  ],
+  "simulated": true
 }

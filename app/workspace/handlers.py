@@ -1,6 +1,6 @@
 """Agent actions in the owner's own workspace; each one waits for the requester's approval."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import msgspec
 
@@ -34,6 +34,19 @@ class EditNotebook(Shape):
     cell_type: Literal["code", "markdown"] = "code"
 
 
+class SaveChart(Shape):
+    max_bytes: ClassVar[int] = 1024 * 1024
+    name: Annotated[str, msgspec.Meta(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
+    spec: dict[str, Any]
+    title: Annotated[str, msgspec.Meta(min_length=1, max_length=200)] | None = None
+
+
+class SavedChart(Shape):
+    svg: str
+    spec: str
+    csv: str
+
+
 class SavedFile(Shape):
     path: str
     size: int
@@ -60,3 +73,9 @@ async def write_file(caller: Caller, request: WriteFile) -> SavedFile:
 async def edit_notebook(caller: Caller, request: EditNotebook) -> EditedNotebook:
     """Insert, replace or delete one notebook cell after approval; for example a new code cell."""
     return EditedNotebook(**await service.edit_notebook(caller, request))
+
+
+@operation(SIGNED_IN, post="/workspace/charts", tool=True, effects=EXTERNAL)
+async def save_chart(caller: Caller, request: SaveChart) -> SavedChart:
+    """Save a chart as SVG, Vega-Lite spec and CSV under outputs/charts after approval."""
+    return SavedChart(**await service.save_chart(caller, request))

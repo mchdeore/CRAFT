@@ -34,6 +34,7 @@ from craft.access import (
     search,
     whoami,
 )
+from craft.analysis import chart, vega
 from craft.client import Craft, native
 from craft.files import excel, find, ls, path, read, save, sql, table
 
@@ -44,6 +45,7 @@ __all__ = [
     "Result",
     "analysis",
     "capabilities",
+    "chart",
     "check_citation",
     "chunks",
     "compare_versions",
@@ -64,5 +66,6 @@ __all__ = [
     "search",
     "sql",
     "table",
+    "vega",
     "whoami",
 ]

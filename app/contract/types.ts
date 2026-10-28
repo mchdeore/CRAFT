@@ -16,6 +16,8 @@ export interface RunCode { code: string }
 export interface CodeResult { status: "ok" | "error"; outputs: string[]; error: string | null; truncated: boolean }
 export interface WriteFile { path: string; content: string }
 export interface SavedFile { path: string; size: number }
+export interface SaveChart { name: string; spec: Record<string, unknown>; title?: string | null }
+export interface SavedChart { svg: string; spec: string; csv: string }
 export interface EditNotebook { path: string; action: "insert" | "replace" | "delete"; index: number; source?: string; cellType?: "code" | "markdown" }
 export interface EditedNotebook { path: string; cells: number }
 export interface Mission { key: string; title: string; currentStage: string; aliases: string[]; simulated: boolean }
@@ -171,8 +173,10 @@ export interface SkillCatalog { items: SkillSummary[]; nextCursor: Id | null }
 export interface AskAgent { question: string; conversationId?: Id | null }
 export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
 
-export interface ChartInput { spec: Record<string, unknown>; format: "svg" | "png" }
-export interface ChartResult { format: "svg" | "png"; mediaType: string; contentBase64: string | null; file: WorkspaceFile | null }
+export interface ChartInput { spec: Record<string, unknown>; format?: "svg" | "png"; title?: string | null; sources?: CitationHandle[] }
+/** In a conversation the chart is kept as four files; outside one the image comes inline. */
+export interface ChartFiles { svg: WorkspaceFile; png: WorkspaceFile; spec: WorkspaceFile; csv: WorkspaceFile }
+export interface ChartResult { title: string; format: "svg" | "png"; mediaType: string; contentBase64: string | null; file: WorkspaceFile | null; files: ChartFiles | null; citations: CitationHandle[]; simulated: boolean }
 export interface CalculationInput { expression: string; craftResult?: string | number | null; unit?: string | null }
 export interface CalculationResult { expression: string; wolframResult: string; craftResult: string | number | null; agrees: boolean; checkedAt: string }
 
