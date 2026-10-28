@@ -180,6 +180,7 @@ def test_jupyter_target_rejects_credentials_in_urls_and_arbitrary_bridge_hosts()
     for url, bridge_host in [
         ("http://127.0.0.1:9998/?token=generated", "127.0.0.1"),
         ("http://127.0.0.1:9998/", "other.invalid"),
+        ("http://127.0.0.1:9998/", "8.8.8.8"),
     ]:
         with pytest.raises(ValueError):
             lifecycle.JupyterTarget(url, "generated-jupyter-token", KERNEL, bridge_host)
@@ -535,36 +536,16 @@ def test_delayed_pause_cleanup_cannot_erase_the_resumed_same_run_binding():
     asyncio.run(execute())
 
 
-def configure_jupyter(tmp_path, *, bridge_port=None):
-    path = tmp_path / "private-workspaces.json"
-    entries = json.loads(path.read_text())
-    next(iter(entries.values()))["jupyter"] = {
-        "url": "http://127.0.0.1:9998/",
-        "token": "generated-jupyter-token",
-        "kernel_id": KERNEL,
-        "bridge_host": "host.docker.internal",
-    }
-    if bridge_port is not None:
-        next(iter(entries.values()))["jupyter"]["bridge_port"] = bridge_port
-    path.write_text(json.dumps(entries))
-
-
-@pytest.mark.parametrize("bridge_port", [None, 54301])
-def test_private_owner_configuration_selects_jupyter_without_exposing_credentials(
-    monkeypatch, tmp_path, bridge_port
-):
+def test_hub_workspace_selects_jupyter_without_exposing_credentials(monkeypatch, tmp_path):
     from app.agent import runtime
 
     caller, _, _ = prepared_run(monkeypatch, tmp_path)
-    configure_jupyter(tmp_path, bridge_port=bridge_port)
-    selected = runtime._workspace_for_caller(caller)
-    assert len(selected) == 3, "The root-selected Jupyter target is not wired into the run"
-    transport, instructions, target = selected
+    monkeypatch.setattr(runtime, "_bridge_host", lambda: "10.42.0.17")
+    transport, instructions, target = asyncio.run(runtime._workspace_for_caller(caller))
     try:
-        assert target.kernel_id == KERNEL and target.bridge_host == "host.docker.internal"
-        assert target.bridge_port == (0 if bridge_port is None else bridge_port)
-        assert "generated-jupyter-token" not in instructions + repr(target)
-        assert "host.docker.internal" not in instructions
+        assert target.bridge_host == "10.42.0.17" and target.bridge_port == 0
+        assert "generated-hub-token" not in instructions + repr(target)
+        assert "10.42.0.17" not in instructions
     finally:
         asyncio.run(transport.close())
 
@@ -580,7 +561,6 @@ def test_native_run_owns_bridge_cleanup_before_finish_and_transport_close(
     caller, request, recorded = prepared_run(
         monkeypatch, tmp_path, failure=failure if failure != "pause" else None
     )
-    configure_jupyter(tmp_path)
     phases, controllers = [], []
 
     class Controller:
@@ -671,8 +651,8 @@ def test_native_run_owns_bridge_cleanup_before_finish_and_transport_close(
     assert middleware is controllers[0].session._middleware
     finished_args = recorded["finished"][0][0]
     assert middleware.budget["calls"] == finished_args[3]["state"]["craft"]["toolCalls"]
-    assert "generated-jupyter-token" not in repr(recorded["agents"][0].options)
-    assert "generated-jupyter-token" not in repr(finished_args[3])
+    assert "generated-hub-token" not in repr(recorded["agents"][0].options)
+    assert "generated-hub-token" not in repr(finished_args[3])
     assert (
         finished_args[2]
         == {None: "finished", "execute": "failed", "cancel": "cancelled", "pause": "paused"}[
@@ -733,3 +713,21 @@ def test_fixed_bridge_port_collision_never_falls_back_and_releases_owner(monkeyp
             assert sdk._binding is None and all(sock.closed for sock in recorded.sockets)
 
     asyncio.run(execute())
+
+
+@pytest.mark.parametrize(
+    "host,allowed",
+    [("127.0.0.1", True), ("10.42.0.17", True), ("8.8.8.8", False), ("other.invalid", False)],
+)
+def test_kernel_accepts_only_a_loopback_or_cluster_bridge(host, allowed):
+    from craft import client as sdk
+
+    assert sdk._bridge_host(host) is allowed
+    lifecycle = lifecycle_module()
+    if allowed:
+        lifecycle.JupyterTarget("http://127.0.0.1:9998/", "generated-jupyter-token", KERNEL, host)
+    else:
+        with pytest.raises(ValueError):
+            lifecycle.JupyterTarget(
+                "http://127.0.0.1:9998/", "generated-jupyter-token", KERNEL, host
+            )

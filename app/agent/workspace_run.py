@@ -98,7 +98,7 @@ class WorkspaceRunController:
             raise ValueError("Expected the native run's pinned workspace middleware")
         self._session, self._target = session, target
         self._middleware = session._middleware
-        self._bridge = WorkspaceRunBridge(session)
+        self._bridge = WorkspaceRunBridge(session, target.bridge_host)
         self._owner = str(session._context.caller.user_id)
         self._run_id = str(session._context.caller.run_id)
         self._binding_id = str(uuid4())
@@ -222,8 +222,12 @@ class WorkspaceRunController:
             await self._resources.enter_async_context(self._bridge.run())
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._resources.callback(listener.close)
-            # In compose the workspace connects from its own container; the port is never published.
-            listen = "0.0.0.0" if self._target.bridge_host == "app" else "127.0.0.1"
+            # On the cluster the person's pod connects to this pod's own address (bridge_host);
+            # the network policy lets only workspace pods reach it, with the run's bearer.
+            loopback = {"127.0.0.1", "localhost", "host.docker.internal"}
+            listen = self._target.bridge_host
+            if listen in loopback:
+                listen = "127.0.0.1"
             listener.bind((listen, self._target.bridge_port))
             listener.listen(128)
             listener.setblocking(False)

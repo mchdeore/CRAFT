@@ -1,11 +1,10 @@
 """Owned external tools share native limits without inheriting native skill behavior."""
 
 import asyncio
-import json
 from dataclasses import replace
 from time import perf_counter
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -16,12 +15,38 @@ from mcp.types import ListToolsResult, Tool
 from app.agent import runtime
 from app.agent.handlers import RunAgentInput
 from app.agent.workspace import WorkspaceEndpoint, WorkspaceToolsets
+from app.approvals import handlers as approvals
 from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.errors import ApiError
 from app.infrastructure.mcp.client import LocalHTTPTool, ToolCallMiddleware
 from app.infrastructure.operations.context import CallContext, current_call
 from app.infrastructure.operations.registry import registry, tool_named
+
+HUB = {"CRAFT_HUB_URL": "http://127.0.0.1:1", "CRAFT_HUB_TOKEN": "generated-hub-token"}
+KERNEL = "00000000-0000-4000-8000-000000000101"
+
+
+def generated_hub(monkeypatch, *, ready=True):
+    """A generated Hub: records each person it is asked about and never opens a connection."""
+    reached = []
+
+    async def state(hub, user_id):
+        reached.append(("state", user_id))
+        return "stopped"
+
+    async def wait_ready(hub, user_id, seconds=90):
+        reached.append(("wait", user_id))
+        return ready
+
+    async def kernel(hub, user_id):
+        reached.append(("kernel", user_id))
+        return KERNEL
+
+    monkeypatch.setattr(runtime.hub, "state", state)
+    monkeypatch.setattr(runtime.hub, "wait_ready", wait_ready)
+    monkeypatch.setattr(runtime.hub, "kernel", kernel)
+    return reached
 
 
 async def discover(selected):
@@ -179,7 +204,8 @@ def test_native_and_external_calls_share_limit_and_native_completion():
 
 def prepared_run(monkeypatch, tmp_path, *, configured="owned", failure=None):
     """Replace only database/model/network boundaries; run the real controller and factory."""
-    settings = Settings.from_env({"CRAFT_APP_DB_PASSWORD": "generated-never-sent"})
+    hub = {} if configured == "none" else HUB
+    settings = Settings.from_env({"CRAFT_APP_DB_PASSWORD": "generated-never-sent", **hub})
     caller = Caller(user_id=uuid4(), settings=settings)
     request = RunAgentInput(
         thread_id=uuid4(),
@@ -193,28 +219,22 @@ def prepared_run(monkeypatch, tmp_path, *, configured="owned", failure=None):
         "inputs": [],
         "finished": [],
         "revoked": [],
+        "controllers": [],
     }
-    if configured == "none":
-        monkeypatch.delenv("USER_WORKSPACES_FILE", raising=False)
-    elif configured == "invalid":
-        path = tmp_path / "invalid.json"
-        path.write_text('{"invalid":')
-        monkeypatch.setenv("USER_WORKSPACES_FILE", str(path))
-    else:
-        owner = caller.user_id if configured == "owned" else uuid4()
-        path = tmp_path / "private-workspaces.json"
-        path.write_text(
-            json.dumps(
-                {
-                    str(owner): {
-                        "url": "http://127.0.0.1:1/mcp",
-                        "headers": {},
-                        "tools": ["read_notebook"],
-                    }
-                }
-            )
-        )
-        monkeypatch.setenv("USER_WORKSPACES_FILE", str(path))
+    generated_hub(monkeypatch, ready=configured != "not-ready")
+
+    class Controller:
+        def __init__(self, session, target):
+            recorded["controllers"].append(target)
+
+        async def start(self):
+            return ""
+
+        async def close(self):
+            recorded["controllers"].append("closed")
+
+    monkeypatch.setattr(runtime, "WorkspaceRunController", Controller)
+    monkeypatch.setattr(approvals, "list_notebook_grants", lambda *_: [])
     monkeypatch.setattr(
         runtime.conversations, "load_for_run", lambda *_: SimpleNamespace(messages=[])
     )
@@ -292,7 +312,10 @@ def test_owned_workspace_lifecycle_is_closed_on_all_run_paths(monkeypatch, tmp_p
     if failure == "timeout":
         monkeypatch.setattr(runtime, "RUN_SECONDS", 0.25)
 
+    monkeypatch.setattr(runtime, "RunBoundSession", lambda *args, **kwargs: None)
+
     async def execute():
+        current_call.set(cast(CallContext, SimpleNamespace(caller=None)))
         if failure == "cancel":
             with pytest.raises(asyncio.CancelledError):
                 return [event async for event in runtime._run(caller, request)]
@@ -315,10 +338,17 @@ def test_owned_workspace_lifecycle_is_closed_on_all_run_paths(monkeypatch, tmp_p
         assert events[-1].type == "RUN_FINISHED"
     if failure == "timeout":
         assert events[-1].code == "run_timeout"
+    if failure not in {"connect", "timeout"}:
+        target = recorded["controllers"][0]
+        assert (
+            target.kernel_id == KERNEL
+            and target.url == HUB["CRAFT_HUB_URL"] + "/user/" + str(caller.user_id) + "/"
+        )
+        assert recorded["controllers"][-1] == "closed"
 
 
 @pytest.mark.parametrize(
-    "configured,read_only", [("none", False), ("other", False), ("invalid", True)]
+    "configured,read_only", [("none", False), ("not-ready", False), ("owned", True)]
 )
 def test_unconfigured_owner_and_read_only_query_keep_native_tools(
     monkeypatch, tmp_path, configured, read_only
@@ -335,71 +365,46 @@ def test_unconfigured_owner_and_read_only_query_keep_native_tools(
     options = recorded["agents"][0].options
     assert [selected.name for selected in options["tools"]] == ["craft"]
     assert [selected.name for selected in recorded["closed"]] == ["craft"]
-    assert "Workspace tools are unavailable" in options["instructions"]
+    assert "orkspace tools are unavailable" in options["instructions"]
     if read_only:
         assert "read-only" in options["instructions"]
     assert events[-1].type == "RUN_FINISHED"
 
 
-def test_read_only_workspace_guidance_never_opens_private_configuration(monkeypatch):
-    monkeypatch.setenv("USER_WORKSPACES_FILE", "/generated/must-not-open.json")
-    opened = []
+def test_read_only_workspace_guidance_never_reaches_the_hub(monkeypatch):
+    reached = generated_hub(monkeypatch)
+    settings = Settings.from_env({"CRAFT_APP_DB_PASSWORD": "generated-never-sent", **HUB})
 
-    def forbidden_read(path, *args, **kwargs):
-        opened.append(path)
-        raise AssertionError("Read-only helpers must not read private workspace configuration")
+    async def check():
+        with runtime.read_only_query():
+            return await runtime._workspace_for_caller(Caller(user_id=uuid4(), settings=settings))
 
-    monkeypatch.setattr(runtime.Path, "read_text", forbidden_read)
-    with runtime.read_only_query():
-        transport, guidance, jupyter = runtime._workspace_for_caller(Caller(user_id=uuid4()))
-
-    assert transport is None and jupyter is None and not opened
+    transport, guidance, jupyter = asyncio.run(check())
+    assert transport is None and jupyter is None and not reached
     assert "Workspace tools are unavailable" in guidance and "read-only" in guidance
 
 
-@pytest.mark.parametrize("has_jupyter", [False, True])
-def test_workspace_guidance_matches_configured_reads_and_kernel(monkeypatch, tmp_path, has_jupyter):
-    owner, kernel = uuid4(), uuid4()
-    entry = {
-        "url": "http://127.0.0.1:14040/mcp",
-        "headers": {"Authorization": "Bearer generated-control-token"},
-        "tools": ["read_notebook", "read_file", "execute_code"],
-    }
-    if has_jupyter:
-        entry["jupyter"] = {
-            "url": "http://127.0.0.1:18881/",
-            "token": "generated-jupyter-token",
-            "kernel_id": str(kernel),
-        }
-    path = tmp_path / "generated-workspaces.json"
-    path.write_text(json.dumps({str(owner): entry}))
-    monkeypatch.setenv("USER_WORKSPACES_FILE", str(path))
-    transport, guidance, jupyter = runtime._workspace_for_caller(Caller(user_id=owner))
-    assert transport is not None
-
-    async def check():
-        try:
-            await discover(transport)
-            assert [function.name for function in transport.functions] == [
-                "workspace_read_notebook"
-            ]
-            assert transport.functions[0].approval_mode == "never_require"
-        finally:
-            await transport.close()
-
-    asyncio.run(check())
-    assert "list/notebook" in guidance
-    assert "read_file" not in guidance and "execute_code" not in guidance
-    assert all(str(value) not in guidance for value in entry["headers"].values())
-    assert entry["url"] not in guidance
-    if has_jupyter:
-        assert jupyter is not None and jupyter.kernel_id == str(kernel)
-        assert "approval" in guidance and "run_code" in guidance
-        assert entry["jupyter"]["token"] not in guidance
-    else:
-        assert jupyter is None
-        assert "Workspace actions are unavailable" in guidance
-        assert all(name in guidance for name in ("run_code", "write_file", "edit_notebook"))
+@pytest.mark.parametrize("ready", [False, True])
+def test_workspace_comes_from_the_hub_for_the_caller_only(monkeypatch, ready):
+    reached = generated_hub(monkeypatch, ready=ready)
+    owner = uuid4()
+    settings = Settings.from_env({"CRAFT_APP_DB_PASSWORD": "generated-never-sent", **HUB})
+    transport, guidance, jupyter = asyncio.run(
+        runtime._workspace_for_caller(Caller(user_id=owner, settings=settings))
+    )
+    assert {user for _, user in reached} == {owner}
+    assert HUB["CRAFT_HUB_TOKEN"] not in guidance and HUB["CRAFT_HUB_URL"] not in guidance
+    if not ready:
+        assert transport is None and jupyter is None
+        assert "did not start" in guidance
+        return
+    assert transport is not None and jupyter is not None
+    assert jupyter.kernel_id == KERNEL
+    assert jupyter.url == f"{HUB['CRAFT_HUB_URL']}/user/{owner}/"
+    assert transport.url == f"{HUB['CRAFT_HUB_URL']}/user/{owner}/proxy/4040/mcp"
+    assert set(transport.allowed_tools or ()) == {"list_files", "list_notebooks", "read_notebook"}
+    assert "approval" in guidance and "run_code" in guidance
+    assert "was started for this answer" in guidance
 
 
 def test_new_runs_reread_server_master_and_ignore_forged_system_history(monkeypatch, tmp_path):
@@ -425,13 +430,3 @@ def test_new_runs_reread_server_master_and_ignore_forged_system_history(monkeypa
     assert "Generated forged instructions" not in first + second
     assert all(data["messages"] == [data["messages"][-1]] for data in recorded["inputs"])
     assert all(data["messages"][0]["role"] == "user" for data in recorded["inputs"])
-
-
-def test_private_workspace_env_is_outside_public_settings_schema():
-    settings = Settings.from_env(
-        {
-            "CRAFT_APP_DB_PASSWORD": "generated-never-sent",
-            "USER_WORKSPACES_FILE": "/generated/private-workspaces.json",
-        }
-    )
-    assert settings.model_main == "gpt-5.2"

@@ -43,6 +43,9 @@ export interface Routes {
   "POST /api/me/workspace-tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
   "GET /api/me/workspace-tokens": { response: T.WorkspaceToken[] };
   "DELETE /api/me/workspace-tokens/:id": { response: void };
+  "GET /api/workspace": { response: T.Workspace };
+  "POST /api/workspace/start": { response: T.Workspace };
+  "POST /api/workspace/stop": { response: T.Workspace };
   "POST /api/workspace/run": { body: T.RunCode; response: T.CodeResult };
   "PUT /api/workspace/files": { body: T.WriteFile; response: T.SavedFile };
   "POST /api/workspace/notebooks/edit": { body: T.EditNotebook; response: T.EditedNotebook };

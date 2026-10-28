@@ -26,6 +26,9 @@ settings:
   - CRAFT_OIDC_CLIENT_ID
   - CRAFT_OIDC_CLIENT_SECRET
   - CRAFT_OIDC_REDIRECT_URI
+  - CRAFT_HUB_URL
+  - CRAFT_HUB_PUBLIC_URL
+  - CRAFT_HUB_TOKEN
 
 # Each container's memory limit is in its own values; this is what each one reserves, so a
 # small node can start everything.

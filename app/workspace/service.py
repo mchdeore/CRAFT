@@ -1,4 +1,4 @@
-"""Reach only the caller's own configured workspace; no endpoint comes from a request."""
+"""Reach only the caller's own workspace through the Hub; no endpoint comes from a request."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -6,15 +6,58 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-from app.infrastructure import workspaces
-from app.infrastructure.errors import InvalidInput, NotFound
+from app.infrastructure import hub, workspaces
+from app.infrastructure.errors import Conflict, InvalidInput, NotFound
 
 
-def _target(caller) -> workspaces.JupyterTarget:
-    entry = workspaces.owner_entry(caller.user_id)
-    if entry is None or "jupyter" not in entry:
+def _hub(caller) -> hub.Hub:
+    found = hub.from_settings(caller.settings)
+    if found is None or caller.user_id is None:
         raise NotFound()
-    return workspaces.jupyter_target(entry)
+    return found
+
+
+async def read_workspace(caller) -> dict[str, Any]:
+    found = _hub(caller)
+    state = await hub.state(found, caller.user_id)
+    return {"state": state, "url": None if state == "stopped" else found.lab(caller.user_id)}
+
+
+def _identity(caller) -> tuple[str, str] | None:
+    from app.infrastructure.database.unit_of_work import unit_of_work
+    from app.workspace import storage
+
+    if caller.sessions is None:
+        return None
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        return storage.identity(session, caller.user_id)
+
+
+async def start_workspace(caller) -> dict[str, Any]:
+    from starlette.concurrency import run_in_threadpool
+
+    found = _hub(caller)
+    if await hub.state(found, caller.user_id) == "stopped":
+        await hub.start(found, caller.user_id)
+    linked = await run_in_threadpool(_identity, caller)
+    if linked is not None:
+        # Lets the person sign in to the Hub with craft-id under this name.
+        await hub.link(found, caller.user_id, *linked)
+    return await read_workspace(caller)
+
+
+async def stop_workspace(caller) -> dict[str, Any]:
+    await hub.stop(_hub(caller), caller.user_id)
+    return await read_workspace(caller)
+
+
+async def _target(caller, *, kernel: bool = False) -> workspaces.JupyterTarget:
+    """The caller's own running server; a stopped one is a conflict, never started here."""
+    found = _hub(caller)
+    if await hub.state(found, caller.user_id) != "ready":
+        raise Conflict()
+    selected = await hub.kernel(found, caller.user_id) if kernel else ""
+    return workspaces.JupyterTarget(found.server(caller.user_id), found.token, selected)
 
 
 def _name(path: str) -> str:
@@ -25,12 +68,12 @@ def _name(path: str) -> str:
 
 
 async def run_code(caller, code: str) -> dict[str, Any]:
-    return await workspaces.run_in_kernel(_target(caller), code)
+    return await workspaces.run_in_kernel(await _target(caller, kernel=True), code)
 
 
 async def write_file(caller, path: str, content: str) -> dict[str, Any]:
     name = _name(path)
-    await workspaces.write_text(_target(caller), name, content)
+    await workspaces.write_text(await _target(caller), name, content)
     return {"path": name, "size": len(content.encode())}
 
 
@@ -40,7 +83,7 @@ async def save_chart(caller, request) -> dict[str, Any]:
     from app.tools.handlers import workspace_chart
 
     made = await run_in_threadpool(workspace_chart, request.spec, request.title)
-    target = _target(caller)
+    target = await _target(caller)
     saved = {}
     for suffix, content in made.items():
         path = f"outputs/charts/{request.name}.{suffix}"
@@ -51,7 +94,7 @@ async def save_chart(caller, request) -> dict[str, Any]:
 
 async def edit_notebook(caller, request) -> dict[str, Any]:
     name = _name(request.path)
-    target = _target(caller)
+    target = await _target(caller)
     try:
         notebook = await workspaces.read_notebook(target, name)
     except Exception:
@@ -88,7 +131,7 @@ async def run_notebook(caller, path: str) -> dict[str, Any]:
     from app.workspace.jobs import NotebookRunJob, notebook_run
 
     name = _name(path)
-    target = _target(caller)
+    target = await _target(caller)
     try:
         await workspaces.read_notebook(target, name)
     except Exception:
@@ -115,7 +158,7 @@ async def notebook_job(caller, path: str, output: str) -> None:
     from app.infrastructure.notebook_sandbox import FOLDER_LIMIT, Sandbox
 
     name = _name(path)
-    target = _target(caller)
+    target = await _target(caller)
     notebook = PurePosixPath(name)
     folder = "" if str(notebook.parent) == "." else str(notebook.parent)
     files = await workspaces.read_folder(target, folder, FOLDER_LIMIT)

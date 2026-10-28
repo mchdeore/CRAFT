@@ -5,12 +5,14 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 root = Path(os.environ.get("USER_ROOT", "/workspace"))
+# Under JupyterHub (deploy/jupyterhub) the Hub signs people and CRAFT in; otherwise a token.
+hub = bool(os.environ.get("JUPYTERHUB_API_TOKEN"))
 token = os.environ.get("JUPYTER_TOKEN", "")
 origin = os.environ.get("CRAFT_UI_ORIGIN", "http://127.0.0.1:5173")
 parsed = urlsplit(origin)
 if not root.is_absolute() or not root.is_dir() or root.resolve() != root:
     raise ValueError("USER_ROOT must be an existing owned mount without symlinks")
-if not token.strip():
+if not hub and not token.strip():
     raise ValueError("A private per-user JUPYTER_TOKEN is required")
 if (
     parsed.scheme not in {"http", "https"}
@@ -32,6 +34,19 @@ if starter.is_dir():
             target = skills / source.name
             if not target.exists() and not target.is_symlink():
                 target.write_bytes(source.read_bytes())
+
+# The notebook control server beside JupyterLab in the pod reads notebooks with this server's
+# own Hub token, which reaches this server only. The folder is a pod-local memory volume.
+control = Path(os.environ.get("CRAFT_CONTROL_DIR", "/run/craft-control"))
+if hub and control.is_dir():
+    for name, value in [
+        ("token", os.environ["JUPYTERHUB_API_TOKEN"]),
+        ("url", "http://127.0.0.1:8888" + os.environ.get("JUPYTERHUB_SERVICE_PREFIX", "/")),
+    ]:
+        path = control / name
+        path.unlink(missing_ok=True)
+        path.touch(mode=0o600)
+        path.write_text(value)
 
 # Terminal shells start guarded, like kernels; the server process itself is not.
 c_terminal_env = {"CRAFT_GUARD": "1"}
@@ -57,7 +72,8 @@ c.ServerApp.tornado_settings = {
     }
 }
 c.ServerApp.disable_check_xsrf = False
-c.IdentityProvider.token = token
+if not hub:
+    c.IdentityProvider.token = token
 password_hash = os.environ.get("JUPYTER_PASSWORD_HASH", "")
 if password_hash:
     c.PasswordIdentityProvider.hashed_password = password_hash

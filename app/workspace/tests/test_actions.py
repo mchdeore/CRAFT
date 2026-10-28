@@ -16,7 +16,7 @@ from app.approvals.handlers import (
     request_approval,
 )
 from app.approvals.tests.test_decisions import context as context
-from app.infrastructure import workspaces
+from app.infrastructure import hub, workspaces
 from app.infrastructure.errors import Forbidden, InvalidInput
 from app.infrastructure.operations.pipeline import ApprovalRequired
 from app.workspace.handlers import (
@@ -39,10 +39,12 @@ def workspace(monkeypatch, context):
     calls = []
     files = {}
 
-    def entry(user_id):
-        return {
-            "jupyter": {"url": "http://127.0.0.1:18881/", "token": "generated", "kernel_id": KERNEL}
-        }
+    async def ready(found, user_id):
+        assert user_id == context["caller"].user_id  # only the caller's own server
+        return "ready"
+
+    async def kernel(found, user_id):
+        return KERNEL
 
     async def run(target, code, seconds=120):
         calls.append(("run", target.kernel_id, code))
@@ -62,7 +64,11 @@ def workspace(monkeypatch, context):
         calls.append(("notebook", path, len(notebook["cells"])))
         files[path] = notebook
 
-    monkeypatch.setattr(workspaces, "owner_entry", entry)
+    monkeypatch.setattr(
+        hub, "from_settings", lambda _: hub.Hub("http://127.0.0.1:1", "", "generated")
+    )
+    monkeypatch.setattr(hub, "state", ready)
+    monkeypatch.setattr(hub, "kernel", kernel)
     monkeypatch.setattr(workspaces, "run_in_kernel", run)
     monkeypatch.setattr(workspaces, "write_text", write)
     monkeypatch.setattr(workspaces, "read_notebook", read_nb)

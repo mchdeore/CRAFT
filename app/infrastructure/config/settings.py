@@ -67,6 +67,11 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     mcp_url: str = "http://127.0.0.1:8000/mcp"
     # Whole-notebook runs start this workspace image in a sandbox with no network.
     notebook_image: str = "craft-user-workspace:local"
+    # JupyterHub (deploy/jupyterhub): its address inside the cluster, the address the browser
+    # opens (empty: the same) and CRAFT's one service token. Empty URL: no workspaces.
+    hub_url: str = ""
+    hub_public_url: str = ""
+    hub_token: str = ""
     # Sign-in: craft-id now, Entra later. Only these three settings change at the switch.
     oidc_authority: str = ""
     oidc_client_id: str = ""
@@ -106,6 +111,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             validate_models(settings, access=False)
             validate_mcp_url(settings.mcp_url)
             validate_oidc(settings)
+            validate_hub(settings)
             if not settings.queue_names():
                 raise SystemExit("bad setting: worker_queues: invalid configuration")
             return settings
@@ -167,6 +173,32 @@ def validate_oidc(settings: Settings) -> None:
             raise SystemExit(f"bad setting: {field}: invalid configuration")
     if not web(settings.oidc_redirect_uri):
         raise SystemExit("bad setting: oidc_redirect_uri: invalid configuration")
+
+
+def validate_hub(settings: Settings) -> None:
+    """Plain http(s) origins; a Hub address needs the service token."""
+    from urllib.parse import urlsplit
+
+    for field in ["hub_url", "hub_public_url"]:
+        value = getattr(settings, field)
+        if not value:
+            continue
+        try:
+            parsed = urlsplit(value)
+            valid = (
+                parsed.scheme in {"http", "https"}
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.path in {"", "/"}
+                and not parsed.query
+                and not parsed.fragment
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise SystemExit(f"bad setting: {field}: invalid configuration")
+    if settings.hub_url and not settings.hub_token.strip():
+        raise SystemExit("bad setting: hub_token: invalid configuration")
 
 
 def validate_mcp_url(value: str) -> None:

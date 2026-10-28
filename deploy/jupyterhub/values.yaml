@@ -1,0 +1,134 @@
+# The Zero to JupyterHub chart (jupyterhub/jupyterhub 4.4.4), unmodified, on Colima's k3s beside the
+# CRAFT chart in the same namespace (deploy/jupyterhub/README.md). Secrets are not here: the craft-id
+# client and CRAFT's Hub service token come from .local/runtime/jupyterhub/secrets.yaml.
+
+hub:
+  config:
+    JupyterHub:
+      authenticator_class: generic-oauth
+    # Sign-in with craft-id. The browser goes to its authorize address; the Hub fetches tokens
+    # from it inside the cluster.
+    GenericOAuthenticator:
+      login_service: craft-id
+      authorize_url: http://localhost:8100/id/6f1c0e2a-163b-4c2a-9e0d-0c5a1d3b7e42/oauth2/v2.0/authorize
+      token_url: http://craft-id:8100/id/6f1c0e2a-163b-4c2a-9e0d-0c5a1d3b7e42/oauth2/v2.0/token
+      oauth_callback_url: http://localhost:8200/hub/oauth_callback
+      userdata_from_id_token: true
+      username_claim: oid
+      scope: [openid, profile]
+      allow_all: true        # only people CRAFT opened a workspace for get a name (craft-names)
+  # CRAFT's one service token (H7): no expiry, rotated by hand. It starts, stops and reads servers
+  # and reaches them; it creates a person's Hub user and their sign-in group on first start.
+  services:
+    craft: {}                # api_token in secrets.yaml
+  loadRoles:
+    craft:
+      services: [craft]
+      scopes: [servers, access:servers, admin:users, admin:groups]
+  extraConfig:
+    # Hub names are CRAFT user IDs (H3). On a person's first start CRAFT puts their Hub user in the
+    # group idp-<tid>-<oid> of their craft-id account; sign-in takes the name from that group, so
+    # no one signs in as a name CRAFT did not give them.
+    craft-names: |
+      from jupyterhub import orm
+
+      def craft_name(authenticator, handler, auth_model):
+          claims = (auth_model.get("auth_state") or {}).get("oauth_user") or {}
+          tenant, account = claims.get("tid"), claims.get("oid")
+          group = tenant and account and orm.Group.find(handler.db, f"idp-{tenant}-{account}")
+          if not group or len(group.users) != 1:
+              return None
+          auth_model["name"] = group.users[0].name
+          return auth_model
+
+      c.Authenticator.post_auth_hook = craft_name
+  networkPolicy:
+    enabled: true
+
+proxy:
+  service:
+    type: ClusterIP         # kubectl port-forward svc/proxy-public 8200:80
+  chp:
+    networkPolicy:
+      enabled: true
+
+singleuser:
+  image:
+    name: craft-user-workspace
+    tag: local
+    pullPolicy: Never       # built by Colima's Docker engine, which k3s uses directly
+  cmd: [jupyterhub-singleuser, --config=/opt/craft-user-workspace/jupyter_server_config.py]
+  defaultUrl: /lab
+  uid: 1000
+  fsGid: 1000
+  startTimeout: 90
+  memory: { limit: 2G, guarantee: 512M }
+  cpu: { limit: 2, guarantee: 0.1 }  # without a guarantee the request is the whole limit
+  extraEnv:
+    USER_ROOT: /workspace
+    CRAFT_API_URL: http://craft-api:8000
+    CRAFT_UI_ORIGIN: http://localhost:5173
+  # A volume per person (H9) from k3s's built-in storage, kept when the pod stops.
+  storage:
+    type: dynamic
+    capacity: 2Gi
+    homeMountPath: /workspace
+    dynamic:
+      storageClass: local-path
+      pvcNameTemplate: claim-{username}
+      volumeNameTemplate: volume-{username}
+    extraVolumes:
+      - name: craft-control
+        emptyDir: { medium: Memory, sizeLimit: 1Mi }
+    extraVolumeMounts:
+      - { name: craft-control, mountPath: /run/craft-control }
+  # The notebook control server for the agent's read tools, on the pod's loopback only; CRAFT
+  # reaches it at /user/<name>/proxy/4040/mcp, behind the Hub's sign-in (workspace/mcp.Dockerfile).
+  extraContainers:
+    - name: notebook-control
+      image: craft-workspace-control:local
+      imagePullPolicy: Never
+      volumeMounts:
+        - { name: craft-control, mountPath: /run/craft-control, readOnly: true }
+      resources:
+        limits: { memory: 256Mi }
+        requests: { memory: 64Mi }
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: [ALL] }
+  cloudMetadata:
+    blockWithIptables: false  # the network policy below already blocks it, without a privileged container
+  # H8: a person's pod accepts traffic only from the Hub proxy (and the Hub), which CRAFT's calls
+  # pass through; it reaches only CRAFT's API pod (the API and the run bridge), the Hub and DNS.
+  networkPolicy:
+    enabled: true
+    egress:
+      - to:
+          - podSelector:
+              matchLabels: { app.kubernetes.io/name: api }
+    egressAllowRules:
+      cloudMetadataServer: false
+      dnsPortsCloudMetadataServer: false
+      dnsPortsKubeSystemNamespace: true
+      dnsPortsPrivateIPs: true
+      nonPrivateIPs: false
+      privateIPs: false
+
+# The idle culler stops a server after an hour without activity; its volume stays.
+cull:
+  enabled: true
+  timeout: 3600
+  every: 300
+
+# The images are local (pullPolicy Never): nothing to pre-pull, and one node to schedule on.
+prePuller:
+  hook:
+    enabled: false
+  continuous:
+    enabled: false
+scheduling:
+  userScheduler:
+    enabled: false

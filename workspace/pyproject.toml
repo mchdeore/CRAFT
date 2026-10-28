@@ -3,7 +3,7 @@ name = "craft-user-workspace"
 version = "0.1.0"
 description = "Private Jupyter workspace with an injectable CRAFT MCP client"
 requires-python = "==3.12.*"
-# Everything `import craft` uses; `[all]` adds JupyterLab for the workspace image.
+# Everything `import craft` uses; `[all]` adds JupyterLab and the Hub's server for the image.
 dependencies = [
   "mcp==1.30.0",
   "httpx==0.28.1",
@@ -32,6 +32,10 @@ all = [
   "ipykernel==6.29.5",
   "jupyter-collaboration==5.0.4",
   "jupyter-server-nbmodel==0.2.9",
+  # jupyterhub-singleuser, the server the Hub spawns (deploy/jupyterhub, chart app 5.5.4)
+  "jupyterhub==5.5.4",
+  # reaches the notebook control server beside JupyterLab through the Hub's own sign-in
+  "jupyter-server-proxy==4.6.0",
 ]
 
 [dependency-groups]

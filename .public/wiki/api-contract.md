@@ -118,6 +118,9 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/me/workspace-tokens` | `NewWorkspaceToken` | `IssuedWorkspaceToken` | signed-in browser session or command line | — |
 | `GET /api/me/workspace-tokens` | — | `WorkspaceToken[]` | signed-in browser session or command line | — |
 | `DELETE /api/me/workspace-tokens/:id` | — | `void` | signed-in browser session or command line | — |
+| `GET /api/workspace` | — | `Workspace` | signed in; own workspace | — |
+| `POST /api/workspace/start` | — | `Workspace` | signed in; own workspace; returns at once while the Hub starts it | — |
+| `POST /api/workspace/stop` | — | `Workspace` | signed in; own workspace; files are kept | — |
 | `POST /api/workspace/run` | `RunCode` | `CodeResult` | signed in; own workspace; requester approval when called by the agent | `run_code` |
 | `PUT /api/workspace/files` | `WriteFile` | `SavedFile` | signed in; own workspace; requester approval when called by the agent | `write_file` |
 | `POST /api/workspace/notebooks/edit` | `EditNotebook` | `EditedNotebook` | signed in; own workspace; requester approval when called by the agent | `edit_notebook` |
@@ -357,6 +360,9 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `PATCH /api/me` | `Me` | `app/contract/examples/me.json` |
 | `POST /api/me/workspace-tokens` | `IssuedWorkspaceToken` | `app/contract/examples/workspace-token.json` |
 | `GET /api/me/workspace-tokens` | `WorkspaceToken[]` | `app/contract/examples/workspace-tokens.json` |
+| `GET /api/workspace` | `Workspace` | `app/contract/examples/workspace.json` |
+| `POST /api/workspace/start` | `Workspace` | `app/contract/examples/workspace.json` |
+| `POST /api/workspace/stop` | `Workspace` | `app/contract/examples/workspace-stopped.json` |
 | `POST /api/workspace/run` | `CodeResult` | `app/contract/examples/code-result.json` |
 | `PUT /api/workspace/files` | `SavedFile` | `app/contract/examples/saved-file.json` |
 | `POST /api/workspace/notebooks/edit` | `EditedNotebook` | `app/contract/examples/edited-notebook.json` |

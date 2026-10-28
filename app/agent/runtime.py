@@ -2,13 +2,10 @@
 
 import asyncio
 import hashlib
-import json
-import os
 from collections.abc import AsyncGenerator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, replace
-from pathlib import Path
 from typing import Any
 from uuid import uuid4, uuid5
 
@@ -35,6 +32,7 @@ from app.agent.workspace_session import RunBoundSession
 from app.approvals.handlers import ApprovalRequest, request_approval
 from app.conversations import handlers as conversations
 from app.cube.handlers import ValueEvidence
+from app.infrastructure import hub
 from app.infrastructure.errors import ApiError, Conflict, InvalidInput
 from app.infrastructure.mcp.client import ToolCallMiddleware
 from app.infrastructure.mcp.client import client as mcp_client
@@ -47,6 +45,7 @@ from app.skills import native as saved_skills
 LANGUAGES = {"en": "English", "fr": "French"}
 RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
+WORKSPACE_READY_SECONDS = 90  # a stopped workspace starts with the run; wait this long for it
 _read_only_query = ContextVar("read_only_query", default=False)
 
 
@@ -60,8 +59,22 @@ def read_only_query():
         _read_only_query.reset(token)
 
 
-def _workspace_for_caller(caller):
-    """Only a private server file and trusted owner can select an external endpoint."""
+def _bridge_host() -> str:
+    """This pod's own address on the cluster, which the person's kernel reaches the bridge on."""
+    import ipaddress
+    import socket
+
+    try:
+        address = socket.gethostbyname(socket.gethostname())
+        if not ipaddress.ip_address(address).is_loopback:
+            return address
+    except (OSError, ValueError):
+        pass
+    return "127.0.0.1"
+
+
+async def _workspace_for_caller(caller):
+    """Only the trusted caller's own Hub server; it starts here and is waited for, bounded."""
     if _read_only_query.get():
         return (
             None,
@@ -69,87 +82,63 @@ def _workspace_for_caller(caller):
             "Do not claim workspace access or propose workspace actions.",
             None,
         )
-    path = os.environ.get("USER_WORKSPACES_FILE")
-    if not path:
+    found = hub.from_settings(caller.settings)
+    if found is None or caller.user_id is None:
         return (
             None,
             "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
             None,
         )
-    endpoints = json.loads(Path(path).read_text())
-    if not isinstance(endpoints, dict):
-        raise ValueError("Invalid private workspace configuration")
-    entry = endpoints.get(str(caller.user_id)) if caller.user_id is not None else None
-    if entry is None:
+    started = await hub.state(found, caller.user_id) != "ready"
+    if not await hub.wait_ready(found, caller.user_id, WORKSPACE_READY_SECONDS):
         return (
             None,
-            "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
+            "\nThe owner's workspace did not start in time; workspace tools are unavailable for "
+            "this answer. Say so and suggest trying again shortly.",
             None,
         )
-    if (
-        not isinstance(entry, dict)
-        or not isinstance(entry.get("url"), str)
-        or not isinstance(entry.get("headers"), dict)
-        or any(
-            not isinstance(k, str) or not isinstance(v, str) for k, v in entry["headers"].items()
-        )
-        or not isinstance(entry.get("tools"), list)
-        or any(not isinstance(name, str) or not name for name in entry["tools"])
-    ):
-        raise ValueError("Invalid private workspace configuration")
-    jupyter = None
-    if "jupyter" in entry:
-        config = entry["jupyter"]
-        if (
-            not isinstance(config, dict)
-            or any(not isinstance(config.get(key), str) for key in ("url", "token", "kernel_id"))
-            or not isinstance(config.get("bridge_host", "127.0.0.1"), str)
-        ):
-            raise ValueError("Invalid private Jupyter configuration")
-        jupyter = JupyterTarget(
-            config["url"],
-            config["token"],
-            config["kernel_id"],
-            config.get("bridge_host", "127.0.0.1"),
-            bridge_port=config.get("bridge_port", 0),
-        )
-    endpoint = WorkspaceEndpoint(entry["url"], entry["headers"], tuple(entry["tools"]))
+    jupyter = JupyterTarget(
+        found.server(caller.user_id),
+        found.token,
+        await hub.kernel(found, caller.user_id),
+        _bridge_host(),
+    )
+    endpoint = WorkspaceEndpoint(
+        found.server(caller.user_id) + hub.CONTROL, found.control_headers(), hub.READ_TOOLS
+    )
     selected = WorkspaceToolsets({str(caller.user_id): endpoint}).for_caller(caller)
     guidance = (
         "\nUSER_ROOT=/workspace. Only the supplied workspace_ list/notebook read tools "
         "are available; use their advertised schemas. "
     )
-    if jupyter is None:
-        guidance += (
-            "Workspace actions are unavailable: run_code, write_file, edit_notebook and save_chart "
-            "cannot execute without a configured Jupyter kernel. native() is unavailable. "
-            "These list/notebook tools cannot read plain files or Markdown skill contents."
-        )
-    else:
-        guidance += (
-            "A Jupyter kernel is configured. run_code, write_file, edit_notebook and save_chart "
-            "require "
-            "the requester's approval. Read plain files and selected Markdown skills with "
-            "small approved run_code calls."
-        )
-        from app.approvals.handlers import GrantQuery, list_notebook_grants
+    guidance += (
+        "A Jupyter kernel is configured. run_code, write_file, edit_notebook and save_chart "
+        "require "
+        "the requester's approval. Read plain files and selected Markdown skills with "
+        "small approved run_code calls."
+    )
+    if started:
+        guidance += " The owner's workspace was started for this answer; say so when you use it."
+    from app.approvals.handlers import GrantQuery, list_notebook_grants
 
-        try:
-            granted = (
-                list_notebook_grants(caller, GrantQuery(conversation_id=caller.conversation_id))
-                if caller.conversation_id is not None
-                else []
+    try:
+        granted = (
+            await run_in_threadpool(
+                list_notebook_grants, caller, GrantQuery(conversation_id=caller.conversation_id)
             )
-        except ApiError:
-            # Without readable grants every notebook edit asks, as before.
-            granted = []
-        if granted:
-            guidance += (
-                " Notebooks granted in this conversation (use edit_granted_notebook and "
-                "run_in_granted_notebook for these, without asking): "
-                + ", ".join(sorted({grant.path for grant in granted}))
-                + "."
-            )
+            if caller.conversation_id is not None
+            else []
+        )
+    except ApiError:
+        # Without readable grants every notebook edit asks, as before.
+        granted = []
+    if granted:
+        guidance += (
+            " Notebooks granted in this conversation (use edit_granted_notebook and "
+            "run_in_granted_notebook for these, without asking): "
+            + ", ".join(sorted({grant.path for grant in granted}))
+            + "."
+        )
     return selected, guidance, jupyter
 
 
@@ -473,8 +462,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         )
         async with asyncio.timeout_at(deadline):
             await transport.connect()
-            workspace_transport, workspace_instructions, jupyter = await run_in_threadpool(
-                _workspace_for_caller, trusted
+            workspace_transport, workspace_instructions, jupyter = await _workspace_for_caller(
+                trusted
             )
             if workspace_transport is not None:
                 await workspace_transport.connect()
