@@ -118,8 +118,27 @@ def sign_in(caller: Caller, request):
         cross_origin_browser=caller.settings.cross_origin_browser,
     )
     return Me(
-        id=user["id"], username=user["username"], display_name=user["display_name"], roles=assigned
+        id=user["id"],
+        username=user["username"],
+        display_name=user["display_name"],
+        roles=assigned,
+        language=user["language"],
     )
+
+
+def change_language(caller: Caller, language: str) -> None:
+    if caller.sessions is None or caller.user_id is None:
+        raise NotSignedIn()
+    with unit_of_work(caller.sessions) as session:
+        storage.set_language(session, caller.user_id, language)
+
+
+def language(caller: Caller) -> str:
+    """The caller's reply language; `en` when there is no signed-in user."""
+    if caller.sessions is None or caller.user_id is None:
+        return "en"
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        return storage.language(session, caller.user_id) or "en"
 
 
 def sign_out(caller: Caller) -> None:
@@ -168,6 +187,7 @@ def list_users(caller: Caller):
                 username=row["username"],
                 display_name=row["display_name"],
                 roles=storage.roles_for(session, row["id"]),
+                language=row["language"],
             )
             for row in session.execute(
                 select(storage.users).order_by(storage.users.c.username)

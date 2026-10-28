@@ -34,11 +34,19 @@ class SignIn(Shape):
     password: Annotated[str, msgspec.Meta(min_length=1)]
 
 
+Language = Literal["en", "fr"]
+
+
 class Me(Shape):
     id: UUID
     username: str
     display_name: str
     roles: list[Literal["member", "admin"]]
+    language: Language
+
+
+class MeChange(Shape):
+    language: Language
 
 
 class NewUser(Shape):
@@ -71,6 +79,22 @@ def sign_out(caller: Caller) -> None:
 @operation(SIGNED_IN, get="/me")
 def me(caller: Caller) -> Me:
     """Return the current authenticated account and its trusted roles."""
+    return current(caller)
+
+
+@operation(SIGNED_IN, patch="/me")
+def change_me(caller: Caller, request: MeChange) -> Me:
+    """Change the current account's own settings; `language` is the reply language."""
+    service.change_language(caller, request.language)
+    return current(caller)
+
+
+def reply_language(caller: Caller) -> str:
+    """The caller's saved reply language, for features that answer them."""
+    return service.language(caller)
+
+
+def current(caller: Caller) -> Me:
     from sqlalchemy import select
 
     from app.accounts import storage
@@ -97,6 +121,7 @@ def me(caller: Caller) -> Me:
             "username": row["username"],
             "displayName": row["display_name"],
             "roles": sorted(caller.roles),
+            "language": row["language"],
         },
         Me,
     )

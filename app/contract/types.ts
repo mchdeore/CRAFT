@@ -3,7 +3,10 @@ import type { Message as AgUiMessage } from "@ag-ui/core";
 export type Id = string;
 export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
-export interface Me { id: Id; username: string; displayName: string; roles: Role[] }
+export type Language = "en" | "fr";
+/** `language` is the reply language; change it with PATCH /api/me. */
+export interface Me { id: Id; username: string; displayName: string; roles: Role[]; language: Language }
+export interface MeChange { language: Language }
 export interface NewWorkspaceToken { label: string; hours?: number }
 export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
@@ -128,6 +131,9 @@ export interface Citation {
   classification: Classification; quote: string;
 }
 export interface AnswerMeta { messageId: string; citations: Citation[]; confidence: Confidence }
+/** `craft.originals`: the untranslated quotes behind a reply in another language, shown collapsed. */
+export interface Original { handle: CitationHandle; language: Language; text: string }
+export interface AnswerOriginals { messageId: string; items: Original[] }
 
 export interface NewConversation { title?: string; groupName?: string | null }
 export interface ConversationUpdate { title?: string; groupName?: string | null; archived?: boolean }
@@ -143,7 +149,7 @@ export interface RunRecovery {
 }
 export interface RetrievalStep { tool: string; operation: string; arguments: Record<string, unknown>; at: string; toolCallId: string }
 export type RetrievalPath = RetrievalStep[];
-export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath; skills?: SkillVersionRef[] }
+export interface RetrievalRecord { messageId: Id; runId: Id; model: string; instructionsVersion: string; path: RetrievalPath; skills?: SkillVersionRef[]; replyLanguage?: Language; originals?: number }
 export interface SkillUsage { runId: Id; skills: SkillVersionRef[] }
 export type WorkspaceFileState = "uploading" | "processing" | "ready" | "failed" | "export-pending" | "exported";
 export interface WorkspaceFile { id: Id; conversationId: Id; name: string; mediaType: string; sizeBytes: number; origin: "upload" | "agent"; state: WorkspaceFileState; simulated: boolean; classification: Classification; createdAt: string; statusDetail?: string; exportApprovalId?: Id }

@@ -211,3 +211,35 @@ def test_conversations_group_assignment_and_restore(chat, foreign_http):
         ).status_code
         == 404
     )
+
+
+def test_french_reply_carries_english_originals(chat):
+    from app.accounts.handlers import MeChange, change_me
+    from app.agent.runtime import language_instructions
+
+    assert "Reply language for this run: French." in language_instructions("fr")
+    change_me(chat["caller"], MeChange(language="fr"))
+    try:
+        french = request(chat)
+        events = collect(chat["caller"], french)
+    finally:
+        change_me(chat["caller"], MeChange(language="en"))
+    answer = next(e["content"] for e in events if e.get("activityType") == "craft.answer")
+    shown = next(e["content"] for e in events if e.get("activityType") == "craft.originals")
+    assert validate_chat_events(events) and shown["messageId"] == answer["messageId"]
+    assert shown["items"] == [
+        {"handle": c["handle"], "language": "en", "text": c["quote"]} for c in answer["citations"]
+    ]
+    english = collect(chat["caller"], request(chat))
+    assert not any(e.get("activityType") == "craft.originals" for e in english)
+    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
+        assert chat["sign_in"](http).status_code == 200
+        saved = http.get("/api/conversations/" + str(chat["thread"])).json()["messages"]
+    assert [m["content"] for m in saved if m.get("activityType") == "craft.originals"] == [shown]
+    records = {
+        m["content"]["runId"]: m["content"]
+        for m in saved
+        if m.get("activityType") == "craft.retrieval"
+    }
+    record = records[str(french.run_id)]
+    assert record["replyLanguage"] == "fr" and record["originals"] == len(shown["items"])
