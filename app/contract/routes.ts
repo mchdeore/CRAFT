@@ -40,6 +40,7 @@ export interface Routes {
   "POST /api/workspace/run": { body: T.RunCode; response: T.CodeResult };
   "PUT /api/workspace/files": { body: T.WriteFile; response: T.SavedFile };
   "POST /api/workspace/notebooks/edit": { body: T.EditNotebook; response: T.EditedNotebook };
+  "POST /api/workspace/charts": { body: T.SaveChart; response: T.SavedChart };
   "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
   "GET /api/cube/parameters": { response: T.Parameter[] };
   "POST /api/cube/find": { body: T.FindMissions; response: T.FoundMissions };

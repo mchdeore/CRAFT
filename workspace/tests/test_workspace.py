@@ -245,3 +245,26 @@ def test_table_finds_header_below_title_rows_and_path_accepts_its_own_result(tmp
     assert files.save(frame, saved) == "outputs/result.csv"
     with pytest.raises(ValueError):
         files.path(tmp_path / ".." / "outside.csv")
+
+
+def test_vega_chart_renders_offline_and_saves_spec_and_rows(tmp_path, monkeypatch):
+    import json
+
+    import pandas as pd
+    from craft import _root, analysis
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    frame = pd.DataFrame({"mission": ["a", "b"], "power": [120.5, 80.0]})
+    shown = analysis.chart(frame, "mission", "power", kind="bar", engine="vega")
+    assert isinstance(shown, analysis.VegaChart)
+    assert shown._repr_svg_().lstrip().startswith("<svg")
+    saved = analysis.chart(
+        frame, "mission", "power", kind="bar", engine="vega", save_as="outputs/charts/power.svg"
+    )
+    assert saved == "outputs/charts/power.svg"
+    spec = json.loads((tmp_path / "outputs/charts/power.vl.json").read_text())
+    assert spec["mark"] == "bar" and spec["data"]["values"][0] == {"mission": "a", "power": 120.5}
+    assert (tmp_path / "outputs/charts/power.csv").read_text() == "mission,power\na,120.5\nb,80.0\n"
+    assert analysis.vega(spec, save_as="power.png") == "power.png"
+    with pytest.raises(ValueError):
+        analysis.vega({**spec, "data": {"url": "https://example.invalid/data.json"}})

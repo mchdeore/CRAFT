@@ -115,6 +115,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/workspace/run` | `RunCode` | `CodeResult` | signed in; own workspace; requester approval when called by the agent | `run_code` |
 | `PUT /api/workspace/files` | `WriteFile` | `SavedFile` | signed in; own workspace; requester approval when called by the agent | `write_file` |
 | `POST /api/workspace/notebooks/edit` | `EditNotebook` | `EditedNotebook` | signed in; own workspace; requester approval when called by the agent | `edit_notebook` |
+| `POST /api/workspace/charts` | `SaveChart` | `SavedChart` | signed in; own workspace; requester approval when called by the agent | `save_chart` |
 | `GET /api/cube/missions` | —; query `{query?: string; limit?: number}` | `Mission[]` | signed in; live resource access | `list_missions` |
 | `GET /api/cube/parameters` | — | `Parameter[]` | signed in; live resource access | `list_parameters` |
 | `POST /api/cube/find` | `FindMissions` | `FoundMissions` | signed in; live resource access | `find_missions` |
@@ -190,6 +191,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
 | `read_skill_version` | `GET /api/skills/:id/versions` | `SkillVersionRef` | `NONE` |
 | `run_code` | `POST /api/workspace/run` | `RunCode` | `EXTERNAL` |
+| `save_chart` | `POST /api/workspace/charts` | `SaveChart` | `EXTERNAL` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
 | `write_file` | `PUT /api/workspace/files` | `WriteFile` | `EXTERNAL` |
@@ -345,6 +347,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/workspace/run` | `CodeResult` | `app/contract/examples/code-result.json` |
 | `PUT /api/workspace/files` | `SavedFile` | `app/contract/examples/saved-file.json` |
 | `POST /api/workspace/notebooks/edit` | `EditedNotebook` | `app/contract/examples/edited-notebook.json` |
+| `POST /api/workspace/charts` | `SavedChart` | `app/contract/examples/saved-chart.json` |
 | `GET /api/cube/missions` | `Mission[]` | `app/contract/examples/missions.json` |
 | `GET /api/cube/parameters` | `Parameter[]` | `app/contract/examples/parameters.json` |
 | `POST /api/cube/find` | `FoundMissions` | `app/contract/examples/found-missions.json` |

@@ -1,0 +1,5 @@
+{
+  "svg": "outputs/charts/peak-power.svg",
+  "spec": "outputs/charts/peak-power.vl.json",
+  "csv": "outputs/charts/peak-power.csv"
+}

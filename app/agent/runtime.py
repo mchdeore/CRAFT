@@ -121,13 +121,14 @@ def _workspace_for_caller(caller):
     )
     if jupyter is None:
         guidance += (
-            "Workspace actions are unavailable: run_code, write_file and edit_notebook "
+            "Workspace actions are unavailable: run_code, write_file, edit_notebook and save_chart "
             "cannot execute without a configured Jupyter kernel. native() is unavailable. "
             "These list/notebook tools cannot read plain files or Markdown skill contents."
         )
     else:
         guidance += (
-            "A Jupyter kernel is configured. run_code, write_file and edit_notebook require "
+            "A Jupyter kernel is configured. run_code, write_file, edit_notebook and save_chart "
+            "require "
             "the requester's approval. Read plain files and selected Markdown skills with "
             "small approved run_code calls."
         )
