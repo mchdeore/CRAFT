@@ -61,9 +61,9 @@ Kernels and terminal shells start with an outbound guard. Python connections, na
 During an active chat run, the selected notebook kernel also has run-bound native access:
 
 ```python
-from craft import native
+import craft
 
-async with native() as sdk:
+async with craft.native() as sdk:
     sources = await sdk.search("project requirements")
 ```
 
@@ -223,9 +223,9 @@ During a native CRAFT run with `jupyter` configured, use top-level `await` in
 that selected notebook:
 
 ```python
-from craft import native
+import craft
 
-async with native() as sdk:
+async with craft.native() as sdk:
     result = await sdk.search("authorized source", limit=5, kinds=["chunk"])
     if result.isError:
         raise RuntimeError("CRAFT search failed; inspect the tool result.")
