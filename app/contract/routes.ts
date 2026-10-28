@@ -4,6 +4,8 @@ export interface Routes {
   "GET /api/approvals": { query: { status?: T.ApprovalStatus }; response: T.Approval[] };
   "GET /api/approvals/:id": { response: T.ApprovalDetail };
   "POST /api/approvals/:id/decision": { body: T.Decision; response: T.Approval };
+  "GET /api/notebook-grants": { query: { conversationId?: T.Id }; response: T.NotebookGrant[] };
+  "DELETE /api/notebook-grants/:id": { response: void };
   "GET /api/tools": { response: T.ToolInfo[] };
   "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
   "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };
@@ -41,6 +43,8 @@ export interface Routes {
   "PUT /api/workspace/files": { body: T.WriteFile; response: T.SavedFile };
   "POST /api/workspace/notebooks/edit": { body: T.EditNotebook; response: T.EditedNotebook };
   "POST /api/workspace/charts": { body: T.SaveChart; response: T.SavedChart };
+  "POST /api/workspace/notebooks/run": { body: T.GrantedRun; response: T.CodeResult };
+  "POST /api/workspace/notebooks/edit-granted": { body: T.EditNotebook; response: T.EditedNotebook };
   "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
   "GET /api/cube/parameters": { response: T.Parameter[] };
   "POST /api/cube/find": { body: T.FindMissions; response: T.FoundMissions };

@@ -30,6 +30,8 @@ def operation(
     effects: str = NONE,
     prepare_approved: Callable[[Caller, Any], object] | None = None,
     job: Job | None = None,
+    grants: str | None = None,
+    granted: str | None = None,
 ) -> Any:
     from app.infrastructure.operations.pipeline import wrap
     from app.infrastructure.operations.registry import declare, registry
@@ -45,6 +47,16 @@ def operation(
             job,
         )
         from dataclasses import replace
+
+        if grants is not None or granted is not None:
+            fields = declaration.input.__struct_fields__ if declaration.input else ()
+            if (
+                effects != EXTERNAL
+                or (grants is not None and granted is not None)
+                or (grants or granted) not in fields
+            ):
+                raise ValueError("A notebook grant names an input field of an external effect")
+            declaration = replace(declaration, grants=grants, granted=granted)
 
         if job is not None:
             from app.infrastructure.operations.jobs import Queued, deferring

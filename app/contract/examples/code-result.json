@@ -1,6 +1,16 @@
 {
   "status": "ok",
-  "outputs": ["2\n"],
+  "outputs": [
+    "2\n",
+    "[image output 1]\n"
+  ],
   "error": null,
-  "truncated": false
+  "truncated": false,
+  "traceback": [],
+  "images": [
+    {
+      "mediaType": "image/png",
+      "dataBase64": "iVBORw0KGgo="
+    }
+  ]
 }
