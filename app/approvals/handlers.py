@@ -104,3 +104,31 @@ def read_approval(caller: Caller, request: ApprovalRef) -> ApprovalDetail:
 def decide_approval(caller: Caller, request: Decision) -> Approval:
     """Record an authenticated requester decision once through HTTP."""
     return Approval(**service.decide(caller, request))
+
+
+class GrantQuery(Shape):
+    conversation_id: UUID | None = None
+
+
+class GrantRef(Shape):
+    id: UUID
+
+
+class NotebookGrant(Shape):
+    id: UUID
+    conversation_id: UUID
+    path: str
+    approval_id: UUID
+    created_at: str
+
+
+@operation(SIGNED_IN, get="/notebook-grants")
+def list_notebook_grants(caller: Caller, request: GrantQuery) -> list[NotebookGrant]:
+    """List up to one hundred active notebook grants, optionally for one conversation."""
+    return [NotebookGrant(**row) for row in service.list_grants(caller, request.conversation_id)]
+
+
+@operation(SIGNED_IN, delete="/notebook-grants/{id}")
+def revoke_notebook_grant(caller: Caller, request: GrantRef) -> None:
+    """Revoke one notebook grant; the agent asks again before the next edit."""
+    service.revoke_grant(caller, request.id)

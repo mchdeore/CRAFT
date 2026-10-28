@@ -135,6 +135,10 @@ def decide(caller, data):
         tool_call_id = storage.native_tool_call_id(session, row)
         kind = "approved" if data.approve else "rejected"
         storage.append_event(session, data.id, kind, caller.user_id, data.note)
+        declared = registry.get(row["operation"])
+        path = row["arguments"].get(declared.grants) if declared and declared.grants else None
+        if data.approve and isinstance(path, str):
+            storage.add_grant(session, data.id, caller.user_id, row["conversation_id"], path)
         result = _summary(row, kind)
     context = current_call.get()
     if context is not None:
@@ -337,6 +341,53 @@ def claim_external_approved(caller, operation, value) -> UUID:
             raise ApprovalRequired()
         storage.append_event(session, row["id"], "executed", caller.user_id, None)
         return row["id"]
+
+
+def claim_granted(caller, operation, value) -> UUID:
+    """Allow a granted call when its notebook was granted in this conversation.
+
+    The call log records each one; the grant's approval keeps its own single execution.
+    """
+    from app.infrastructure.operations.pipeline import ApprovalRequired
+
+    path = getattr(value, operation.granted or "", None)
+    if (
+        caller.origin != "mcp"
+        or operation.granted is None
+        or not isinstance(path, str)
+        or caller.sessions is None
+        or caller.user_id is None
+        or caller.run_id is None
+        or caller.conversation_id is None
+        or has_ambient_transaction()
+    ):
+        raise ApprovalRequired()
+    with unit_of_work(_sessions(caller)) as session:
+        storage.require_run(session, caller.user_id, caller.run_id, caller.conversation_id)
+        approval = storage.grant_for(session, caller.user_id, caller.conversation_id, path)
+    if approval is None:
+        raise ApprovalRequired()
+    return approval
+
+
+def list_grants(caller, conversation):
+    with unit_of_work(_sessions(caller), read_only=True) as session:
+        return [
+            {
+                "id": row["id"],
+                "conversation_id": row["conversation_id"],
+                "path": row["path"],
+                "approval_id": row["approval_id"],
+                "created_at": row["created_at"].isoformat(),
+            }
+            for row in storage.list_grants(session, caller.user_id, conversation)
+        ]
+
+
+def revoke_grant(caller, identifier):
+    with unit_of_work(_sessions(caller)) as session:
+        if storage.revoke_grant(session, caller.user_id, identifier) != 1:
+            raise NotFound()
 
 
 def status_expression():

@@ -132,6 +132,24 @@ def _workspace_for_caller(caller):
             "the requester's approval. Read plain files and selected Markdown skills with "
             "small approved run_code calls."
         )
+        from app.approvals.handlers import GrantQuery, list_notebook_grants
+
+        try:
+            granted = (
+                list_notebook_grants(caller, GrantQuery(conversation_id=caller.conversation_id))
+                if caller.conversation_id is not None
+                else []
+            )
+        except ApiError:
+            # Without readable grants every notebook edit asks, as before.
+            granted = []
+        if granted:
+            guidance += (
+                " Notebooks granted in this conversation (use edit_granted_notebook and "
+                "run_in_granted_notebook for these, without asking): "
+                + ", ".join(sorted({grant.path for grant in granted}))
+                + "."
+            )
     return selected, guidance, jupyter
 
 

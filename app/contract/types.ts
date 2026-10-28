@@ -12,8 +12,12 @@ export interface SignedOut { logoutUrl: string | null }
 export interface NewWorkspaceToken { label: string; hours?: number }
 export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
-export interface RunCode { code: string }
-export interface CodeResult { status: "ok" | "error"; outputs: string[]; error: string | null; truncated: boolean }
+/** `notebook`: the notebook this code works on; approving it grants that notebook for the conversation. */
+export interface RunCode { code: string; notebook?: string | null }
+export interface GrantedRun { notebook: string; code: string }
+export interface KernelImage { mediaType: "image/png" | "image/jpeg"; dataBase64: string }
+export interface CodeResult { status: "ok" | "error"; outputs: string[]; error: string | null; truncated: boolean; traceback?: string[]; images?: KernelImage[] }
+export interface NotebookGrant { id: Id; conversationId: Id; path: string; approvalId: Id; createdAt: string }
 export interface WriteFile { path: string; content: string }
 export interface SavedFile { path: string; size: number }
 export interface SaveChart { name: string; spec: Record<string, unknown>; title?: string | null }

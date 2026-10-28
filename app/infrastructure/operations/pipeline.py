@@ -186,7 +186,8 @@ def checked_input(operation: Operation, caller: Caller, value: Any) -> Any:
         if isinstance(content, (bytes, bytearray)) and len(content) > RawFile.max_bytes:
             raise TooLarge()
     request = decode(operation, value)
-    if caller.origin == "mcp" and operation.effects != "NONE":
+    # A granted call is checked against its notebook grant when it is claimed instead.
+    if caller.origin == "mcp" and operation.effects != "NONE" and operation.granted is None:
         from app.approvals.service import require_approved
 
         require_approved(caller, operation, request)
@@ -318,9 +319,10 @@ def wrap(operation: Operation) -> Any:
                 else:
                     resolved, value = checked(operation, caller, request)
                 if resolved.origin == "mcp" and operation.effects == "EXTERNAL":
-                    from app.approvals.service import claim_external_approved
+                    from app.approvals.service import claim_external_approved, claim_granted
 
-                    await run_in_threadpool(claim_external_approved, resolved, operation, value)
+                    claim = claim_granted if operation.granted else claim_external_approved
+                    await run_in_threadpool(claim, resolved, operation, value)
                     output = await fn(resolved, value) if operation.input else await fn(resolved)
                 elif resolved.origin == "mcp" and operation.effects != "NONE":
                     from app.approvals.service import execute_approved

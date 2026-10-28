@@ -1,5 +1,6 @@
 """Native streamable HTTP tools keep credentials separate from model arguments."""
 
+import base64
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -10,7 +11,7 @@ from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 
 import httpx
-from agent_framework import FunctionMiddleware, MCPStreamableHTTPTool
+from agent_framework import Content, FunctionMiddleware, MCPStreamableHTTPTool
 from agent_framework._mcp import _capture_mcp_tool_result
 from agent_framework.exceptions import ToolExecutionException
 from agent_framework.observability import set_mcp_span_error
@@ -157,19 +158,32 @@ def client(url, raw_token, results, allowed=None):
         value = result.structuredContent
         if value is None:
             value = next((json.loads(c.text) for c in result.content if c.type == "text"), None)
+        images = value.pop("images", None) if isinstance(value, dict) else None
         results.append(value)
-        return json.dumps(value, separators=(",", ":"))
+        text = json.dumps(value, separators=(",", ":"))
+        if not images:
+            return text
+        # Kernel plots reach the model as image content beside the text result.
+        return [Content.from_text(text)] + [
+            Content.from_data(base64.b64decode(image["dataBase64"]), image["mediaType"])
+            for image in images
+        ]
 
     return LocalHTTPTool(
         name="craft",
         url=url,
         allowed_tools=allowlist,
         approval_mode={
+            # A granted call asks nothing here; the server refuses it without a notebook grant.
             "always_require_approval": [
-                o.tool_name for o in tool_operations(registry) if o.effects != "NONE"
+                o.tool_name
+                for o in tool_operations(registry)
+                if o.effects != "NONE" and o.granted is None
             ],
             "never_require_approval": [
-                o.tool_name for o in tool_operations(registry) if o.effects == "NONE"
+                o.tool_name
+                for o in tool_operations(registry)
+                if o.effects == "NONE" or o.granted is not None
             ],
         },
         load_prompts=False,

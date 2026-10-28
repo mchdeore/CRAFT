@@ -118,6 +118,11 @@ def context(settings, owner_engine):
                 metadata.tables["approval_requests"].c.run_id == run
             )
             db.execute(
+                metadata.tables["notebook_grants"]
+                .delete()
+                .where(metadata.tables["notebook_grants"].c.approval_id.in_(ids))
+            )
+            db.execute(
                 metadata.tables["approval_events"]
                 .delete()
                 .where(metadata.tables["approval_events"].c.request_id.in_(ids))

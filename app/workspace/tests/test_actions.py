@@ -228,3 +228,88 @@ def test_chart_saves_svg_spec_and_csv(context, workspace):
     with pytest.raises(ApprovalRequired):
         asyncio.run(save_chart(trusted, value))
     assert calls == []
+
+
+def test_approving_a_notebook_edit_grants_later_edits_without_asking(context, workspace):
+    from app.approvals.handlers import (
+        GrantQuery,
+        GrantRef,
+        list_notebook_grants,
+        revoke_notebook_grant,
+    )
+    from app.workspace.handlers import GrantedRun, edit_granted_notebook, run_in_granted_notebook
+
+    calls, _ = workspace
+    first = EditNotebook(path="work/fit.ipynb", action="insert", index=0, source="x = 1")
+    trusted, identifier = proposal(context, edit_notebook, first)
+    assert asyncio.run(edit_notebook(trusted, first)).cells == 1
+    own = replace(context["caller"], origin="http")
+    grants = list_notebook_grants(own, GrantQuery(conversation_id=context["conversation"]))
+    assert [(g.path, g.approval_id) for g in grants] == [("work/fit.ipynb", identifier)]
+
+    second = EditNotebook(path="work/fit.ipynb", action="insert", index=1, source="x")
+    assert asyncio.run(edit_granted_notebook(trusted, second)).cells == 2
+    run = GrantedRun(notebook="work/fit.ipynb", code="x")
+    assert asyncio.run(run_in_granted_notebook(trusted, run)).status == "ok"
+    other = EditNotebook(path="work/other.ipynb", action="insert", index=0, source="y")
+    with pytest.raises(ApprovalRequired):
+        asyncio.run(edit_granted_notebook(trusted, other))
+
+    revoke_notebook_grant(own, GrantRef(id=grants[0].id))
+    with pytest.raises(ApprovalRequired):
+        asyncio.run(edit_granted_notebook(trusted, second))
+    assert [call[0] for call in calls] == ["notebook", "notebook", "run"]
+
+
+def test_a_rejected_edit_grants_nothing(context, workspace):
+    from app.workspace.handlers import edit_granted_notebook
+
+    value = EditNotebook(path="work/no.ipynb", action="insert", index=0, source="x")
+    trusted, _ = proposal(context, edit_notebook, value, approve=False)
+    with pytest.raises(ApprovalRequired):
+        asyncio.run(edit_granted_notebook(trusted, value))
+
+
+def test_kernel_outputs_keep_two_images_and_the_last_traceback_lines():
+    import base64
+
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 10).decode()
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4">'
+        '<rect width="4" height="4"/></svg>'
+    )
+    outputs = workspaces.KernelOutputs()
+    outputs.add("display_data", {"data": {"image/png": png, "text/plain": "<Figure>"}})
+    outputs.add("display_data", {"data": {"image/svg+xml": svg}})
+    outputs.add("display_data", {"data": {"image/png": png}})
+    trace = ["\x1b[31mTraceback\x1b[0m"] + [f"line {n}" for n in range(30)]
+    outputs.add("error", {"ename": "ValueError", "evalue": "bad", "traceback": ["\n".join(trace)]})
+    result = outputs.result()
+    assert [image["media_type"] for image in result["images"]] == ["image/png", "image/png"]
+    assert base64.b64decode(result["images"][1]["data_base64"]).startswith(b"\x89PNG")
+    assert result["truncated"] and result["status"] == "error"
+    assert result["error"] == "ValueError: bad"
+    assert result["traceback"] == [f"line {n}" for n in range(10, 30)]
+    assert "<Figure>" not in "".join(result["outputs"])
+
+
+def test_kernel_images_reach_the_model_as_image_content():
+    from mcp.types import CallToolResult, TextContent
+
+    from app.infrastructure.mcp.client import client
+
+    results = []
+    tool = client("http://127.0.0.1:1/mcp", "generated", results, allowed=["run_code"])
+    value = {
+        "status": "ok",
+        "outputs": [],
+        "images": [{"mediaType": "image/png", "dataBase64": "iVBORw0KGgo="}],
+    }
+    assert tool.parse_tool_results is not None
+    parsed = tool.parse_tool_results(
+        CallToolResult(content=[TextContent(type="text", text="{}")], structuredContent=value)
+    )
+    assert not isinstance(parsed, str)
+    assert [item.type for item in parsed] == ["text", "data"]
+    assert parsed[1].media_type == "image/png"
+    assert results == [{"status": "ok", "outputs": []}]

@@ -55,6 +55,24 @@ Index(
     unique=True,
     postgresql_where=text("kind in ('executed','failed')"),
 )
+notebook_grants = Table(
+    "notebook_grants",
+    metadata,
+    Column("id", UUID, primary_key=True, server_default=text("uuidv7()")),
+    Column("approval_id", UUID, ForeignKey("approval_requests.id"), nullable=False, unique=True),
+    Column("user_id", UUID, ForeignKey("users.id"), nullable=False),
+    Column("conversation_id", UUID, ForeignKey("conversations.id"), nullable=False),
+    Column("path", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("revoked_at", DateTime(timezone=True)),
+)
+Index(
+    "uq_notebook_grants_active",
+    notebook_grants.c.conversation_id,
+    notebook_grants.c.path,
+    unique=True,
+    postgresql_where=text("revoked_at IS NULL"),
+)
 APPROVAL_STATUS = text("SELECT request_id, kind, actor_id, at FROM approval_status")
 
 
@@ -276,3 +294,59 @@ def events(session, identifier):
         .mappings()
         .all()
     )
+
+
+def add_grant(session, approval, user, conversation, path):
+    from sqlalchemy.dialects.postgresql import insert
+
+    session.execute(
+        insert(notebook_grants)
+        .values(approval_id=approval, user_id=user, conversation_id=conversation, path=path)
+        .on_conflict_do_nothing()
+    )
+
+
+def grant_for(session, user, conversation, path):
+    from sqlalchemy import select
+
+    conversations = metadata.tables["conversations"]
+    return session.execute(
+        select(notebook_grants.c.approval_id)
+        .join(conversations, conversations.c.id == notebook_grants.c.conversation_id)
+        .where(
+            notebook_grants.c.user_id == user,
+            notebook_grants.c.conversation_id == conversation,
+            notebook_grants.c.path == path,
+            notebook_grants.c.revoked_at.is_(None),
+            conversations.c.owner_id == user,
+        )
+    ).scalar_one_or_none()
+
+
+def list_grants(session, user, conversation=None):
+    from sqlalchemy import select
+
+    statement = select(notebook_grants).where(
+        notebook_grants.c.user_id == user, notebook_grants.c.revoked_at.is_(None)
+    )
+    if conversation is not None:
+        statement = statement.where(notebook_grants.c.conversation_id == conversation)
+    return (
+        session.execute(statement.order_by(notebook_grants.c.created_at.desc()).limit(100))
+        .mappings()
+        .all()
+    )
+
+
+def revoke_grant(session, user, identifier):
+    from sqlalchemy import func
+
+    return session.execute(
+        notebook_grants.update()
+        .where(
+            notebook_grants.c.id == identifier,
+            notebook_grants.c.user_id == user,
+            notebook_grants.c.revoked_at.is_(None),
+        )
+        .values(revoked_at=func.now())
+    ).rowcount
