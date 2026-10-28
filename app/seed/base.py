@@ -72,23 +72,23 @@ def seed(settings: Settings) -> dict[str, int]:
                 )
     finally:
         engine.dispose()
-    set_demo_passwords(settings)
+    set_seed_passwords(settings)
     return {"users": 3, "documents": 5}
 
 
-def set_demo_passwords(settings: Settings) -> bool:
-    """Give every seeded account the local SEED_DEMO_PASSWORD, so demos can sign in.
+def set_seed_passwords(settings: Settings) -> bool:
+    """Give every seeded account the local SEED_PASSWORD, so they can sign in locally.
 
     The password comes only from the environment and is never stored in the repository.
     Without it, accounts keep their current passwords or stay without one.
     """
     from argon2 import PasswordHasher
 
-    password = os.environ.get("SEED_DEMO_PASSWORD", "")
+    password = os.environ.get("SEED_PASSWORD", "")
     if not password:
         return False
     if len(password) < settings.password_min_length:
-        raise ValueError("SEED_DEMO_PASSWORD is shorter than the minimum password length")
+        raise ValueError("SEED_PASSWORD is shorter than the minimum password length")
     hashed = PasswordHasher().hash(password)
     sessions, engine = make_owner_sessions(settings)
     users = metadata.tables["users"]

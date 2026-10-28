@@ -23,7 +23,7 @@ from app.infrastructure.access import Caller
 from app.infrastructure.operations.context import current_call
 
 KERNEL = "00000000-0000-4000-8000-000000000001"
-NOTEBOOK = "notebooks/demo.ipynb"
+NOTEBOOK = "notebooks/analysis.ipynb"
 
 
 def lifecycle_module():
@@ -100,7 +100,7 @@ def test_workspace_kernel_selection_is_pinned_before_external_dispatch():
                     (execute_code, {"code": "print(1)", "kernel_id": "other"}, False),
                     (
                         use_notebook,
-                        {"notebook_name": "demo", "notebook_path": NOTEBOOK},
+                        {"notebook_name": "analysis", "notebook_path": NOTEBOOK},
                         True,
                     ),
                     (
@@ -125,7 +125,7 @@ def test_workspace_kernel_selection_is_pinned_before_external_dispatch():
                 current_call.reset(token)
             assert dispatched == [
                 {"code": "print(1)", "kernel_id": KERNEL},
-                {"notebook_name": "demo", "notebook_path": NOTEBOOK, "kernel_id": KERNEL},
+                {"notebook_name": "analysis", "notebook_path": NOTEBOOK, "kernel_id": KERNEL},
             ]
             assert budget["calls"] == 4 and len(trace) == 4
             assert all("arguments" not in step for step in trace)

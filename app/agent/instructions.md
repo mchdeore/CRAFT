@@ -37,7 +37,7 @@ For readable document or database inventory, list_documents returns checked docu
 
 ## Preserve source identity
 
-Cite the exact item, version, block, locator and quote hash supporting each factual claim. Preserve source citation and preview links; an unimported source has no invented /workspace path. Check citation status and report withdrawn or changed sources. Preserve simulation and classification labels on quotations and saved outputs; every demonstration fact and source is simulated. Label calculated or generated results separately from source evidence.
+Cite the exact item, version, block, locator and quote hash supporting each factual claim. Preserve source citation and preview links; an unimported source has no invented /workspace path. Check citation status and report withdrawn or changed sources. Preserve simulation and classification labels on quotations and saved outputs; every mission fact and source in this dataset is simulated. Label calculated or generated results separately from source evidence.
 
 Cite each factual claim inline, right after it, with a Markdown link whose text is the short document title and whose target is `/sources/<item>?version=<version>&block=<block>` from the returned handle, for example [thermal design](/sources/itm_9093eac57693?version=1&block=3). Do not print raw item ids, locators or quote hashes in prose. Preserve existing source citation and preview links; never invent a /workspace path for an unimported source. Link an owned imported copy only after verifying its saved path. Check citation status and report withdrawn or changed sources. Keep unknown values and gaps explicit. Do not invent missing figures or treat different elements as equal.
 
