@@ -8,7 +8,6 @@ import pytest
 
 from app.approvals.tests.test_decisions import context as context
 from app.infrastructure import notebook_sandbox, workspaces
-from app.infrastructure.errors import Conflict
 from app.workspace import service
 from app.workspace.handlers import RunNotebook, run_notebook
 from app.workspace.tests.test_actions import workspace as workspace
@@ -21,15 +20,13 @@ NOTEBOOK = {
 }
 
 
-def test_at_most_two_runs_queue_per_requester(context, workspace, monkeypatch):
+def test_a_person_can_queue_more_than_two_notebook_runs(context, workspace, monkeypatch):
     _, files = workspace
     files["work/fit.ipynb"] = NOTEBOOK
     own = replace(context["caller"], origin="http")
-    first = asyncio.run(run_notebook(own, RunNotebook(path="work/fit.ipynb")))
-    assert first.notebook == "work/fit.ipynb" and first.output.startswith("work/fit.run-")
-    asyncio.run(run_notebook(own, RunNotebook(path="work/fit.ipynb")))
-    with pytest.raises(Conflict):
-        asyncio.run(run_notebook(own, RunNotebook(path="work/fit.ipynb")))
+    queued = [asyncio.run(run_notebook(own, RunNotebook(path="work/fit.ipynb"))) for _ in range(3)]
+    assert len({run.job_id for run in queued}) == 3
+    assert all(run.notebook == "work/fit.ipynb" for run in queued)
     from sqlalchemy import text
 
     with context["owner"].begin() as connection:

@@ -2,7 +2,7 @@
 
 Three queues, one worker each: `agent` (chat turns), `interactive` (someone is waiting) and
 `bulk` (long batch work), so a long job never holds up a person. Every worker runs the same
-image and command, `craft worker`, with CRAFT_WORKER_QUEUES and CRAFT_WORKER_CONCURRENCY.
+image and command, `craft worker`, with CRAFT_WORKER_QUEUES and per-queue concurrency settings.
 Job arguments are JSON and hold IDs only: never document text, prompts or tokens.
 """
 
@@ -46,6 +46,8 @@ POLL_SECONDS = 5.0
 # A worker silent this long is dead; its jobs are retried or marked failed.
 STALLED_SECONDS = 30.0
 RECOVER_SECONDS = 15.0
+# How often workers write queue depth samples for craft queues report.
+SAMPLE_SECONDS = 30.0
 HEALTHY_SECONDS = 60.0
 HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "craft-worker-heartbeat"
 assert set(WAITS) == set(GRACE) == set(QUEUES)
@@ -290,13 +292,32 @@ def register_maintenance(func: Callable[[sessionmaker[Session]], None]) -> None:
     MAINTENANCE.append(func)
 
 
-async def _maintain(app: App, settings: Settings, sessions: sessionmaker[Session]) -> None:
+def _sample_queues(sessions: sessionmaker[Session], queues: list[str], concurrency: int) -> None:
+    """Record queued/running depth and alive workers for later sizing decisions."""
+    from app.jobs import storage
+
+    with sessions.begin() as session:
+        storage.sample_queues(session, queues, concurrency, STALLED_SECONDS)
+
+
+async def _maintain(
+    app: App,
+    settings: Settings,
+    sessions: sessionmaker[Session],
+    queues: list[str],
+    concurrency: int,
+) -> None:
+    next_sample = time.monotonic()
     while True:
         HEARTBEAT_FILE.touch()
         try:
             await recover(app, settings, sessions)
             for func in MAINTENANCE:
                 await asyncio.to_thread(func, sessions)
+            now = time.monotonic()
+            if now >= next_sample:
+                await asyncio.to_thread(_sample_queues, sessions, queues, concurrency)
+                next_sample = now + SAMPLE_SECONDS
         except Exception:
             logger.warning("job maintenance failed")
         await asyncio.sleep(RECOVER_SECONDS)
@@ -326,7 +347,7 @@ async def work(
             update_heartbeat_interval=HEARTBEAT_SECONDS,
             stalled_worker_timeout=STALLED_SECONDS,
         )
-        maintenance = asyncio.create_task(_maintain(app, settings, sessions))
+        maintenance = asyncio.create_task(_maintain(app, settings, sessions, queues, concurrency))
         if started is not None:
             started(worker)
         try:
@@ -359,7 +380,8 @@ def wait_for_schema(settings: Settings) -> None:
 def run_worker(settings: Settings) -> None:
     """`craft worker`: run until SIGTERM, then finish current jobs within the grace period."""
     wait_for_schema(settings)
-    asyncio.run(work(settings, settings.queue_names(), settings.worker_concurrency))
+    queues = settings.queue_names()
+    asyncio.run(work(settings, queues, settings.concurrency_for(queues)))
 
 
 def check_worker() -> bool:

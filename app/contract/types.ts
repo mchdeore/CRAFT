@@ -47,7 +47,28 @@ export type JobState = "queued" | "scheduled" | "started" | "stopping" | "finish
 export interface JobPageRequest { status?: JobState | null; offset?: number; limit?: number }
 export interface Job { jobId: string; kind: string; queue: string; status: JobState; attempts: number; requestedBy: string | null; enqueuedAt: string | null; startedAt: string | null; finishedAt: string | null; error: string | null }
 export interface JobPage { jobs: Job[]; nextOffset: number | null }
-export interface QueueCounts { queue: string; queued: number; scheduled: number; started: number; stopping: number; finished: number; failed: number; canceled: number; stopped: number; oldestQueuedSeconds: number | null }
+export interface QueueCounts {
+  queue: string;
+  queued: number;
+  scheduled: number;
+  started: number;
+  stopping: number;
+  finished: number;
+  failed: number;
+  canceled: number;
+  stopped: number;
+  oldestQueuedSeconds: number | null;
+  waitP50Seconds?: number | null;
+  waitP95Seconds?: number | null;
+  waitMaxSeconds?: number | null;
+  runP50Seconds?: number | null;
+  runP95Seconds?: number | null;
+  runMaxSeconds?: number | null;
+  busyWorkers?: number;
+  concurrency?: number;
+  peakQueued?: number;
+  saturatedSeconds?: number;
+}
 export interface QueueHealth { queues: QueueCounts[]; dead: number }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }

@@ -603,9 +603,9 @@ def test_native_run_owns_bridge_cleanup_before_finish_and_transport_close(
     monkeypatch.setattr(runtime, "WorkspaceRunController", Controller)
     original_finish, original_close = runtime.service.finish, LocalHTTPTool.close
 
-    def finish(*args):
+    def finish(*args, **kwargs):
         phases.append("run_finished")
-        original_finish(*args)
+        original_finish(*args, **kwargs)
 
     async def close(transport):
         phases.append(transport.name + "_closed")
@@ -669,11 +669,12 @@ def test_native_run_owns_bridge_cleanup_before_finish_and_transport_close(
     )
     middleware = recorded["agents"][0].options["middleware"][0]
     assert middleware is controllers[0].session._middleware
-    assert middleware.budget["calls"] == recorded["finished"][0][3]["state"]["craft"]["toolCalls"]
+    finished_args = recorded["finished"][0][0]
+    assert middleware.budget["calls"] == finished_args[3]["state"]["craft"]["toolCalls"]
     assert "generated-jupyter-token" not in repr(recorded["agents"][0].options)
-    assert "generated-jupyter-token" not in repr(recorded["finished"][0][3])
+    assert "generated-jupyter-token" not in repr(finished_args[3])
     assert (
-        recorded["finished"][0][2]
+        finished_args[2]
         == {None: "finished", "execute": "failed", "cancel": "cancelled", "pause": "paused"}[
             failure
         ]

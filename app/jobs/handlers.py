@@ -87,5 +87,10 @@ def cancel_job_by_id(session, job_id: int) -> bool:
 
 
 def queue_counts(sessions) -> dict:
-    """Counts for /health/queue."""
+    """Counts and last-hour percentiles for /health/queue."""
     return service.health(sessions)
+
+
+def queue_report(sessions, since_seconds: float) -> dict:
+    """Totals for `craft queues report`."""
+    return service.report(sessions, since_seconds=since_seconds)

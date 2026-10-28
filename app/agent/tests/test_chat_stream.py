@@ -336,17 +336,20 @@ def test_chat_stream_tool_and_time_budgets(chat, monkeypatch):
     monkeypatch.setattr(runtime, "TOOL_LIMIT", 0)
     data = request(chat)
     events = collect(chat["caller"], data)
-    assert events[-1]["type"] == "RUN_ERROR" and row(chat, data.run_id)["status"] == "failed"
-    cleared = row(chat, data.run_id)["token_sha256"] is None
-    assert cleared
+    recorded = row(chat, data.run_id)
+    assert events[-1]["type"] == "RUN_ERROR" and recorded["status"] == "failed"
+    assert recorded["end_reason"] == "tool_limit"
+    assert recorded["tool_calls"] is not None and recorded["active_seconds"] is not None
+    assert recorded["token_sha256"] is None
 
     monkeypatch.setattr(runtime, "TOOL_LIMIT", 20)
     monkeypatch.setattr(runtime, "RUN_SECONDS", 0.000001)
     data = request(chat)
     events = collect(chat["caller"], data)
-    assert events[-1]["type"] == "RUN_ERROR" and row(chat, data.run_id)["status"] == "failed"
-    cleared = row(chat, data.run_id)["token_sha256"] is None
-    assert cleared
+    recorded = row(chat, data.run_id)
+    assert events[-1]["type"] == "RUN_ERROR" and recorded["status"] == "failed"
+    assert recorded["end_reason"] == "time_limit"
+    assert recorded["token_sha256"] is None
 
 
 def test_chat_stream_output_budget(chat, monkeypatch):
