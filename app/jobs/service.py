@@ -108,11 +108,35 @@ def cancel(caller: Caller, job_id: int) -> dict[str, Any]:
         return shape(storage.read(session, job_id))
 
 
-def health(sessions) -> dict[str, Any]:
+def _seconds(value) -> float | None:
+    return None if value is None else round(float(value), 3)
+
+
+def health(sessions, *, since_seconds: float = 3600.0) -> dict[str, Any]:
+    """Counts plus last-hour wait/run percentiles and busy workers."""
+    from app.infrastructure.queue import STALLED_SECONDS
+
     with unit_of_work(sessions, read_only=True) as session:
         rows = storage.counts(session)
+        percentiles = {row["queue"]: row for row in storage.job_percentiles(session, since_seconds)}
+        samples = {row["queue"]: row for row in storage.sample_stats(session, since_seconds)}
+        alive = storage.workers_alive(session, STALLED_SECONDS)
     queues = {
-        name: {"queue": name, "oldest_queued_seconds": None} | dict.fromkeys(STATES, 0)
+        name: {
+            "queue": name,
+            "oldest_queued_seconds": None,
+            "wait_p50_seconds": None,
+            "wait_p95_seconds": None,
+            "wait_max_seconds": None,
+            "run_p50_seconds": None,
+            "run_p95_seconds": None,
+            "run_max_seconds": None,
+            "busy_workers": 0,
+            "concurrency": 0,
+            "peak_queued": 0,
+            "saturated_seconds": 0.0,
+        }
+        | dict.fromkeys(STATES, 0)
         for name in QUEUES
     }
     for row in rows:
@@ -123,7 +147,96 @@ def health(sessions) -> dict[str, Any]:
         entry[row["state"]] = row["jobs"]
         if row["state"] == "queued" and row["oldest"] is not None:
             entry["oldest_queued_seconds"] = round(float(row["oldest"]), 1)
+    for name, entry in queues.items():
+        stats = percentiles.get(name)
+        if stats is not None:
+            entry["wait_p50_seconds"] = _seconds(stats["wait_p50"])
+            entry["wait_p95_seconds"] = _seconds(stats["wait_p95"])
+            entry["wait_max_seconds"] = _seconds(stats["wait_max"])
+            entry["run_p50_seconds"] = _seconds(stats["run_p50"])
+            entry["run_p95_seconds"] = _seconds(stats["run_p95"])
+            entry["run_max_seconds"] = _seconds(stats["run_max"])
+        sample = samples.get(name)
+        if sample is not None:
+            entry["busy_workers"] = int(sample["workers_alive"] or 0)
+            entry["concurrency"] = int(sample["concurrency"] or 0)
+            entry["peak_queued"] = int(sample["peak_queued"] or 0)
+            entry["saturated_seconds"] = float(sample["saturated_seconds"] or 0)
+        elif alive:
+            entry["busy_workers"] = int(alive)
     return {"queues": list(queues.values()), "dead": sum(q["failed"] for q in queues.values())}
+
+
+def report(sessions, *, since_seconds: float = 86400.0) -> dict[str, Any]:
+    """Totals for `craft queues report`: per queue and kind, failures, saturation."""
+    from app.infrastructure.queue import SAMPLE_SECONDS
+
+    with unit_of_work(sessions, read_only=True) as session:
+        kinds = storage.kind_stats(session, since_seconds)
+        samples = {
+            row["queue"]: row
+            for row in storage.sample_stats(session, since_seconds, SAMPLE_SECONDS)
+        }
+        percentiles = {row["queue"]: row for row in storage.job_percentiles(session, since_seconds)}
+    by_queue: dict[str, dict[str, Any]] = {}
+    for name in QUEUES:
+        sample = samples.get(name, {})
+        stats = percentiles.get(name, {})
+        by_queue[name] = {
+            "queue": name,
+            "wait_p50_seconds": _seconds(stats.get("wait_p50")),
+            "wait_p95_seconds": _seconds(stats.get("wait_p95")),
+            "wait_max_seconds": _seconds(stats.get("wait_max")),
+            "run_p50_seconds": _seconds(stats.get("run_p50")),
+            "run_p95_seconds": _seconds(stats.get("run_p95")),
+            "run_max_seconds": _seconds(stats.get("run_max")),
+            "peak_queued": int(sample.get("peak_queued") or 0),
+            "saturated_seconds": float(sample.get("saturated_seconds") or 0),
+            "workers_alive": int(sample.get("workers_alive") or 0),
+            "concurrency": int(sample.get("concurrency") or 0),
+            "kinds": {},
+            "failures": {},
+        }
+    for row in kinds:
+        entry = by_queue.setdefault(
+            row["queue"],
+            {"queue": row["queue"], "kinds": {}, "failures": {}},
+        )
+        kind = entry["kinds"].setdefault(
+            row["kind"],
+            {
+                "kind": row["kind"],
+                "jobs": 0,
+                "outcomes": {},
+                "wait_p50_seconds": None,
+                "wait_p95_seconds": None,
+                "wait_max_seconds": None,
+                "run_p50_seconds": None,
+                "run_p95_seconds": None,
+                "run_max_seconds": None,
+            },
+        )
+        kind["jobs"] += int(row["jobs"])
+        kind["outcomes"][row["outcome"]] = kind["outcomes"].get(row["outcome"], 0) + int(
+            row["jobs"]
+        )
+        # Prefer finished-job percentiles when present on this row.
+        for key, column in (
+            ("wait_p50_seconds", "wait_p50"),
+            ("wait_p95_seconds", "wait_p95"),
+            ("wait_max_seconds", "wait_max"),
+            ("run_p50_seconds", "run_p50"),
+            ("run_p95_seconds", "run_p95"),
+            ("run_max_seconds", "run_max"),
+        ):
+            value = _seconds(row[column])
+            if value is not None and kind[key] is None:
+                kind[key] = value
+        if row["outcome"] == "failed" and row["error"]:
+            entry["failures"][row["error"]] = entry["failures"].get(row["error"], 0) + int(
+                row["jobs"]
+            )
+    return {"since_seconds": since_seconds, "queues": list(by_queue.values())}
 
 
 STATES = ("queued", "scheduled", "started", "stopping", "finished", "failed", "canceled", "stopped")

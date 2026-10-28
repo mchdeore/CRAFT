@@ -86,9 +86,21 @@ def resume(caller, request):
     }
 
 
-def finish(caller, request, status, state):
+def finish(
+    caller, request, status, state, *, tool_calls=None, active_seconds=None, end_reason=None
+):
     with unit_of_work(scope(caller)) as session:
-        storage.finish(session, caller.user_id, request.run_id, request.thread_id, status, state)
+        storage.finish(
+            session,
+            caller.user_id,
+            request.run_id,
+            request.thread_id,
+            status,
+            state,
+            tool_calls=tool_calls,
+            active_seconds=active_seconds,
+            end_reason=end_reason,
+        )
 
 
 def issue_token(caller, identifier):

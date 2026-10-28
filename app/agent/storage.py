@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -35,9 +36,19 @@ agent_runs = Table(
     Column("token_expires_at", DateTime(timezone=True)),
     Column("started_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("ended_at", DateTime(timezone=True)),
+    Column("tool_calls", Integer),
+    Column("active_seconds", Float),
+    Column("end_reason", Text),
     CheckConstraint(
         "status in ('running','paused','finished','failed','cancelled')", name="status"
     ),
+    CheckConstraint(
+        "end_reason IS NULL OR end_reason IN ("
+        "'finished', 'paused', 'time_limit', 'tool_limit', 'failed', 'cancelled')",
+        name="end_reason",
+    ),
+    CheckConstraint("tool_calls IS NULL OR tool_calls >= 0", name="tool_calls"),
+    CheckConstraint("active_seconds IS NULL OR active_seconds >= 0", name="active_seconds"),
 )
 agent_sessions = Table(
     "agent_sessions",
@@ -279,7 +290,19 @@ def resume(session: Session, user, identifier):
     )
 
 
-def finish(session: Session, user, identifier, conversation, status, state):
+def finish(
+    session: Session,
+    user,
+    identifier,
+    conversation,
+    status,
+    state,
+    *,
+    tool_calls=None,
+    active_seconds=None,
+    end_reason=None,
+):
+    """End a run and record counters only (no prompts, answers or tool arguments)."""
     row = session.execute(
         select(agent_runs.c.id)
         .where(
@@ -298,16 +321,18 @@ def finish(session: Session, user, identifier, conversation, status, state):
             set_={"state": state, "updated_at": func.now()},
         )
     )
-    session.execute(
-        agent_runs.update()
-        .where(agent_runs.c.id == identifier)
-        .values(
-            status=status,
-            ended_at=func.now(),
-            token_sha256=None,
-            token_expires_at=None,
-        )
-    )
+    values = {
+        "status": status,
+        "ended_at": func.now(),
+        "token_sha256": None,
+        "token_expires_at": None,
+        "end_reason": end_reason or status,
+    }
+    if tool_calls is not None:
+        values["tool_calls"] = tool_calls
+    if active_seconds is not None:
+        values["active_seconds"] = active_seconds
+    session.execute(agent_runs.update().where(agent_runs.c.id == identifier).values(**values))
 
 
 def issue_token(session, user, identifier, digest, expires, context):

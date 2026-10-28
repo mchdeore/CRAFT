@@ -1,7 +1,17 @@
-"""The craft command: mcp, worker, operations, call, provider, users, missions and id."""
+"""The craft command: mcp, worker, queues, operations, call, provider, users, missions and id."""
 
 import argparse
+import re
 from importlib.metadata import version
+
+
+def parse_since(value: str) -> float:
+    """Turn 24h / 1h / 7d into seconds for craft queues report."""
+    match = re.fullmatch(r"(\d+)([smhd])", value.strip().lower())
+    if match is None:
+        raise argparse.ArgumentTypeError("use a duration like 24h, 1h, 30m or 7d")
+    amount, unit = int(match[1]), match[2]
+    return float(amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit])
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -13,6 +23,15 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("operations")
     worker = commands.add_parser("worker")
     worker.add_argument("--check", action="store_true", help="exit 1 without a recent heartbeat")
+    queues = commands.add_parser("queues", help="job queue measurements")
+    queues_commands = queues.add_subparsers(dest="queues_action")
+    report = queues_commands.add_parser("report", help="wait/run percentiles and saturation")
+    report.add_argument(
+        "--since",
+        type=parse_since,
+        default=parse_since("24h"),
+        help="lookback window (default 24h)",
+    )
     call = commands.add_parser("call")
     call.add_argument("operation")
     call.add_argument("--as", dest="username", required=True)
@@ -71,6 +90,25 @@ def main(argv: list[str] | None = None) -> None:
         from app.infrastructure.queue import check_worker
 
         raise SystemExit(0 if check_worker() else 1)
+    elif args.command == "queues":
+        import json
+        import sys
+
+        from app.infrastructure.config.settings import Settings
+        from app.infrastructure.database.engine import make_engine, make_sessions
+        from app.infrastructure.logging import configure_logging
+        from app.jobs.handlers import queue_report
+
+        if args.queues_action != "report":
+            parser.parse_args(["queues", "--help"])
+            raise SystemExit(2)
+        settings = Settings.from_env()
+        configure_logging(settings.log_level, sys.stderr)
+        engine = make_engine(settings)
+        try:
+            print(json.dumps(queue_report(make_sessions(engine), args.since), sort_keys=True))
+        finally:
+            engine.dispose()
     elif args.command in {"worker", "provider", "call", "users", "missions"}:
         import json
         import sys

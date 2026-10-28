@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.infrastructure import workspaces
-from app.infrastructure.errors import Conflict, InvalidInput, NotFound
+from app.infrastructure.errors import InvalidInput, NotFound
 
 
 def _target(caller) -> workspaces.JupyterTarget:
@@ -81,13 +81,10 @@ async def edit_notebook(caller, request) -> dict[str, Any]:
     return {"path": name, "cells": len(cells)}
 
 
-NOTEBOOK_RUNS = 2  # queued or running, per requester
-
-
 async def run_notebook(caller, path: str) -> dict[str, Any]:
+    """Queue a whole-notebook run; no per-person cap (sizing comes from measured concurrency)."""
     from app.infrastructure.database.unit_of_work import unit_of_work
     from app.infrastructure.operations.jobs import enqueue
-    from app.jobs.handlers import running_jobs
     from app.workspace.jobs import NotebookRunJob, notebook_run
 
     name = _name(path)
@@ -101,8 +98,6 @@ async def run_notebook(caller, path: str) -> dict[str, Any]:
     output = f"{notebook.stem}.run-{stamp}.ipynb"
     assert caller.sessions is not None
     with unit_of_work(caller.sessions) as session:
-        if running_jobs(session, notebook_run.__operation__.name, caller.user_id) >= NOTEBOOK_RUNS:
-            raise Conflict()
         job = enqueue(session, caller, notebook_run, NotebookRunJob(path=name, output=output))
     folder = str(notebook.parent) if str(notebook.parent) != "." else ""
     return {"job_id": str(job), "notebook": name, "output": f"{folder}/{output}".lstrip("/")}

@@ -63,6 +63,16 @@ class QueueCounts(Shape):
     canceled: int
     stopped: int
     oldest_queued_seconds: float | None
+    wait_p50_seconds: float | None = None
+    wait_p95_seconds: float | None = None
+    wait_max_seconds: float | None = None
+    run_p50_seconds: float | None = None
+    run_p95_seconds: float | None = None
+    run_max_seconds: float | None = None
+    busy_workers: int = 0
+    concurrency: int = 0
+    peak_queued: int = 0
+    saturated_seconds: float = 0.0
 
 
 class QueueHealth(Shape):
@@ -72,7 +82,7 @@ class QueueHealth(Shape):
 
 @operation(PUBLIC, get="/health/queue")
 def queue(caller: Caller) -> QueueHealth:
-    """Job counts per queue and state, the oldest queued job's age and the dead (failed) count."""
+    """Job counts, last-hour wait/run percentiles, busy workers and saturation."""
     from app.jobs.handlers import queue_counts
 
     assert caller.sessions is not None

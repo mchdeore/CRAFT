@@ -220,7 +220,11 @@ def prepared_run(monkeypatch, tmp_path, *, configured="owned", failure=None):
     )
     monkeypatch.setattr(runtime.conversations, "append_for_run", lambda *_: None)
     monkeypatch.setattr(runtime.service, "start", lambda *_: {})
-    monkeypatch.setattr(runtime.service, "finish", lambda *args: recorded["finished"].append(args))
+    monkeypatch.setattr(
+        runtime.service,
+        "finish",
+        lambda *args, **kwargs: recorded["finished"].append((args, kwargs)),
+    )
     monkeypatch.setattr(
         runtime, "issue_run_token", lambda *_: SimpleNamespace(token="generated-never-sent")
     )
@@ -300,7 +304,7 @@ def test_owned_workspace_lifecycle_is_closed_on_all_run_paths(monkeypatch, tmp_p
     assert [selected.name for selected in recorded["closed"]] == ["user_workspace", "craft"]
     assert all(selected._local_http.is_closed for selected in recorded["closed"])
     assert len(recorded["finished"]) == len(recorded["revoked"]) == 1
-    assert recorded["finished"][0][2] == (
+    assert recorded["finished"][0][0][2] == (
         "finished" if failure is None else "cancelled" if failure == "cancel" else "failed"
     )
     if failure is None:

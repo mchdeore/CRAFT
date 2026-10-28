@@ -409,6 +409,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     limit = min(RUN_SECONDS, caller.settings.agent_run_seconds)
     deadline = started + limit
     status = "failed"
+    end_reason = "failed"
     selected = None
     transport = None
     workspace_transport = None
@@ -650,6 +651,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                     )
                 if kind == "RUN_ERROR":
                     status = "failed"
+                    end_reason = "failed"
                     had_error = True
                     fault(value.get("code", "internal_error"))
                 if kind == "RUN_FINISHED":
@@ -699,23 +701,29 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                             }
                         agent.saved.state["craftApprovals"] = pending
                         status = "paused"
+                        end_reason = "paused"
                     else:
                         status = "failed" if had_error else "finished"
+                        end_reason = status
                     continue
                 yield msgspec.convert(value, AGUIEvent)
     except (asyncio.CancelledError, GeneratorExit):
         status = "cancelled"
+        end_reason = "cancelled"
         raise
     except TimeoutError:
         status = "failed"
+        end_reason = "time_limit"
         fault("run_timeout")
         yield AGUIEvent(type="RUN_ERROR", code="run_timeout", message="Run time limit reached.")
     except ApiError as error:
         status = "failed"
+        end_reason = "tool_limit" if error.code == "run_limit" else "failed"
         fault(error.code)
         yield AGUIEvent(type="RUN_ERROR", code=error.code, message=type(error).message)
     except Exception:
         status = "failed"
+        end_reason = "failed"
         fault("internal_error")
         yield AGUIEvent(type="RUN_ERROR", code="internal_error", message="Run failed.")
     finally:
@@ -775,13 +783,22 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                     raise ApiError() from None
                 finally:
                     try:
-                        await run_in_threadpool(
-                            service.finish,
-                            trusted,
-                            request,
-                            status,
-                            saved.to_dict() | {"craftAguiSnapshot": snapshots.snapshot},
-                        )
+                        active = elapsed + asyncio.get_running_loop().time() - started
+                        state = saved.to_dict() | {"craftAguiSnapshot": snapshots.snapshot}
+                        calls, reason = budget["calls"], end_reason
+
+                        def persist():
+                            service.finish(
+                                trusted,
+                                request,
+                                status,
+                                state,
+                                tool_calls=calls,
+                                active_seconds=active,
+                                end_reason=reason,
+                            )
+
+                        await run_in_threadpool(persist)
                     finally:
                         await run_in_threadpool(
                             revoke_run_token, trusted, RunRef(run=request.run_id)

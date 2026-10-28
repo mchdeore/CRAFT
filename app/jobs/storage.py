@@ -2,7 +2,18 @@
 
 import json
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, Table, Text, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Double,
+    Index,
+    Integer,
+    Table,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database.metadata import metadata
@@ -15,6 +26,24 @@ job_attempt_errors = Table(
     Column("error", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
 )
+
+queue_samples = Table(
+    "queue_samples",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("sampled_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("queue", Text, nullable=False),
+    Column("queued", Integer, nullable=False),
+    Column("running", Integer, nullable=False),
+    Column("workers_alive", Integer, nullable=False),
+    Column("concurrency", Integer, nullable=False),
+    Column("oldest_wait_seconds", Double),
+    CheckConstraint(
+        "queued >= 0 AND running >= 0 AND workers_alive >= 0 AND concurrency >= 1",
+        name="counts",
+    ),
+)
+Index("ix_queue_samples_queue_sampled_at", queue_samples.c.queue, queue_samples.c.sampled_at)
 
 COLUMNS = (
     "job_id, kind, queue, state, attempts, requested_by,"
@@ -104,3 +133,160 @@ def counts(session: Session):
             )
         ).mappings()
     )
+
+
+def sample_queues(session: Session, queues: list[str], concurrency: int, stalled: float) -> None:
+    """Write one sample per queue: depth, alive workers, this worker's concurrency."""
+    alive = session.execute(
+        text(
+            "select count(*) from procrastinate_workers"
+            " where last_heartbeat > now() - make_interval(secs => :stalled)"
+        ),
+        {"stalled": stalled},
+    ).scalar_one()
+    for queue in queues:
+        row = (
+            session.execute(
+                text(
+                    "select"
+                    " count(*) filter (where state = 'queued') as queued,"
+                    " count(*) filter (where state = 'started') as running,"
+                    " extract(epoch from now() - min(enqueued_at)"
+                    "   filter (where state = 'queued')) as oldest"
+                    " from job_overview where queue = :queue"
+                    "   and state in ('queued', 'started', 'stopping')"
+                ),
+                {"queue": queue},
+            )
+            .mappings()
+            .one()
+        )
+        session.execute(
+            text(
+                "insert into queue_samples"
+                " (queue, queued, running, workers_alive, concurrency, oldest_wait_seconds)"
+                " values (:queue, :queued, :running, :alive, :concurrency, :oldest)"
+            ),
+            {
+                "queue": queue,
+                "queued": int(row["queued"] or 0),
+                "running": int(row["running"] or 0),
+                "alive": int(alive),
+                "concurrency": concurrency,
+                "oldest": float(row["oldest"]) if row["oldest"] is not None else None,
+            },
+        )
+
+
+def job_percentiles(session: Session, since_seconds: float):
+    """Wait and run percentiles per queue for jobs finished in the window."""
+    return list(
+        session.execute(
+            text(
+                """
+                select queue,
+                       count(*) as jobs,
+                       percentile_cont(0.5) within group (
+                         order by wait_seconds
+                       ) as wait_p50,
+                       percentile_cont(0.95) within group (
+                         order by wait_seconds
+                       ) as wait_p95,
+                       max(wait_seconds) as wait_max,
+                       percentile_cont(0.5) within group (
+                         order by run_seconds
+                       ) as run_p50,
+                       percentile_cont(0.95) within group (
+                         order by run_seconds
+                       ) as run_p95,
+                       max(run_seconds) as run_max
+                  from job_metrics
+                 where finished_at is not null
+                   and wait_seconds is not null
+                   and run_seconds is not null
+                   and finished_at >= now() - make_interval(secs => :since)
+                 group by queue
+                """
+            ),
+            {"since": since_seconds},
+        ).mappings()
+    )
+
+
+def kind_stats(session: Session, since_seconds: float):
+    """Per queue and kind: counts, wait/run percentiles, failures by error class."""
+    return list(
+        session.execute(
+            text(
+                """
+                select queue, kind, outcome, error, count(*) as jobs,
+                       percentile_cont(0.5) within group (
+                         order by wait_seconds
+                       ) as wait_p50,
+                       percentile_cont(0.95) within group (
+                         order by wait_seconds
+                       ) as wait_p95,
+                       max(wait_seconds) as wait_max,
+                       percentile_cont(0.5) within group (
+                         order by run_seconds
+                       ) as run_p50,
+                       percentile_cont(0.95) within group (
+                         order by run_seconds
+                       ) as run_p95,
+                       max(run_seconds) as run_max
+                  from job_metrics
+                 where coalesce(finished_at, enqueued_at)
+                         >= now() - make_interval(secs => :since)
+                 group by queue, kind, outcome, error
+                """
+            ),
+            {"since": since_seconds},
+        ).mappings()
+    )
+
+
+def sample_stats(session: Session, since_seconds: float, sample_seconds: float = 30.0):
+    """Peak queued and seconds saturated (waiting while every slot was busy)."""
+    return list(
+        session.execute(
+            text(
+                """
+                with buckets as (
+                  select distinct on (
+                    queue,
+                    to_timestamp(floor(extract(epoch from sampled_at) / :step) * :step)
+                  )
+                    queue, queued, running, concurrency, workers_alive,
+                    to_timestamp(floor(extract(epoch from sampled_at) / :step) * :step) as bucket
+                  from queue_samples
+                  where sampled_at >= now() - make_interval(secs => :since)
+                  order by queue,
+                    to_timestamp(floor(extract(epoch from sampled_at) / :step) * :step),
+                    queued desc
+                )
+                select queue,
+                       max(queued) as peak_queued,
+                       coalesce(
+                         count(*) filter (
+                           where queued > 0 and running >= concurrency
+                         ), 0
+                       ) * :step as saturated_seconds,
+                       max(workers_alive) as workers_alive,
+                       max(concurrency) as concurrency
+                  from buckets
+                 group by queue
+                """
+            ),
+            {"since": since_seconds, "step": sample_seconds},
+        ).mappings()
+    )
+
+
+def workers_alive(session: Session, stalled: float) -> int:
+    return session.execute(
+        text(
+            "select count(*) from procrastinate_workers"
+            " where last_heartbeat > now() - make_interval(secs => :stalled)"
+        ),
+        {"stalled": stalled},
+    ).scalar_one()

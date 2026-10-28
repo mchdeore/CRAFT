@@ -21,8 +21,13 @@ RETIRED = {
     "queue_url",
     "queue_name",
     "dev_page",
+    # Replaced by per-queue CRAFT_WORKER_CONCURRENCY_AGENT / _INTERACTIVE / _BULK.
+    "worker_concurrency",
 }
 QUEUES = ("agent", "interactive", "bulk")
+# High default until measured; a worker always needs some concurrency number.
+DEFAULT_WORKER_CONCURRENCY = 50
+MAX_WORKER_CONCURRENCY = 1000
 
 
 class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=True):
@@ -36,7 +41,15 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     provider_token: str = ""
     process_root: str = ""
     worker_queues: str = "agent,interactive,bulk"
-    worker_concurrency: Annotated[int, msgspec.Meta(ge=1, le=100)] = 4
+    worker_concurrency_agent: Annotated[int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)] = (
+        DEFAULT_WORKER_CONCURRENCY
+    )
+    worker_concurrency_interactive: Annotated[
+        int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)
+    ] = DEFAULT_WORKER_CONCURRENCY
+    worker_concurrency_bulk: Annotated[int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)] = (
+        DEFAULT_WORKER_CONCURRENCY
+    )
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
     sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
@@ -110,6 +123,16 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
         """The worker's queues in the order given; empty when any name is unknown."""
         names = [name.strip() for name in self.worker_queues.split(",") if name.strip()]
         return names if names and set(names) <= set(QUEUES) else []
+
+    def concurrency_for(self, queues: list[str] | None = None) -> int:
+        """Jobs at once for these queues: one queue's setting, or the min when several."""
+        names = queues if queues is not None else self.queue_names()
+        values = {
+            "agent": self.worker_concurrency_agent,
+            "interactive": self.worker_concurrency_interactive,
+            "bulk": self.worker_concurrency_bulk,
+        }
+        return min(values[name] for name in names)
 
     def __repr__(self) -> str:
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"
