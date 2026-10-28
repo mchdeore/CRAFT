@@ -21,6 +21,7 @@ from agent_framework import (
 from agent_framework_ag_ui import AGUIThreadSnapshot
 from starlette.concurrency import run_in_threadpool
 
+from app.accounts.handlers import reply_language
 from app.agent import model, service
 from app.agent.approval_adapter import DurableApprovalAgent
 from app.agent.handlers import AGUIEvent, RunRef, issue_run_token, revoke_run_token
@@ -43,6 +44,7 @@ from app.infrastructure.paths import ROOT
 from app.library.handlers import ChunkText, LibraryDocument, LibraryHit
 from app.skills import native as saved_skills
 
+LANGUAGES = {"en": "English", "fr": "French"}
 RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
 _read_only_query = ContextVar("read_only_query", default=False)
@@ -183,7 +185,14 @@ class RunSnapshots:
         self.snapshot = None
 
 
-def citations(results, text):
+def source_link(handle) -> str:
+    return (
+        f"/sources/{handle.get('item')}?version={handle.get('version')}&block={handle.get('block')}"
+    )
+
+
+def citations(results, text, linked=False):
+    """Verified quotes the answer uses; with `linked`, a source link also counts (paraphrases)."""
     found = []
     chunks = []
     neighbors = []
@@ -219,7 +228,11 @@ def citations(results, text):
             if (
                 isinstance(value.get("text"), str)
                 and isinstance(value.get("handle"), dict)
-                and (text is None or value["text"] in text)
+                and (
+                    text is None
+                    or value["text"] in text
+                    or (linked and source_link(value["handle"]) in text)
+                )
                 and hashlib.sha256(value["text"].encode()).hexdigest()
                 == value["handle"].get("quoteSha256")
             ):
@@ -315,6 +328,25 @@ def citations(results, text):
     return found
 
 
+def language_instructions(language: str) -> str:
+    return f"\n\nReply language for this run: {LANGUAGES[language]}.\n"
+
+
+def originals(message_id: str, cited, language: str) -> dict | None:
+    """The English quotes behind a reply in another language; every source is English for now."""
+    if language == "en":
+        return None
+    items = []
+    for citation in cited:
+        try:
+            items.append(
+                {"handle": citation["handle"], "language": "en", "text": citation["quote"]}
+            )
+        except (KeyError, TypeError):
+            continue
+    return {"messageId": message_id, "items": items} if items else None
+
+
 async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     resuming = request.resume is not None
     newest = next(
@@ -328,6 +360,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         raise InvalidInput()
     instructions = (ROOT / "app/agent/instructions.md").read_text()
     version = hashlib.sha256(instructions.encode()).hexdigest()
+    language = await run_in_threadpool(reply_language, caller)
     ref = conversations.ConversationRef(id=request.thread_id)
     await run_in_threadpool(conversations.load_for_run, caller, ref)
     resume_payload = None
@@ -456,7 +489,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         selected = model.client(caller.settings)
         agent = StatefulAgent(
             selected,
-            instructions=instructions + workspace_instructions,
+            instructions=instructions + language_instructions(language) + workspace_instructions,
             name="craft",
             saved=saved,
             context_providers=[skills],
@@ -514,9 +547,10 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                     if not text:
                         yield msgspec.convert(value, AGUIEvent)
                         continue
+                    cited = citations(results, text, linked=language != "en")
                     answer = {
                         "messageId": value["messageId"],
-                        "citations": citations(results, text),
+                        "citations": cited,
                         "confidence": {
                             "score": 0.0,
                             "level": "low",
@@ -524,6 +558,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         },
                     }
                     yield msgspec.convert(value, AGUIEvent)
+                    found = originals(value["messageId"], cited, language)
                     activity = {
                         "id": str(uuid4()),
                         "role": "activity",
@@ -541,13 +576,14 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                             "instructionsVersion": version,
                             "skills": [dict(reference) for reference in skills.references],
                             "path": [dict(step) for step in trace],
+                            "replyLanguage": language,
+                            "originals": len(found["items"]) if found else 0,
                         },
                     }
                     output.extend(
                         [
                             {"id": value["messageId"], "role": "assistant", "content": text},
                             activity,
-                            retrieval,
                         ]
                     )
                     yield AGUIEvent(
@@ -556,6 +592,21 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         activity_type="craft.answer",
                         content=answer,
                     )
+                    if found:
+                        shown = {
+                            "id": str(uuid4()),
+                            "role": "activity",
+                            "activityType": "craft.originals",
+                            "content": found,
+                        }
+                        output.append(shown)
+                        yield AGUIEvent(
+                            type="ACTIVITY_SNAPSHOT",
+                            message_id=shown["id"],
+                            activity_type="craft.originals",
+                            content=found,
+                        )
+                    output.append(retrieval)
                     continue
                 if kind == "MESSAGES_SNAPSHOT":
                     snapshot = [

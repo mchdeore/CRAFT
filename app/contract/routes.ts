@@ -30,6 +30,7 @@ export interface Routes {
   "POST /api/session": { body: T.SignIn; response: T.Me };
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
+  "PATCH /api/me": { body: T.MeChange; response: T.Me };
   "POST /api/me/workspace-tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
   "GET /api/me/workspace-tokens": { response: T.WorkspaceToken[] };
   "DELETE /api/me/workspace-tokens/:id": { response: void };

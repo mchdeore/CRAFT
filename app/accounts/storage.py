@@ -22,7 +22,9 @@ users = Table(
     Column("display_name", Text, nullable=False),
     Column("disabled_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("language", Text, nullable=False, server_default=text("'en'")),
     CheckConstraint("username = lower(username)", name="lower_username"),
+    CheckConstraint("language IN ('en', 'fr')", name="language"),
 )
 local_credentials = Table(
     "local_credentials",
@@ -74,6 +76,16 @@ def account(session, username: str, lock: bool = False):
     if lock:
         statement = statement.with_for_update()
     return session.execute(statement).mappings().first()
+
+
+def set_language(session, user, language: str) -> None:
+    session.execute(users.update().where(users.c.id == user).values(language=language))
+
+
+def language(session, user) -> str | None:
+    from sqlalchemy import select
+
+    return session.execute(select(users.c.language).where(users.c.id == user)).scalar_one_or_none()
 
 
 def credentials(session, user):

@@ -23,6 +23,7 @@ def test_me_returns_signed_in_account(account, owner_engine) -> None:
         "username": account.username,
         "displayName": "Test",
         "roles": ["member"],
+        "language": "en",
     }
     jsonschema.validate(response.json(), typescript_schema("Me"))
     with owner_engine.begin() as connection:
@@ -53,5 +54,14 @@ def test_me_ignores_browser_identity(account) -> None:
     )
     response = account.client.get("/api/me", headers={"X-User-Id": "another", "X-Roles": "admin"})
     assert response.json()["id"] == str(account.id)
-    assert set(response.json()) == {"id", "username", "displayName", "roles"}
+    assert set(response.json()) == {"id", "username", "displayName", "roles", "language"}
     jsonschema.validate(json.load(open("app/contract/examples/me.json")), typescript_schema("Me"))
+
+
+def test_me_changes_only_the_callers_language(account) -> None:
+    login(account)
+    changed = account.client.patch("/api/me", json={"language": "fr"})
+    assert changed.status_code == 200 and changed.json()["language"] == "fr"
+    assert account.client.get("/api/me").json()["language"] == "fr"
+    assert account.client.patch("/api/me", json={"language": "de"}).status_code == 400
+    assert account.client.patch("/api/me", json={"language": "en", "id": "x"}).status_code == 400

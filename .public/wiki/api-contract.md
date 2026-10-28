@@ -105,6 +105,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/session` | `SignIn` | `Me` | public | — |
 | `DELETE /api/session` | — | `void` | signed in; live resource access | — |
 | `GET /api/me` | — | `Me` | signed in; live resource access | — |
+| `PATCH /api/me` | `MeChange` | `Me` | signed-in browser session or command line; the caller's own row only | — |
 | `POST /api/me/workspace-tokens` | `NewWorkspaceToken` | `IssuedWorkspaceToken` | signed-in browser session or command line | — |
 | `GET /api/me/workspace-tokens` | — | `WorkspaceToken[]` | signed-in browser session or command line | — |
 | `DELETE /api/me/workspace-tokens/:id` | — | `void` | signed-in browser session or command line | — |
@@ -334,6 +335,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/library/explore` | `ChunkPage` | `app/contract/examples/explore.json` |
 | `POST /api/session` | `Me` | `app/contract/examples/session.json` |
 | `GET /api/me` | `Me` | `app/contract/examples/me.json` |
+| `PATCH /api/me` | `Me` | `app/contract/examples/me.json` |
 | `POST /api/me/workspace-tokens` | `IssuedWorkspaceToken` | `app/contract/examples/workspace-token.json` |
 | `GET /api/me/workspace-tokens` | `WorkspaceToken[]` | `app/contract/examples/workspace-tokens.json` |
 | `POST /api/workspace/run` | `CodeResult` | `app/contract/examples/code-result.json` |

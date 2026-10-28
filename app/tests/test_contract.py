@@ -36,7 +36,7 @@ from app.tools.handlers import Capability, CapabilityCatalog
 def test_session_contract() -> None:
     example = json.loads(Path("app/contract/examples/session.json").read_text())
     body = msgspec.convert(example, Me)
-    assert set(msgspec.to_builtins(body)) == {"id", "username", "displayName", "roles"}
+    assert set(msgspec.to_builtins(body)) == {"id", "username", "displayName", "roles", "language"}
     assert set(msgspec.structs.fields(SignIn)[n].encode_name for n in [0, 1]) == {
         "username",
         "password",
@@ -157,12 +157,14 @@ def validate_chat_events(events) -> bool:
     )
     if checked.returncode != 0:
         return False
-    schema = typescript_schema("AnswerMeta")
-    validator = jsonschema.Draft7Validator(schema)
+    shapes = {"craft.answer": "AnswerMeta", "craft.originals": "AnswerOriginals"}
+    validators = {
+        kind: jsonschema.Draft7Validator(typescript_schema(shape)) for kind, shape in shapes.items()
+    }
     return all(
-        validator.is_valid(event["content"])
+        validators[event["activityType"]].is_valid(event["content"])
         for event in events
-        if event.get("activityType") == "craft.answer"
+        if event.get("activityType") in validators
     )
 
 
