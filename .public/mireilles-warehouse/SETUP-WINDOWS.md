@@ -3,7 +3,7 @@
 Do this once per computer.
 
 1. Open **Terminal** (or PowerShell) from the Start menu and run these one at a time, pressing Enter after each. Say yes to any prompts.
-   - `winget install Git.Git` (Git keeps track of your files)
+   - `winget install Git.Git` (Git keeps track of your files; Git is not an npm package)
    - `winget install Microsoft.VisualStudioCode` (the editor)
    - `winget install OpenJS.NodeJS.LTS` (Node.js and npm, for your projects)
    - Optional: `winget install GitHub.cli`, then `gh auth login` and follow the prompts

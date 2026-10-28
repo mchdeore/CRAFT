@@ -12,9 +12,9 @@ This folder is where Mireille shares things she has built, so Marc can see what 
 
 ## Put it on main
 
-1. On GitHub, open the CRAFT repository. A yellow banner shows your branch: press **Compare & pull request**, then **Create pull request**.
+1. Open https://github.com/mchdeore/CRAFT . A yellow banner shows your branch: press **Compare & pull request**, then **Create pull request**.
 2. Press **Squash and merge**, then **Confirm**. There are no checks to wait for.
-3. Back in VS Code, click the branch name in the bottom-left and switch to `main`.
+3. Back in VS Code, click the branch name in the bottom-left, switch to `main`, then press **Sync Changes**.
 
 ## Everything here is public
 
