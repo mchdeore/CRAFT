@@ -1,0 +1,6 @@
+apiVersion: v2
+name: craft
+description: CRAFT's API, workers, craft-id and (locally) PostgreSQL
+type: application
+version: 0.1.0
+appVersion: local

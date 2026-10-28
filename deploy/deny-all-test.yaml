@@ -1,0 +1,8 @@
+# Test only (deploy/README.md): denies all traffic into every pod in its namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]

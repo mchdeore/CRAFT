@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Load the frozen dataset (the library index and the datacube as of 2026-10-21) into an empty
 # database and provider folder. No model calls: the data is restored, never rebuilt.
-#   scripts/seed    restore .local/seed/cube-v1 into the compose db, then apply newer migrations
+#   scripts/seed           restore .local/seed/cube-v1 into the compose db, then apply newer migrations
+#   scripts/seed cluster   the same into the database on 127.0.0.1:$CRAFT_DATABASE_PORT, such as the
+#                          local cluster's through kubectl port-forward (deploy/README.md); needs psql
 # The frozen set is private (never committed): craft_dev.dump, provider.tgz and embedding.
 # To start over: docker compose down -v, remove the provider folder, run this again.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+mode=${1:-compose}
+[ "$mode" = compose ] || [ "$mode" = cluster ] || { echo "usage: scripts/seed [cluster]" >&2; exit 2; }
 [ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
 export DOCKER_CONTEXT=${DOCKER_CONTEXT:-colima} UV_NO_PROGRESS=1
 # .env fills in what the environment does not already set.
@@ -28,13 +32,19 @@ if [ -n "$(ls -A "$PROVIDER" 2>/dev/null)" ]; then
   echo "$PROVIDER is not empty; remove it first" >&2; exit 1
 fi
 
-docker compose up -d --wait db >/dev/null
-tables=$(docker compose exec -T db psql -U postgres -d "$DATABASE" -Atc \
+if [ "$mode" = cluster ]; then
+  export PGHOST=127.0.0.1 PGPORT=${CRAFT_DATABASE_PORT:-5432} PGPASSWORD=$CRAFT_DB_ADMIN_PASSWORD
+  admin() { "$@"; }
+else
+  docker compose up -d --wait db >/dev/null
+  admin() { docker compose exec -T db "$@"; }
+fi
+tables=$(admin psql -U postgres -d "$DATABASE" -Atc \
   "select count(*) from pg_tables where schemaname = 'public'")
 [ "$tables" = 0 ] || { echo "$DATABASE already has tables; run docker compose down -v first" >&2; exit 1; }
 
 echo "Restoring the frozen database into $DATABASE"
-docker compose exec -T db pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
+admin pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
 echo "Restoring the provider files into $PROVIDER"
 unpacked=$(mktemp -d)
 tar -xzf "$SEED/provider.tgz" -C "$unpacked"

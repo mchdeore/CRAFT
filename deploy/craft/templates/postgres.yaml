@@ -1,0 +1,67 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-initdb
+data:
+  10-craft.sh: |
+    {{- .Files.Get "initdb.sh" | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
+spec:
+  serviceName: {{ .Release.Name }}-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
+    spec:
+      # No service-link variables: services named craft-* would add unknown CRAFT_* settings.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          env:
+            {{- range $name, $key := dict "POSTGRES_PASSWORD" "CRAFT_DB_ADMIN_PASSWORD" "CRAFT_OWNER_DB_PASSWORD" "CRAFT_OWNER_DB_PASSWORD" "CRAFT_APP_DB_PASSWORD" "CRAFT_APP_DB_PASSWORD" "CRAFT_ID_DB_PASSWORD" "CRAFT_ID_DB_PASSWORD" }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.secret }}, key: {{ $key }}, optional: {{ eq $key "CRAFT_ID_DB_PASSWORD" }} }
+            {{- end }}
+          ports: [{ name: postgres, containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql }    # the PostgreSQL 18 image's path
+            - { name: initdb, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+          # TCP, as compose: not ready during initdb, which listens on the socket only.
+          readinessProbe:
+            exec: { command: [pg_isready, -U, postgres, -h, localhost] }
+            periodSeconds: 2
+          livenessProbe:
+            exec: { command: [pg_isready, -U, postgres, -h, localhost] }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            limits: { memory: {{ .Values.postgres.memory }} }
+            requests: { memory: {{ .Values.memoryRequest }} }
+      volumes:
+        - name: initdb
+          configMap: { name: {{ .Release.Name }}-initdb, defaultMode: 0555 }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: {{ .Values.postgres.storage }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-postgres
+spec:
+  selector: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports: [{ name: postgres, port: 5432, targetPort: postgres }]
+{{- end }}

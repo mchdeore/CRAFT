@@ -1,0 +1,1 @@
+../../app/infrastructure/database/initdb.sh
