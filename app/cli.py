@@ -165,6 +165,8 @@ def main(argv: list[str] | None = None) -> None:
                 changes, cursor = provider.list_changes(0)
                 print(json.dumps({"changes": changes, "cursor": cursor}))
         else:
+            import asyncio
+            import inspect
             from dataclasses import replace
 
             from app.infrastructure.mcp.stdio import local_caller
@@ -229,7 +231,12 @@ def main(argv: list[str] | None = None) -> None:
                 operation = registry.get(args.operation)
                 if operation is None:
                     parser.error("unknown operation")
-                result = operation.function(caller, msgspec.json.decode(args.arguments))
+                if operation.input is None:
+                    result = operation.function(caller)
+                else:
+                    result = operation.function(caller, msgspec.json.decode(args.arguments))
+                if inspect.iscoroutine(result):
+                    result = asyncio.run(result)
                 print(msgspec.json.encode(result).decode())
     else:
         parser.print_help()
