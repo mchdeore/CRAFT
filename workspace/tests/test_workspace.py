@@ -373,23 +373,30 @@ def test_workbook_and_slides_get_native_charts_from_a_vega_lite_spec(tmp_path, m
 def test_pages_and_preview_render_with_libreoffice_in_the_workspace_image():
     import docker
 
+    # Guarded like the kernel, so page rendering is checked where the agent runs it.
     script = """
 import asyncio, os
+import craft_guard
+assert craft_guard.installed()
 from docx import Document
-from craft import docs
+import craft
 import craft_preview
 document = Document(); document.add_heading("Preview", 0); document.add_paragraph("Generated.")
 document.save("/workspace/memo.docx")
 pdf = asyncio.run(craft_preview.preview("memo.docx"))
 assert pdf.startswith(b"%PDF") and asyncio.run(craft_preview.preview("memo.docx")) == pdf
-pages = docs.pages("memo.docx")
+pages = craft.preview("memo.docx")
 assert len(pages) == 1 and pages[0]._repr_png_().startswith(b"\\x89PNG")
+report = craft.check()
+assert all(report[part].startswith("ok") for part in
+           ("LibreOffice", "Poppler", "Fonts", "Python libraries")), report
 print("ok")
 """
     client = docker.from_env(timeout=120)
     output = client.containers.run(
         "craft-user-workspace:local-pilot",
         ["python", "-c", script],
+        environment={"CRAFT_GUARD": "1"},
         remove=True,
         network_disabled=True,
         read_only=True,

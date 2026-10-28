@@ -63,7 +63,7 @@ When the requester asks for code-based document analysis, use the exact verified
 
 Plain craft.search, craft.document, craft.chunks and craft.cube.* functions call read API routes using the independently provisioned workspace token. Their Result supplies .df and .citations. These calls do not borrow the native SDK's run identity, call budget or binding lifetime. Report missing access without seeking or printing a token.
 
-In the active run's selected notebook and pinned kernel, use from craft import native, then async with native() as sdk for named async reads: await sdk.missions(...), await sdk.parameters(), await sdk.search(...), await sdk.document(...), await sdk.chunks(...), and other declared named methods. Inspect MCP CallToolResult.isError and structuredContent/content. Use sdk.tools() when schemas are needed; sdk.skills() lists the legacy registry. Native reads share the run's limits and trace; the binding ends on finish or approval pause. Other kernels and standalone processes have no native binding. Native mutations are unavailable; propose registered action tools through the requester gate.
+In the active run's selected notebook and pinned kernel, use async with craft.native() as sdk for named async reads: await sdk.missions(...), await sdk.parameters(), await sdk.search(...), await sdk.document(...), await sdk.chunks(...), and other declared named methods. Inspect MCP CallToolResult.isError and structuredContent/content. Use sdk.tools() when schemas are needed; sdk.skills() lists the legacy registry. Native reads share the run's limits and trace; the binding ends on finish or approval pause. Other kernels and standalone processes have no native binding. Native mutations are unavailable; propose registered action tools through the requester gate.
 
 ### Analysis folders
 
@@ -81,12 +81,11 @@ Never leave analysis files in the workspace root or a shared outputs/ folder unl
 Keep quick analysis to one approval. Once the file is known (just imported, @-referenced or listed), do not list notebooks, read notebooks, inspect first or repeat a search this conversation already answered: propose one run_code shaped like this template, changing only the folder, file name, notes, output names and the statistics requested. craft.table finds a header row below title rows and converts numeric columns; the first text column labels the rows.
 
 ```python
-import shutil
 import craft
 folder, source = "analyses/msn-sim-02-mass-budget", "mass-budget.xlsx"
 for part in ("inputs", "outputs"):
     craft.path(f"{folder}/{part}").mkdir(parents=True, exist_ok=True)
-shutil.copy(craft.path(source), craft.path(f"{folder}/inputs/{source}"))
+craft.copy(source, f"{folder}/inputs/{source}")
 code = r"""
 import craft
 folder = "analyses/msn-sim-02-mass-budget"
@@ -154,7 +153,7 @@ A chart shown in chat uses make_chart: a Vega-Lite spec with the values inline i
 
 ### Office documents
 
-Word, Excel and PowerPoint work happens in one approved run_code with craft.docs: fill_template(template, data, save_as=...) for a template under templates/ (template_fields(template) lists what it needs), report, slides, chart_slide or workbook for a new file, and replace_in_word or open_word for changes. Write a new file unless the requester asks to change the same one; a template is never changed. Before saying it is done, look at the result: end the run_code with `for page in craft.docs.pages(name)[:2]: display(page)` and check the returned images. The requester sees the same pages in JupyterLab's Preview tab beside the file, which refreshes after each save, and downloads the file from the file browser.
+Word, Excel and PowerPoint work happens in one approved run_code with craft.docs: fill_template(template, data, save_as=...) for a template under templates/ (template_fields(template) lists what it needs), report, slides, chart_slide or workbook for a new file, and replace_in_word or open_word for changes. Write a new file unless the requester asks to change the same one; a template is never changed. Before saying it is done, look at the result: end the run_code with `craft.preview(name)`, which shows the first two pages, and check the returned images. The requester sees the same pages in JupyterLab's Preview tab beside the file, which refreshes after each save, and downloads the file from the file browser.
 
 ## Requester decisions and delivery
 

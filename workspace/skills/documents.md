@@ -40,6 +40,7 @@ craft.docs.report(
 )
 craft.docs.slides("outputs/summary.pptx", "Mass summary", ("Findings", "Mission 01 is lightest"), ("Table", table))
 craft.excel("outputs/summary.xlsx", Summary=table, Detail=detail)
+craft.preview("outputs/summary.docx")   # shows the first two pages
 ```
 
-After saving, tell the person each file name and what it holds.
+After saving, tell the person each file name and what it holds. `craft.check()` says whether LibreOffice, Poppler and the fonts that rendering needs are installed.

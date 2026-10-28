@@ -286,15 +286,11 @@ name = "craft-user-workspace"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "httpx" },
-    { name = "mcp" },
-]
-
-[package.optional-dependencies]
-analysis = [
     { name = "docxtpl" },
     { name = "duckdb" },
+    { name = "httpx" },
     { name = "matplotlib" },
+    { name = "mcp" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -309,7 +305,9 @@ analysis = [
     { name = "sympy" },
     { name = "vl-convert-python" },
 ]
-lab = [
+
+[package.optional-dependencies]
+all = [
     { name = "ipykernel" },
     { name = "jupyter-collaboration" },
     { name = "jupyter-server" },
@@ -324,31 +322,31 @@ build = [
 
 [package.metadata]
 requires-dist = [
-    { name = "docxtpl", marker = "extra == 'analysis'", specifier = "==0.20.1" },
-    { name = "duckdb", marker = "extra == 'analysis'", specifier = "==1.5.6" },
+    { name = "docxtpl", specifier = "==0.20.1" },
+    { name = "duckdb", specifier = "==1.5.6" },
     { name = "httpx", specifier = "==0.28.1" },
-    { name = "ipykernel", marker = "extra == 'lab'", specifier = "==6.29.5" },
-    { name = "jupyter-collaboration", marker = "extra == 'lab'", specifier = "==5.0.4" },
-    { name = "jupyter-server", marker = "extra == 'lab'", specifier = "==2.21.1" },
-    { name = "jupyter-server-nbmodel", marker = "extra == 'lab'", specifier = "==0.2.9" },
-    { name = "jupyterlab", marker = "extra == 'lab'", specifier = "==4.6.4" },
-    { name = "matplotlib", marker = "extra == 'analysis'", specifier = "==3.11.2" },
+    { name = "ipykernel", marker = "extra == 'all'", specifier = "==6.29.5" },
+    { name = "jupyter-collaboration", marker = "extra == 'all'", specifier = "==5.0.4" },
+    { name = "jupyter-server", marker = "extra == 'all'", specifier = "==2.21.1" },
+    { name = "jupyter-server-nbmodel", marker = "extra == 'all'", specifier = "==0.2.9" },
+    { name = "jupyterlab", marker = "extra == 'all'", specifier = "==4.6.4" },
+    { name = "matplotlib", specifier = "==3.11.2" },
     { name = "mcp", specifier = "==1.30.0" },
-    { name = "numpy", marker = "extra == 'analysis'", specifier = "==2.5.4" },
-    { name = "openpyxl", marker = "extra == 'analysis'", specifier = "==3.1.5" },
-    { name = "pandas", marker = "extra == 'analysis'", specifier = "==3.0.6" },
-    { name = "pint", marker = "extra == 'analysis'", specifier = "==0.26.2" },
-    { name = "pyarrow", marker = "extra == 'analysis'", specifier = "==26.0.0" },
-    { name = "pypdf", marker = "extra == 'analysis'", specifier = "==6.21.1" },
-    { name = "python-docx", marker = "extra == 'analysis'", specifier = "==1.2.0" },
-    { name = "python-pptx", marker = "extra == 'analysis'", specifier = "==1.0.2" },
-    { name = "scikit-learn", marker = "extra == 'analysis'", specifier = "==1.9.1" },
-    { name = "scipy", marker = "extra == 'analysis'", specifier = "==1.18.1" },
-    { name = "statsmodels", marker = "extra == 'analysis'", specifier = "==0.15.0" },
-    { name = "sympy", marker = "extra == 'analysis'", specifier = "==1.14.0" },
-    { name = "vl-convert-python", marker = "extra == 'analysis'", specifier = "==1.9.0.post1" },
+    { name = "numpy", specifier = "==2.5.4" },
+    { name = "openpyxl", specifier = "==3.1.5" },
+    { name = "pandas", specifier = "==3.0.6" },
+    { name = "pint", specifier = "==0.26.2" },
+    { name = "pyarrow", specifier = "==26.0.0" },
+    { name = "pypdf", specifier = "==6.21.1" },
+    { name = "python-docx", specifier = "==1.2.0" },
+    { name = "python-pptx", specifier = "==1.0.2" },
+    { name = "scikit-learn", specifier = "==1.9.1" },
+    { name = "scipy", specifier = "==1.18.1" },
+    { name = "statsmodels", specifier = "==0.15.0" },
+    { name = "sympy", specifier = "==1.14.0" },
+    { name = "vl-convert-python", specifier = "==1.9.0.post1" },
 ]
-provides-extras = ["analysis", "lab"]
+provides-extras = ["all"]
 
 [package.metadata.requires-dev]
 build = [{ name = "setuptools", specifier = "==80.9.0" }]

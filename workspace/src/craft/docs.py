@@ -7,7 +7,7 @@ are read-only; import a personal copy before editing it.
 from pathlib import Path
 from typing import Any
 
-from craft import _root, files
+from craft import _root, files, system
 
 _EDITABLE_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xlsm", ".docx", ".pptx", ".ipynb", ".md", ".txt"}
 
@@ -433,8 +433,10 @@ class Page:
 
 
 def to_pdf(name: str | Path, *, timeout: float = 120) -> bytes:
-    """A Word, Excel or PowerPoint file as PDF bytes, rendered by LibreOffice offline."""
-    import subprocess
+    """A Word, Excel or PowerPoint file as PDF bytes, rendered by LibreOffice offline.
+
+    Without LibreOffice this raises ``craft.MissingSoftware`` saying what to install.
+    """
     import tempfile
 
     source = files.path(name)
@@ -443,20 +445,16 @@ def to_pdf(name: str | Path, *, timeout: float = 120) -> bytes:
     with tempfile.TemporaryDirectory() as out:
         # A persistent profile keeps later conversions warm.
         profile = Path(tempfile.gettempdir(), "craft-office-profile").as_uri()
-        subprocess.run(
-            [
-                "soffice",
-                f"-env:UserInstallation={profile}",
-                "--headless",
-                "--norestore",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                out,
-                str(source),
-            ],
-            check=True,
-            capture_output=True,
+        system.run(
+            "soffice",
+            f"-env:UserInstallation={profile}",
+            "--headless",
+            "--norestore",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            out,
+            str(source),
             timeout=timeout,
         )
         return Path(out, source.stem + ".pdf").read_bytes()
@@ -465,27 +463,35 @@ def to_pdf(name: str | Path, *, timeout: float = 120) -> bytes:
 def pages(name: str | Path, *, first: int = 1, last: int | None = None, dpi: int = 80) -> list:
     """Render pages of an Office or PDF file as PNG images to look at.
 
-    ``display(page)`` shows one in the notebook, and a run_code result passes up to
-    two shown images back to the agent.
+    ``craft.show(page)`` shows one in the notebook, and a run_code result passes up
+    to two shown images back to the agent. Without LibreOffice (Office files) or
+    Poppler this raises ``craft.MissingSoftware`` saying what to install.
     """
-    import subprocess
     import tempfile
 
     source = files.path(name)
+    system.find("pdftoppm")  # fail before a slow Office conversion
     pdf = source.read_bytes() if source.suffix.lower() == ".pdf" else to_pdf(name)
     with tempfile.TemporaryDirectory() as out:
         Path(out, "in.pdf").write_bytes(pdf)
-        command = ["pdftoppm", "-png", "-r", str(dpi), "-f", str(first)]
+        options = ["-png", "-r", str(dpi), "-f", str(first)]
         if last is not None:
-            command += ["-l", str(last)]
-        subprocess.run(
-            command + [str(Path(out, "in.pdf")), str(Path(out, "page"))],
-            check=True,
-            capture_output=True,
-            timeout=120,
+            options += ["-l", str(last)]
+        system.run(
+            "pdftoppm", *options, str(Path(out, "in.pdf")), str(Path(out, "page")), timeout=120
         )
         images = sorted(Path(out).glob("page-*.png"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
         return [Page(int(image.stem.rsplit("-", 1)[1]), image.read_bytes()) for image in images]
+
+
+def preview(name: str | Path, *, count: int = 2) -> list:
+    """Show the first pages of an Office or PDF file in the notebook and return them.
+
+    Ending a run_code with ``craft.preview(name)`` passes the shown pages back to the agent.
+    """
+    shown = pages(name, last=count)
+    files.show(*shown)
+    return shown
 
 
 def _spec_series(spec: dict[str, Any]) -> tuple[str, str, list[dict[str, Any]], str]:
