@@ -95,11 +95,10 @@ async def save_chart(caller, request) -> dict[str, Any]:
 async def edit_notebook(caller, request) -> dict[str, Any]:
     name = _name(request.path)
     target = await _target(caller)
-    try:
-        notebook = await workspaces.read_notebook(target, name)
-    except Exception:
+    notebook = await workspaces.read_notebook(target, name)
+    if notebook is None:
         if request.action != "insert" or request.index != 0:
-            raise NotFound() from None
+            raise NotFound()
         notebook = {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
     cells = notebook.setdefault("cells", [])
     limit = len(cells) if request.action == "insert" else len(cells) - 1
@@ -132,10 +131,8 @@ async def run_notebook(caller, path: str) -> dict[str, Any]:
 
     name = _name(path)
     target = await _target(caller)
-    try:
-        await workspaces.read_notebook(target, name)
-    except Exception:
-        raise NotFound() from None
+    if await workspaces.read_notebook(target, name) is None:
+        raise NotFound()
     notebook = PurePosixPath(name)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     output = f"{notebook.stem}.run-{stamp}.ipynb"

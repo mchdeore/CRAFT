@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import replace
 from uuid import uuid4
 
+import httpx
 import msgspec
 import pytest
 
@@ -17,15 +18,17 @@ from app.approvals.handlers import (
 )
 from app.approvals.tests.test_decisions import context as context
 from app.infrastructure import hub, workspaces
-from app.infrastructure.errors import Forbidden, InvalidInput
+from app.infrastructure.errors import ApiError, Forbidden, InvalidInput, NotFound
 from app.infrastructure.operations.pipeline import ApprovalRequired
 from app.workspace.handlers import (
     EditNotebook,
     RunCode,
+    RunNotebook,
     SaveChart,
     WriteFile,
     edit_notebook,
     run_code,
+    run_notebook,
     save_chart,
 )
 from app.workspace.handlers import write_file as write_file_operation
@@ -56,9 +59,10 @@ def workspace(monkeypatch, context):
         return {}
 
     async def read_nb(target, path):
-        if path not in files:
-            raise FileNotFoundError(path)
-        return files[path]
+        if path == "outage.ipynb":
+            request = httpx.Request("GET", "http://jupyter/" + path)
+            raise httpx.HTTPStatusError("down", request=request, response=httpx.Response(503))
+        return files.get(path)
 
     async def write_nb(target, path, notebook):
         calls.append(("notebook", path, len(notebook["cells"])))
@@ -199,6 +203,21 @@ def test_notebook_cells_insert_replace_and_delete(context, workspace):
     with pytest.raises(InvalidInput):
         edit(action="delete", index=5)
     assert edit(action="delete", index=1).cells == 1
+
+
+def test_a_workspace_outage_is_not_a_missing_notebook(context, workspace):
+    calls, _ = workspace
+    own = replace(context["caller"], origin="http")
+    with pytest.raises(NotFound):
+        asyncio.run(edit_notebook(own, EditNotebook(path="gone.ipynb", action="delete", index=0)))
+    with pytest.raises(NotFound):
+        asyncio.run(run_notebook(own, RunNotebook(path="gone.ipynb")))
+    outage = EditNotebook(path="outage.ipynb", action="insert", index=0)
+    for call in (run_notebook(own, RunNotebook(path=outage.path)), edit_notebook(own, outage)):
+        with pytest.raises(ApiError) as error:  # a 500, not a 404, and nothing written
+            asyncio.run(call)
+        assert error.value.status == 500
+    assert calls == []
 
 
 def test_direct_workspace_tools_are_read_only():
