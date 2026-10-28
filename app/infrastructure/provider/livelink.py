@@ -60,18 +60,16 @@ class LiveLinkProvider:
         if entry is None:
             raise KeyError("unknown version")
         address = f"nodes/{node_id(item)}/versions/{version}/content"
-        try:
-            with self.http.stream("GET", address) as response:
-                if response.status_code in {403, 404}:
-                    raise KeyError("unreadable version")
-                response.raise_for_status()
-                content = b""
-                for chunk in response.iter_bytes():
-                    content += chunk
-                    if max_bytes is not None and len(content) > max_bytes:
-                        raise ValueError("Source exceeds configured byte limit.")
-        except httpx.HTTPError:
-            raise FileNotFoundError(item) from None
+        # 403 and 404 mean unreadable; an outage or any other status stays an error.
+        with self.http.stream("GET", address) as response:
+            if response.status_code in {403, 404}:
+                raise KeyError("unreadable version")
+            response.raise_for_status()
+            content = b""
+            for chunk in response.iter_bytes():
+                content += chunk
+                if max_bytes is not None and len(content) > max_bytes:
+                    raise ValueError("Source exceeds configured byte limit.")
         if hashlib.sha256(content).hexdigest() != entry["sha256"]:
             raise KeyError("changed version")  # versions are immutable; changed bytes withdraw it
         return content

@@ -82,7 +82,7 @@ def test_a_withdrawn_version_is_unreadable(source, folder):
 
 def test_the_api_refuses_a_wrong_ticket_and_a_denied_node(folder):
     item = the_item(SimulatedProvider(folder))["item"]
-    with pytest.raises((KeyError, FileNotFoundError)):
+    with pytest.raises(httpx.HTTPStatusError):  # an error, not a missing document
         livelink(folder, ticket="wrong").read_content(item, 1)
     with pytest.raises(KeyError):
         livelink(folder, denied={node_id(item)}).read_content(item, 1)
