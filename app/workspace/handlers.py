@@ -63,6 +63,16 @@ class SavedChart(Shape):
     csv: str
 
 
+class RunNotebook(Shape):
+    path: Annotated[str, msgspec.Meta(min_length=1, max_length=255, pattern=r"\.ipynb$")]
+
+
+class NotebookRunQueued(Shape):
+    job_id: str
+    notebook: str
+    output: str
+
+
 class SavedFile(Shape):
     path: str
     size: int
@@ -111,3 +121,9 @@ async def save_chart(caller: Caller, request: SaveChart) -> SavedChart:
 async def edit_granted_notebook(caller: Caller, request: EditNotebook) -> EditedNotebook:
     """Change a cell of a notebook already granted in this conversation, without asking again."""
     return EditedNotebook(**await service.edit_notebook(caller, request))
+
+
+@operation(SIGNED_IN, post="/workspace/notebooks/runs", tool=True, effects=EXTERNAL)
+async def run_notebook(caller: Caller, request: RunNotebook) -> NotebookRunQueued:
+    """Run a whole notebook unattended in a sandbox after approval; the original is unchanged."""
+    return NotebookRunQueued(**await service.run_notebook(caller, request.path))

@@ -48,6 +48,8 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     agent_run_seconds: Annotated[int, msgspec.Meta(ge=30, le=900)] = 120
     wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"
+    # Whole-notebook runs start this workspace image in a sandbox with no network.
+    notebook_image: str = "craft-user-workspace:local"
     # Sign-in: craft-id now, Entra later. Only these three settings change at the switch.
     oidc_authority: str = ""
     oidc_client_id: str = ""

@@ -24,6 +24,9 @@ export interface SaveChart { name: string; spec: Record<string, unknown>; title?
 export interface SavedChart { svg: string; spec: string; csv: string }
 export interface EditNotebook { path: string; action: "insert" | "replace" | "delete"; index: number; source?: string; cellType?: "code" | "markdown" }
 export interface EditedNotebook { path: string; cells: number }
+export interface RunNotebook { path: string }
+/** The run is a background job (`GET /api/jobs/:jobId`); `output` is the executed copy it writes beside the notebook. */
+export interface NotebookRunQueued { jobId: string; notebook: string; output: string }
 export interface Mission { key: string; title: string; currentStage: string; aliases: string[]; simulated: boolean }
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }

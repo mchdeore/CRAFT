@@ -45,6 +45,7 @@ export interface Routes {
   "POST /api/workspace/charts": { body: T.SaveChart; response: T.SavedChart };
   "POST /api/workspace/notebooks/run": { body: T.GrantedRun; response: T.CodeResult };
   "POST /api/workspace/notebooks/edit-granted": { body: T.EditNotebook; response: T.EditedNotebook };
+  "POST /api/workspace/notebooks/runs": { body: T.RunNotebook; response: T.NotebookRunQueued };
   "GET /api/cube/missions": { query: {query?: string; limit?: number}; response: T.Mission[] };
   "GET /api/cube/parameters": { response: T.Parameter[] };
   "POST /api/cube/find": { body: T.FindMissions; response: T.FoundMissions };

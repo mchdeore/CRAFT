@@ -120,6 +120,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/workspace/charts` | `SaveChart` | `SavedChart` | signed in; own workspace; requester approval when called by the agent | `save_chart` |
 | `POST /api/workspace/notebooks/run` | `GrantedRun` | `CodeResult` | signed in; own workspace; a notebook grant when called by the agent | `run_in_granted_notebook` |
 | `POST /api/workspace/notebooks/edit-granted` | `EditNotebook` | `EditedNotebook` | signed in; own workspace; a notebook grant when called by the agent | `edit_granted_notebook` |
+| `POST /api/workspace/notebooks/runs` | `RunNotebook` | `NotebookRunQueued` | signed in; own workspace; requester approval when called by the agent; at most two at once | `run_notebook` |
 | `GET /api/cube/missions` | —; query `{query?: string; limit?: number}` | `Mission[]` | signed in; live resource access | `list_missions` |
 | `GET /api/cube/parameters` | — | `Parameter[]` | signed in; live resource access | `list_parameters` |
 | `POST /api/cube/find` | `FindMissions` | `FoundMissions` | signed in; live resource access | `find_missions` |
@@ -198,6 +199,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `run_code` | `POST /api/workspace/run` | `RunCode` | `EXTERNAL` |
 | `save_chart` | `POST /api/workspace/charts` | `SaveChart` | `EXTERNAL` |
 | `run_in_granted_notebook` | `POST /api/workspace/notebooks/run` | `GrantedRun` | `EXTERNAL` |
+| `run_notebook` | `POST /api/workspace/notebooks/runs` | `RunNotebook` | `EXTERNAL` |
 | `search` | `POST /api/library/search` | `LibrarySearch` | `NONE` |
 | `similar_missions` | `POST /api/cube/similar` | `SimilarMissions` | `NONE` |
 | `write_file` | `PUT /api/workspace/files` | `WriteFile` | `EXTERNAL` |
@@ -357,6 +359,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/workspace/charts` | `SavedChart` | `app/contract/examples/saved-chart.json` |
 | `POST /api/workspace/notebooks/run` | `CodeResult` | `app/contract/examples/code-result.json` |
 | `POST /api/workspace/notebooks/edit-granted` | `EditedNotebook` | `app/contract/examples/edited-notebook.json` |
+| `POST /api/workspace/notebooks/runs` | `NotebookRunQueued` | `app/contract/examples/notebook-run.json` |
 | `GET /api/cube/missions` | `Mission[]` | `app/contract/examples/missions.json` |
 | `GET /api/cube/parameters` | `Parameter[]` | `app/contract/examples/parameters.json` |
 | `POST /api/cube/find` | `FoundMissions` | `app/contract/examples/found-missions.json` |
