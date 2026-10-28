@@ -130,7 +130,7 @@ services:
     network_mode: "service:app"
     environment: *app_environment
     volumes: *provider_mount
-    command: ["craft", "mcp", "--as", "${CRAFT_MCP_ACCOUNT:-demo}"]
+    command: ["craft", "mcp", "--as", "${CRAFT_MCP_ACCOUNT:-analyst}"]
     depends_on:
       app:
         condition: service_healthy

@@ -6,7 +6,7 @@ CRAFT uses a stable application user to own conversations, credentials and perso
 
 ## What is standard
 
-There is no standard SQL schema covering users, passwords, workspaces, tools and MCP. OpenID Connect defines login identity, OAuth defines delegated access, SCIM defines provisioning resources, and MCP defines tool communication. Mature systems demonstrate useful relationships rather than one schema to copy.
+There is no standard SQL schema covering users, passwords, workspaces, tools and MCP. OpenID Connect defines login identity, OAuth defines delegated access, SCIM defines provisioning resources, and MCP defines tool communication. Mature systems show useful relationships rather than one schema to copy.
 
 The common pattern is a stable user with separate credentials, sessions and owned resources. Django supports users, roles and sessions; Ory separates identity traits, credentials and sessions; JupyterHub keeps a user independently of their running server. Their tables and operational responsibilities differ. CRAFT can use the pattern without adopting those frameworks.
 
@@ -49,7 +49,7 @@ Keep `.py`, `.ipynb`, `skills/*.md`, imports and outputs in that workspace's vol
 
 This is the target relationship model, not an implemented SQL schema. Solid links show the core ownership design; dashed boxes show additions contingent on the features described below. `USER_ROOT` is filesystem storage, not another table.
 
-Workspace children normally need only `workspace_id`: derive the owner through their parent. If a child stores both workspace and user IDs, enforce the pair with a composite foreign key to a unique `(workspace.id, workspace.owner_user_id)`. Use the same mechanism for run/conversation and approval/run relationships where scope is duplicated. CRAFT's `skill_revisions` already demonstrates an owner-preserving composite FK. Required scope columns must be non-null; separate FKs on two IDs allow mismatched pairs.
+Workspace children normally need only `workspace_id`: derive the owner through their parent. If a child stores both workspace and user IDs, enforce the pair with a composite foreign key to a unique `(workspace.id, workspace.owner_user_id)`. Use the same mechanism for run/conversation and approval/run relationships where scope is duplicated. CRAFT's `skill_revisions` already uses an owner-preserving composite FK. Required scope columns must be non-null; separate FKs on two IDs allow mismatched pairs.
 
 ## Sessions and credentials
 
