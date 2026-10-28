@@ -33,9 +33,9 @@ COPY src ./src
 COPY --from=preview /build/src/craft_preview/labextension ./src/craft_preview/labextension
 # The external MCP2 control service runs outside this user image.
 # Install locked wheels, including Setuptools, before building the local package.
-RUN uv sync --locked --extra lab --extra analysis --no-dev --group build --no-editable \
+RUN uv sync --locked --extra all --no-dev --group build --no-editable \
         --no-install-project --no-build --no-cache \
-    && uv sync --locked --extra lab --extra analysis --no-dev --group build --no-editable \
+    && uv sync --locked --extra all --no-dev --group build --no-editable \
         --no-build-isolation-package craft-user-workspace --no-cache
 # Load the outbound guard at interpreter start; it installs only where CRAFT_GUARD=1,
 # which the kernel specification sets. The Jupyter server runs without it.

@@ -282,8 +282,8 @@ class WorkspaceRunController:
                 f"and kernel {self._target.kernel_id} during this run. "
                 "run_code executes in this kernel after approval. "
                 "Use `import craft` for files, documents and read access points such as "
-                "`craft.search` and `craft.cube.find`; `from craft import native` and "
-                "`async with native() as sdk:` remain available for run-bound reads. "
+                "`craft.search` and `craft.cube.find`; `async with craft.native() as sdk:` "
+                "remains available for run-bound reads. "
                 "Other kernels and standalone processes have no active binding. "
                 "Native mutations still require the CRAFT approval/resume path."
             )

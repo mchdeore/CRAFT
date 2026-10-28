@@ -3,10 +3,10 @@ name = "craft-user-workspace"
 version = "0.1.0"
 description = "Private Jupyter workspace with an injectable CRAFT MCP client"
 requires-python = "==3.12.*"
-dependencies = ["mcp==1.30.0", "httpx==0.28.1"]
-
-[project.optional-dependencies]
-analysis = [
+# Everything `import craft` uses; `[all]` adds JupyterLab for the workspace image.
+dependencies = [
+  "mcp==1.30.0",
+  "httpx==0.28.1",
   "numpy==2.5.4",
   "pandas==3.0.6",
   "scipy==1.18.1",
@@ -24,7 +24,9 @@ analysis = [
   "pint==0.26.2",
   "vl-convert-python==1.9.0.post1",
 ]
-lab = [
+
+[project.optional-dependencies]
+all = [
   "jupyterlab==4.6.4",
   "jupyter-server==2.21.1",
   "ipykernel==6.29.5",

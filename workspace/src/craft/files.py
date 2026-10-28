@@ -195,6 +195,29 @@ def sql(query: str, **tables: Any):
         connection.close()
 
 
+def copy(source: str | Path, target: str | Path) -> str:
+    """Copy a file to a new name, creating its folder; returns the new relative name."""
+    import shutil
+
+    destination = path(target)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path(source), destination)
+    return destination.relative_to(_root.USER_ROOT).as_posix()
+
+
+def show(*values: Any) -> None:
+    """Display results, pages, charts or tables in the notebook; print them elsewhere."""
+    try:
+        # IPython is in the workspace image, not in CRAFT's own environment.
+        from IPython.display import display  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        for value in values:
+            print(value)
+        return
+    for value in values:
+        display(value)
+
+
 def _excel(sheets: dict[str, Any], target: Path) -> None:
     import pandas as pd
 
