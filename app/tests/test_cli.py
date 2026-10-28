@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import msgspec
 import pytest
@@ -13,6 +15,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from app import create_app
+from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_owner_sessions
@@ -83,3 +86,28 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
             session.execute(m.provider_items.delete())
             session.execute(m.index_cursor.delete())
         engine.dispose()
+
+
+@pytest.mark.parametrize("arguments", [[], ['{"value": 2}']])
+def test_cli_call_awaits_async_operations(monkeypatch, capsys, arguments) -> None:
+    """An async operation's result is printed, with or without an input shape."""
+    from app import cli
+    from app.infrastructure.mcp import stdio
+    from app.infrastructure.operations.registry import registry
+
+    class Doubled(msgspec.Struct):
+        value: int
+
+    async def without_input(caller):
+        return {"value": 1}
+
+    async def with_input(caller, request):
+        return {"value": request["value"] * 2}
+
+    function, shape = (with_input, Doubled) if arguments else (without_input, None)
+    monkeypatch.setitem(
+        registry, "generated.async", SimpleNamespace(function=function, input=shape)
+    )
+    monkeypatch.setattr(stdio, "local_caller", lambda *_: Caller(user_id=uuid4()))
+    cli.main(["call", "generated.async", "--as", "generated", *arguments])
+    assert json.loads(capsys.readouterr().out) == {"value": 4 if arguments else 1}
