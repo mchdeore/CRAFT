@@ -46,6 +46,7 @@ def register_tables() -> None:
         "app.agent.storage",
         "app.approvals.storage",
         "app.jobs.storage",
+        "app.identity.storage",
     ):
         import_module(module)
 

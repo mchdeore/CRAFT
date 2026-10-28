@@ -36,7 +36,14 @@ from app.tools.handlers import Capability, CapabilityCatalog
 def test_session_contract() -> None:
     example = json.loads(Path("app/contract/examples/session.json").read_text())
     body = msgspec.convert(example, Me)
-    assert set(msgspec.to_builtins(body)) == {"id", "username", "displayName", "roles", "language"}
+    assert set(msgspec.to_builtins(body)) == {
+        "id",
+        "username",
+        "displayName",
+        "roles",
+        "language",
+        "email",
+    }
     assert set(msgspec.structs.fields(SignIn)[n].encode_name for n in [0, 1]) == {
         "username",
         "password",

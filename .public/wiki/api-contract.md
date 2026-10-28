@@ -18,7 +18,7 @@ The application programming interface (API) uses Hypertext Transfer Protocol (HT
 |---|---|
 | Prefix | `/api`. Health checks are outside it. There is no generic run-any-operation route. |
 | Format | JSON, `camelCase` field names, UUID identifiers, ISO 8601 UTC times |
-| Sign-in | Cookie `__Host-craft_session` (`Secure`, `HttpOnly`, `SameSite=Lax` by default, `Path=/`), set by `POST /api/session`. Send requests with `credentials: "include"`. No tokens in browser storage |
+| Sign-in | Cookie `__Host-craft_session` (`Secure`, `HttpOnly`, `SameSite=Lax` by default, `Path=/`), set at the end of the identity provider round trip (`GET /api/auth/login`, then `GET /api/auth/callback`). Send requests with `credentials: "include"`. No tokens in browser storage |
 | Workspace token | `Authorization: Bearer <token>` from `POST /api/me/workspace-tokens`, shown once, 1 to 168 hours (default 12). It signs in as its account on the read routes whose operation is a read tool (section 6) and on `GET /api/me`; every other route returns `403`. A request with both a token and a session cookie returns `401`. Calls are logged with origin `workspace` and the token's identifier. Revoked, expired or disabled-account tokens return `401` |
 | Writes | Ordinary `/api` requests using `POST`, `PUT`, `PATCH` and `DELETE` must carry an `Origin` header from the allowed list |
 | Request ID | Every response has `X-Request-Id`. The same value appears in error bodies and server logs |
@@ -102,7 +102,10 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | signed in; live resource access | `explore` |
 | `GET /api/library/documents/:item/preview` | —; query `{ version: number; locator?: string }` | `Blob` | signed in; live resource access | — |
 | `GET /api/library/documents/:item/download` | —; query `{ version: number; locator?: string }` | `Blob` | signed in; live resource access | — |
-| `POST /api/session` | `SignIn` | `Me` | public | — |
+| `GET /api/auth/login` | `returnTo?` (query) | `302` to the identity provider | public | — |
+| `GET /api/auth/callback` | the provider's `code`, `state` (query) | `302` to `returnTo`, or to `/?signIn=failed` or `/?signIn=no-access` | public | — |
+| `POST /api/auth/logout` | — | `SignedOut` | signed in | — |
+| `POST /api/session` | `SignIn` | `Me` | public; tests only (`CRAFT_LOCAL_PASSWORD_SIGNIN`) | — |
 | `DELETE /api/session` | — | `void` | signed in; live resource access | — |
 | `GET /api/me` | — | `Me` | signed in; live resource access | — |
 | `PATCH /api/me` | `MeChange` | `Me` | signed-in browser session or command line; the caller's own row only | — |
@@ -333,6 +336,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/library/documents/:item` | `LibraryDocument` | `app/contract/examples/library-document.json` |
 | `GET /api/library/documents/:item/chunks` | `ChunkPage` | `app/contract/examples/chunks.json` |
 | `POST /api/library/explore` | `ChunkPage` | `app/contract/examples/explore.json` |
+| `POST /api/auth/logout` | `SignedOut` | `app/contract/examples/signed-out.json` |
 | `POST /api/session` | `Me` | `app/contract/examples/session.json` |
 | `GET /api/me` | `Me` | `app/contract/examples/me.json` |
 | `PATCH /api/me` | `Me` | `app/contract/examples/me.json` |

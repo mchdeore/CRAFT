@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import msgspec
+from starlette.responses import RedirectResponse, Response
 
 from app.accounts import service
 from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
@@ -43,6 +44,7 @@ class Me(Shape):
     display_name: str
     roles: list[Literal["member", "admin"]]
     language: Language
+    email: str | None = None
 
 
 class MeChange(Shape):
@@ -52,7 +54,13 @@ class MeChange(Shape):
 class NewUser(Shape):
     username: str
     display_name: str
-    password: str
+    # A password is for tests' local sign-in; with an email, people sign in at the provider.
+    password: str | None = None
+    email: str | None = None
+
+
+class AccessApproval(Shape):
+    email: str
 
 
 class UserRef(Shape):
@@ -68,6 +76,50 @@ class ResetPassword(Shape):
 def sign_in(caller: Caller, request: SignIn) -> Me:
     """Sign in with a local account."""
     return service.sign_in(caller, request)
+
+
+class SignInStart(Shape):
+    return_to: str | None = None
+
+
+class SignInAnswer(Shape):
+    # The provider's own query names, which are snake_case.
+    code: str | None = None
+    state: str | None = None
+    error: str | None = None
+    error_description: str | None = msgspec.field(default=None, name="error_description")
+    session_state: str | None = msgspec.field(default=None, name="session_state")
+
+
+class SignedOut(Shape):
+    logout_url: str | None
+
+
+@operation(PUBLIC, get="/auth/login")
+def auth_login(caller: Caller, request: SignInStart) -> Response:
+    """Send the browser to the identity provider; `returnTo` is where it comes back to."""
+    return RedirectResponse(service.start_sign_in(caller, request.return_to), 302)
+
+
+@operation(PUBLIC, get="/auth/callback")
+def auth_callback(caller: Caller, request: SignInAnswer) -> Response:
+    """The provider's redirect back: on success a session cookie, then on to `returnTo`."""
+    from app.infrastructure.operations.context import transport_request
+
+    cookie = transport_request.get().cookies.get("__Host-craft_signin")
+    target, problem = service.finish_sign_in(caller, cookie, request.state, request.code)
+    if problem:
+        # The page at the target reads this to explain; nothing about the person is in it.
+        base = target.split("/", 3)[:3] if "://" in target else []
+        target = ("/".join(base) if base else "") + "/?signIn=" + problem
+    return RedirectResponse(target, 302)
+
+
+@operation(SIGNED_IN, post="/auth/logout")
+def auth_logout(caller: Caller) -> SignedOut:
+    """End the CRAFT session; the browser then visits `logoutUrl` to end the provider's."""
+    service.sign_out(caller)
+    return SignedOut(logout_url=service.provider_logout(caller))
 
 
 @operation(SIGNED_IN, delete="/session")
@@ -122,6 +174,7 @@ def current(caller: Caller) -> Me:
             "displayName": row["display_name"],
             "roles": sorted(caller.roles),
             "language": row["language"],
+            "email": row["email"],
         },
         Me,
     )
@@ -130,6 +183,12 @@ def current(caller: Caller) -> Me:
 @operation("accounts.manage")
 def add(caller: Caller, request: NewUser) -> None:
     service.add(caller, request)
+
+
+@operation("accounts.manage")
+def approve(caller: Caller, request: AccessApproval) -> Me:
+    """Let in someone who signed in at the provider and was told "no access yet"."""
+    return service.approve(caller, request.email)
 
 
 @operation("accounts.manage")

@@ -24,6 +24,7 @@ def test_me_returns_signed_in_account(account, owner_engine) -> None:
         "displayName": "Test",
         "roles": ["member"],
         "language": "en",
+        "email": None,
     }
     jsonschema.validate(response.json(), typescript_schema("Me"))
     with owner_engine.begin() as connection:
@@ -54,7 +55,7 @@ def test_me_ignores_browser_identity(account) -> None:
     )
     response = account.client.get("/api/me", headers={"X-User-Id": "another", "X-Roles": "admin"})
     assert response.json()["id"] == str(account.id)
-    assert set(response.json()) == {"id", "username", "displayName", "roles", "language"}
+    assert set(response.json()) == {"id", "username", "displayName", "roles", "language", "email"}
     jsonschema.validate(json.load(open("app/contract/examples/me.json")), typescript_schema("Me"))
 
 

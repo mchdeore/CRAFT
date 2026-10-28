@@ -11,6 +11,13 @@ create database craft_dev  owner craft_owner;
 create database craft_test owner craft_owner;
 SQL
 
+# craft-id's own login: it reads only the id_* tables (granted by migration 0021).
+if [[ -n "${CRAFT_ID_DB_PASSWORD:-}" ]]; then
+  psql -v ON_ERROR_STOP=1 -U postgres -v id_pw="$CRAFT_ID_DB_PASSWORD" <<'SQL'
+create role craft_id login password :'id_pw';
+SQL
+fi
+
 for db in craft_dev craft_test; do
   psql -v ON_ERROR_STOP=1 -U postgres -d "$db" <<'SQL'
 create extension if not exists vector;
