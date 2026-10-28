@@ -72,6 +72,11 @@ def active_job(session, lock: str) -> int | None:
     return service.active(session, lock)
 
 
+def running_jobs(session, kind: str, requested_by) -> int:
+    """Queued and running jobs of one kind for one requester; serializes concurrent callers."""
+    return service.running_count(session, kind, requested_by)
+
+
 def job_state(session, job_id: int) -> str | None:
     return service.state(session, job_id)
 

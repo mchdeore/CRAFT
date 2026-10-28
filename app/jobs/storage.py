@@ -36,6 +36,19 @@ def active(session: Session, lock: str) -> int | None:
     ).scalar_one_or_none()
 
 
+def running_count(session: Session, kind: str, requested_by: str) -> int:
+    """Queued and running jobs of one kind for one requester, after serializing on them."""
+    key = f"count:{kind}:{requested_by}"
+    session.execute(text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key})
+    return session.execute(
+        text(
+            "select count(*) from procrastinate_jobs where task_name = :kind"
+            " and status in ('todo', 'doing') and args->>'requested_by' = :user"
+        ),
+        {"kind": kind, "user": requested_by},
+    ).scalar_one()
+
+
 def defer(session: Session, queue: str, kind: str, args: dict, lock: str | None) -> int:
     """Insert one job; workers hear of it by NOTIFY when the transaction commits."""
     return session.execute(

@@ -28,6 +28,10 @@ def defer(session: Session, kind: str, args: dict, requested_by: Any = None) -> 
     return storage.defer(session, declared.queue, kind, values, lock)
 
 
+def running_count(session: Session, kind: str, requested_by: Any) -> int:
+    return storage.running_count(session, kind, str(requested_by))
+
+
 def active(session: Session, lock: str) -> int | None:
     return storage.active(session, lock)
 

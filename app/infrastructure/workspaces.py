@@ -295,3 +295,58 @@ async def write_notebook(target: JupyterTarget, path: str, notebook: dict[str, A
         await _ensure_folders(http, path)
         saved = await http.put(_contents(path), json={"type": "notebook", "content": notebook})
         saved.raise_for_status()
+
+
+async def read_folder(target: JupyterTarget, folder: str, limit: int) -> dict[str, bytes]:
+    """Every visible file under one owned folder, relative to it; at most ``limit`` bytes."""
+    found: dict[str, bytes] = {}
+    size = 0
+    async with jupyter_http(target) as http:
+        pending = [folder]
+        while pending:
+            current = pending.pop()
+            listing = await http.get(_contents(current) if current else "api/contents/")
+            listing.raise_for_status()
+            for entry in listing.json().get("content") or []:
+                if entry["name"].startswith("."):
+                    continue
+                if entry["type"] == "directory":
+                    pending.append(entry["path"])
+                    continue
+                size += entry.get("size") or 0
+                if size > limit:
+                    raise ValueError("The notebook folder is too large")
+                item = await http.get(
+                    _contents(entry["path"]), params={"format": "base64", "type": "file"}
+                )
+                item.raise_for_status()
+                content = base64.b64decode(item.json()["content"])
+                size += len(content) - (entry.get("size") or 0)
+                if size > limit:
+                    raise ValueError("The notebook folder is too large")
+                found[entry["path"][len(folder) + 1 :] if folder else entry["path"]] = content
+    return found
+
+
+async def exists(target: JupyterTarget, path: str) -> bool:
+    async with jupyter_http(target) as http:
+        found = await http.get(_contents(path), params={"content": "0"})
+        if found.status_code == 404:
+            return False
+        found.raise_for_status()
+        return True
+
+
+async def write_bytes(target: JupyterTarget, path: str, content: bytes) -> None:
+    """Create one owned file through the Jupyter contents service."""
+    async with jupyter_http(target) as http:
+        await _ensure_folders(http, path)
+        saved = await http.put(
+            _contents(path),
+            json={
+                "type": "file",
+                "format": "base64",
+                "content": base64.b64encode(content).decode(),
+            },
+        )
+        saved.raise_for_status()

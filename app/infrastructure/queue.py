@@ -36,7 +36,7 @@ from app.infrastructure.database.engine import conninfo, make_engine, make_sessi
 logger = logging.getLogger("craft.jobs")
 
 # Modules that declare job operations (`@operation(..., job=Job(...))`); the worker imports them.
-KIND_MODULES = ("app.agent.jobs",)
+KIND_MODULES = ("app.agent.jobs", "app.workspace.jobs")
 # Waits between automatic retries (transient errors only) and the SIGTERM grace per queue.
 WAITS = {"agent": (), "interactive": (5, 30, 120), "bulk": (60, 300, 1800)}
 GRACE = {"agent": 900.0, "interactive": 120.0, "bulk": 120.0}
