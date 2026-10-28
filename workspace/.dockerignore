@@ -3,3 +3,6 @@
 .pytest_cache
 build
 *.egg-info
+labextension/node_modules
+labextension/lib
+src/craft_preview/labextension

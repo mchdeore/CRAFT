@@ -1,0 +1,26 @@
+{
+  "name": "craft-preview",
+  "version": "0.1.0",
+  "description": "Preview Word, Excel and PowerPoint files beside them, refreshed after each save",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "lib/index.js",
+  "files": ["lib/*.js"],
+  "scripts": {
+    "build": "tsc && jupyter labextension build ."
+  },
+  "dependencies": {
+    "@jupyterlab/application": "4.6.4",
+    "@jupyterlab/apputils": "4.7.4",
+    "@jupyterlab/coreutils": "6.6.4",
+    "@jupyterlab/filebrowser": "4.6.4"
+  },
+  "devDependencies": {
+    "@jupyterlab/builder": "4.5.11",
+    "typescript": "5.9.3"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "../src/craft_preview/labextension"
+  }
+}

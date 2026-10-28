@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -268,3 +269,130 @@ def test_vega_chart_renders_offline_and_saves_spec_and_rows(tmp_path, monkeypatc
     assert analysis.vega(spec, save_as="power.png") == "power.png"
     with pytest.raises(ValueError):
         analysis.vega({**spec, "data": {"url": "https://example.invalid/data.json"}})
+
+
+def _word(path, *paragraphs, header=None):
+    from docx import Document
+
+    document = Document()
+    for runs in paragraphs:
+        paragraph = document.add_paragraph()
+        for text, bold in runs:
+            paragraph.add_run(text).bold = bold
+    if header is not None:
+        document.sections[0].header.paragraphs[0].text = header
+    document.save(path)
+
+
+def test_replace_in_word_matches_across_runs_and_in_headers(tmp_path, monkeypatch):
+    from craft import _root, docs
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    _word(
+        tmp_path / "memo.docx",
+        [("Mission ", False), ("Ze", True), ("ta", False)],
+        header="Zeta memo",
+    )
+    assert docs.replace_in_word("memo.docx", "Zeta", "Kappa", save_as="memo-2.docx") == 2
+    text = docs.read_word("memo-2.docx")
+    assert "Mission Kappa" in text
+    from docx import Document
+
+    edited = Document(str(tmp_path / "memo-2.docx"))
+    assert edited.paragraphs[0].runs[1].bold and edited.paragraphs[0].runs[1].text == "Kappa"
+    assert edited.sections[0].header.paragraphs[0].text == "Kappa memo"
+    assert "Zeta" in docs.read_word("memo.docx")
+
+
+def test_fill_template_word_excel_and_powerpoint_keep_the_template(tmp_path, monkeypatch):
+    from craft import _root, docs
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.workbook.defined_name import DefinedName
+    from pptx import Presentation
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    _word(
+        tmp_path / "memo.docx",
+        [("To: {{ recipient }}", False)],
+        [("{% for r in rows %}{{ r }};{% endfor %}", False)],
+    )
+    original = (tmp_path / "memo.docx").read_bytes()
+    assert docs.template_fields("memo.docx") == ["recipient", "rows"]
+    with pytest.raises(ValueError, match="rows"):
+        docs.fill_template("memo.docx", {"recipient": "Finance"}, save_as="out/memo.docx")
+    saved = docs.fill_template(
+        "memo.docx", {"recipient": "Finance & Ops", "rows": ["a", "b"]}, save_as="out/memo.docx"
+    )
+    assert saved == "out/memo.docx" and (tmp_path / "memo.docx").read_bytes() == original
+    text = docs.read_word(saved)
+    assert "To: Finance & Ops" in text and "a;b;" in text and "{{" not in text
+
+    book: Any = Workbook()
+    book.active.title = "Cost"
+    book.defined_names["total"] = DefinedName("total", attr_text="Cost!$B$2")
+    book.save(tmp_path / "cost.xlsx")
+    assert docs.template_fields("cost.xlsx") == ["total"]
+    docs.fill_template("cost.xlsx", {"total": 42}, save_as="cost-filled.xlsx")
+    assert load_workbook(tmp_path / "cost-filled.xlsx")["Cost"]["B2"].value == 42
+
+    deck = Presentation()
+    slide: Any = deck.slides.add_slide(deck.slide_layouts[0])
+    slide.shapes.title.text = "Review of {{ mission }}"
+    deck.save(str(tmp_path / "deck.pptx"))
+    assert docs.template_fields("deck.pptx") == ["mission"]
+    docs.fill_template("deck.pptx", {"mission": "msn-sim-02"}, save_as="deck-filled.pptx")
+    assert docs.read_slides("deck-filled.pptx")[0]["title"] == "Review of msn-sim-02"
+    with pytest.raises(ValueError):
+        docs.fill_template("deck.pptx", {"mission": "x"}, save_as="deck.pptx")
+
+
+def test_workbook_and_slides_get_native_charts_from_a_vega_lite_spec(tmp_path, monkeypatch):
+    import pandas as pd
+    from craft import _root, docs
+    from openpyxl import load_workbook
+    from pptx import Presentation
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    frame = pd.DataFrame({"mission": ["a", "b"], "power": [120.5, 80]})
+    spec = {
+        "title": "Peak power",
+        "data": {"values": frame.to_dict(orient="records")},
+        "mark": "bar",
+        "encoding": {"x": {"field": "mission"}, "y": {"field": "power"}},
+    }
+    assert docs.workbook("book.xlsx", ("Power", frame), charts={"Power": spec}) == "book.xlsx"
+    sheet: Any = load_workbook(tmp_path / "book.xlsx")["Power"]
+    assert sheet["B3"].value == 80 and len(sheet._charts) == 1
+    docs.chart_slide("deck.pptx", spec)
+    docs.chart_slide("deck.pptx", {**spec, "mark": "line"}, title="Trend")
+    slides = Presentation(str(tmp_path / "deck.pptx")).slides
+    assert len(slides) == 2 and any(shape.has_chart for shape in slides[1].shapes)
+
+
+@pytest.mark.docker
+def test_pages_and_preview_render_with_libreoffice_in_the_workspace_image():
+    import docker
+
+    script = """
+import asyncio, os
+from docx import Document
+from craft import docs
+import craft_preview
+document = Document(); document.add_heading("Preview", 0); document.add_paragraph("Generated.")
+document.save("/workspace/memo.docx")
+pdf = asyncio.run(craft_preview.preview("memo.docx"))
+assert pdf.startswith(b"%PDF") and asyncio.run(craft_preview.preview("memo.docx")) == pdf
+pages = docs.pages("memo.docx")
+assert len(pages) == 1 and pages[0]._repr_png_().startswith(b"\\x89PNG")
+print("ok")
+"""
+    client = docker.from_env(timeout=120)
+    output = client.containers.run(
+        "craft-user-workspace:local-pilot",
+        ["python", "-c", script],
+        remove=True,
+        network_disabled=True,
+        read_only=True,
+        tmpfs={"/tmp": "", "/workspace": "uid=1000"},
+    )
+    assert output.strip().endswith(b"ok")

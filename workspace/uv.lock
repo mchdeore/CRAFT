@@ -292,6 +292,7 @@ dependencies = [
 
 [package.optional-dependencies]
 analysis = [
+    { name = "docxtpl" },
     { name = "duckdb" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -323,6 +324,7 @@ build = [
 
 [package.metadata]
 requires-dist = [
+    { name = "docxtpl", marker = "extra == 'analysis'", specifier = "==0.20.1" },
     { name = "duckdb", marker = "extra == 'analysis'", specifier = "==1.5.6" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "ipykernel", marker = "extra == 'lab'", specifier = "==6.29.5" },
@@ -430,6 +432,35 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
+name = "docxcompose"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "babel" },
+    { name = "lxml" },
+    { name = "python-docx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/10/d0941047b177c0b6eb95138b15949ca59a8ddb1d7266d10dc384d0dba681/docxcompose-2.2.0.tar.gz", hash = "sha256:e2c69703a2fefad4471aad82861a1c5d7b3f4a669510de504bb36f41f66f6d3e", size = 22036, upload-time = "2026-06-02T12:18:11.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/70/121090145cb543e48da7421e64036e6484bfbbc40fc619d73599dc22eb2e/docxcompose-2.2.0-py3-none-any.whl", hash = "sha256:fcfec8b0ba7d341bd3280cb92b571ed2f9e868bbd0d6750ea9539e0ab0bb49a1", size = 25738, upload-time = "2026-06-02T12:18:09.963Z" },
+]
+
+[[package]]
+name = "docxtpl"
+version = "0.20.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "docxcompose" },
+    { name = "jinja2" },
+    { name = "lxml" },
+    { name = "python-docx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8c/3a/de0754ed1bcc47210307b7a98708d71207eb3f52594e2cf23a1ae97d7f08/docxtpl-0.20.1.tar.gz", hash = "sha256:5bab05a2c60b225c730ce18e9e2d40d748b4a12f599e150badbcb659088a51d4", size = 22560, upload-time = "2025-07-15T15:14:21.93Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/10/9f8c71b89c1189f5184fa05d9d8c21a4cf62cb43ca1d602a90bf58edca8c/docxtpl-0.20.1-py3-none-any.whl", hash = "sha256:8c4c63c5505373cb1624e969ea85a47d7cb61be18008a03f5271c1be4bbe501c", size = 20498, upload-time = "2025-07-15T15:14:20.703Z" },
 ]
 
 [[package]]
