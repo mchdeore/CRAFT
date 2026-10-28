@@ -33,10 +33,11 @@ def jobs(settings, owner_engine, monkeypatch):
             text("update procrastinate_jobs set status = 'cancelled' where status = 'todo'")
         )
     engine = make_engine(settings)
-    sessions = make_sessions(engine)
+    sessions = made = make_sessions(engine)
 
     class Jobs:
-        caller = Caller(user_id=uuid4(), roles=frozenset({"member"}), sessions=sessions)
+        caller = Caller(user_id=uuid4(), roles=frozenset({"member"}), sessions=made)
+        sessions = made
 
         @staticmethod
         def defer(operation, requested_by=None, **values):
@@ -73,7 +74,6 @@ def jobs(settings, owner_engine, monkeypatch):
                     text("select procrastinate_cancel_job_v1(:id, true, false)"), {"id": job_id}
                 )
 
-    Jobs.sessions = sessions
     yield Jobs
     engine.dispose()
 
