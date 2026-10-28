@@ -29,6 +29,10 @@ export interface Routes {
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
   "GET /api/library/documents/:item/preview": { query: { version: number; locator?: string }; response: Blob };
   "GET /api/library/documents/:item/download": { query: { version: number; locator?: string }; response: Blob };
+  "POST /api/library/documents/:item/revisions": { body: Blob; query: { version: number }; response: T.Revision };
+  "GET /api/library/documents/:item/revisions": { response: T.Revision[] };
+  "GET /api/library/documents/:item/revisions/:revision": { response: T.Revision };
+  "GET /api/library/documents/:item/revisions/:revision/content": { response: Blob };
   "GET /api/auth/login": { query: { returnTo?: string }; response: void }; // 302 to the identity provider
   "GET /api/auth/callback": { query: { code?: string; state?: string; error?: string }; response: void }; // the provider's redirect back; 302 onward
   "POST /api/auth/logout": { response: T.SignedOut }; // then send the browser to logoutUrl when it is set

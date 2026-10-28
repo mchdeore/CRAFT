@@ -18,7 +18,8 @@ def main(argv: list[str] | None = None) -> None:
     call.add_argument("--as", dest="username", required=True)
     call.add_argument("arguments", nargs="?", default="{}")
     provider = commands.add_parser("provider")
-    provider.add_argument("action", choices=["scan", "put", "rm", "log"])
+    provider.add_argument("action", choices=["scan", "put", "rm", "log", "serve"])
+    provider.add_argument("--port", type=int, default=8200, help="serve: the LiveLink API port")
     provider.add_argument("path", nargs="?")
     provider.add_argument("file", nargs="?")
     users = commands.add_parser("users")
@@ -91,20 +92,37 @@ def main(argv: list[str] | None = None) -> None:
 
             run_worker(settings)
         elif args.command == "provider":
-            from app.infrastructure.provider import get_provider
+            from app.infrastructure.provider import get_provider, source_provider
 
-            provider = get_provider(settings.provider_root)
+            if args.action == "serve":
+                import uvicorn
+
+                from app.infrastructure.provider.livelink_api import livelink_api
+
+                if not settings.provider_token:
+                    parser.error("set CRAFT_PROVIDER_TOKEN: the API needs a ticket")
+                # The LiveLink-shaped API over the provider folder's originals.
+                uvicorn.run(
+                    livelink_api(settings.provider_root, settings.provider_token),
+                    host="127.0.0.1",
+                    port=args.port,
+                    log_level="warning",
+                )
+                return
+            provider = source_provider(settings)
+            # Writes always go to the simulated folder; the LiveLink adapter only reads.
+            writer = get_provider(settings.provider_root)
             if args.action == "scan":
                 print(json.dumps({"changes": len(provider.scan())}))
             elif args.action == "put":
                 if not args.path or not args.file:
                     parser.error("put requires a path and file")
-                provider.write_content(args.path, Path(args.file).read_bytes())
+                writer.write_content(args.path, Path(args.file).read_bytes())
             elif args.action == "rm":
-                item = next((i for i in provider.items().values() if i["path"] == args.path), None)
+                item = next((i for i in writer.items().values() if i["path"] == args.path), None)
                 if item is None:
                     parser.error("unknown provider item")
-                provider.delete_item(item["item"])
+                writer.delete_item(item["item"])
             else:
                 changes, cursor = provider.list_changes(0)
                 print(json.dumps({"changes": changes, "cursor": cursor}))

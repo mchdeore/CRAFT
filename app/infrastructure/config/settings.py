@@ -30,6 +30,10 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     database_port: int = 5432
     database_name: str = "craft_dev"
     provider_root: str = ".local/runtime/provider"
+    # Where originals are read: the simulated folder, or a LiveLink-shaped API in front of it.
+    provider: Literal["simulated", "livelink_test"] = "simulated"
+    provider_url: str = ""
+    provider_token: str = ""
     process_root: str = ""
     worker_queues: str = "agent,interactive,bulk"
     worker_concurrency: Annotated[int, msgspec.Meta(ge=1, le=100)] = 4

@@ -1,6 +1,7 @@
 """Library shapes and the sole entry points for readable source operations."""
 
 from typing import Annotated, Literal
+from uuid import UUID
 
 import msgspec
 from sqlalchemy.orm import Session
@@ -314,3 +315,58 @@ def citation_quote(caller: Caller, handle: CitationHandle) -> str:
     if hashlib.sha256(quote.encode()).hexdigest() != handle.quote_sha256:
         raise NotFound()
     return quote
+
+
+class RevisionUpload(RawFile, kw_only=True):
+    item: str
+    version: Annotated[int, msgspec.Meta(ge=1)]
+
+
+class RevisionList(Shape):
+    item: str
+
+
+class RevisionRef(Shape):
+    item: str
+    revision: Annotated[int, msgspec.Meta(ge=1)]
+
+
+class Revision(Shape):
+    item: str
+    revision: int
+    source_version: int
+    file_name: str
+    media_type: str
+    size_bytes: int
+    content_sha256: str
+    author_id: UUID
+    created_at: str
+    simulated: bool
+    classification: str
+
+
+@operation(SIGNED_IN, post="/library/documents/{item}/revisions")
+def create_revision(caller: Caller, request: RevisionUpload) -> Revision:
+    """Save CRAFT's own full copy of a readable document, pointing at its source version.
+
+    The source is never changed and a revision is never written back to it.
+    """
+    return Revision(**service.create_revision(caller, request))
+
+
+@operation(SIGNED_IN, get="/library/documents/{item}/revisions")
+def list_revisions(caller: Caller, request: RevisionList) -> list[Revision]:
+    """List a readable document's CRAFT revisions, oldest first."""
+    return [Revision(**row) for row in service.list_revisions(caller, request.item)]
+
+
+@operation(SIGNED_IN, get="/library/documents/{item}/revisions/{revision}")
+def read_revision(caller: Caller, request: RevisionRef) -> Revision:
+    """Read one CRAFT revision's record, including the source version it came from."""
+    return Revision(**service.read_revision(caller, request))
+
+
+@operation(SIGNED_IN, get="/library/documents/{item}/revisions/{revision}/content")
+def export_revision(caller: Caller, request: RevisionRef) -> Response:
+    """Download one CRAFT revision's exact bytes as an attachment."""
+    return service.export_revision(caller, request)
