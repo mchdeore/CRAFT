@@ -35,7 +35,7 @@ from app.infrastructure.database.engine import conninfo, make_engine, make_sessi
 
 logger = logging.getLogger("craft.jobs")
 
-# Modules whose import registers job kinds; the worker imports them all.
+# Modules that declare job operations (`@operation(..., job=Job(...))`); the worker imports them.
 KIND_MODULES = ("app.agent.jobs",)
 # Waits between automatic retries (transient errors only) and the SIGTERM grace per queue.
 WAITS = {"agent": (), "interactive": (5, 30, 120), "bulk": (60, 300, 1800)}
@@ -144,6 +144,7 @@ def register_job(
     interrupted: Callable[[sessionmaker[Session], dict], None] | None = None,
 ) -> Kind:
     """Register a job kind: `func(job: JobRun, **args)`, sync (run in a thread) or async.
+    Features declare jobs as operations instead (`Job` in app.infrastructure.operations).
 
     A job may run more than once (a retry, or a worker that died after its effect), so its
     effects must be idempotent: keyed by content hash or written as upserts, never "insert

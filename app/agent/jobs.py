@@ -3,68 +3,64 @@
 import asyncio
 from contextlib import nullcontext
 from dataclasses import replace
-from time import perf_counter
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import msgspec
 
 from app.agent import service
 from app.agent.handlers import RunAgentInput
-from app.infrastructure.access import Caller
+from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.errors import ApiError
-from app.infrastructure.operations.context import CallContext, current_call
-from app.infrastructure.operations.pipeline import finish
-from app.infrastructure.queue import JobRun, register_job, register_maintenance
+from app.infrastructure.operations import Job, operation
+from app.infrastructure.operations.context import current_call
+from app.infrastructure.queue import register_maintenance
+from app.infrastructure.shapes import Shape
 
 TERMINAL = {"RUN_FINISHED", "RUN_ERROR", "CRAFT_ERROR"}
 
 
-async def agent_run(
-    job: JobRun,
-    user: str,
-    run: str,
-    segment: int,
-    roles: list[str],
-    auth_session_id: str | None,
-    origin: str,
-    read_only: bool,
-    request_id: str | None = None,
-    parent_call_id: str | None = None,
-) -> None:
+class AgentRunJob(Shape):
+    run: UUID
+    segment: int
+    read_only: bool = False
+
+
+def interrupted(sessions, request: AgentRunJob) -> None:
+    service.interrupt(sessions, request.run, request.segment)
+
+
+@operation(
+    SIGNED_IN,
+    job=Job(
+        queue="agent",
+        retry=False,
+        lock=lambda request: service.RUN_LOCK + str(request.run),
+        interrupted=interrupted,
+    ),
+)
+async def agent_run(caller: Caller, request: AgentRunJob) -> None:
+    """Run one queued segment of an owned chat turn and write its events."""
     from app.agent import runtime
 
-    found = await asyncio.to_thread(service.run_input, job.sessions, UUID(run), segment)
-    if found is None or str(found.owner_id) != user:
+    run, segment, sessions = request.run, request.segment, caller.sessions
+    found = await asyncio.to_thread(service.run_input, sessions, run, segment)
+    if found is None or found.owner_id != caller.user_id:
         return
-    request = msgspec.convert(found.input, RunAgentInput)
-    caller = Caller(
-        user_id=UUID(user),
-        roles=frozenset(roles),
-        auth_session_id=UUID(auth_session_id) if auth_session_id else None,
-        sessions=job.sessions,
-        settings=job.settings,
-        origin=origin,
-    )
+    data = msgspec.convert(found.input, RunAgentInput)
     ended = False
 
     async def write(event: dict) -> None:
         nonlocal ended
-        await asyncio.to_thread(service.append_event, job.sessions, UUID(run), segment, event)
+        await asyncio.to_thread(service.append_event, sessions, run, segment, event)
         ended = event["type"] in TERMINAL
 
-    # The run is one logged operation; its tool calls are child calls of it.
-    context = CallContext(
-        UUID(request_id) if request_id else uuid4(),
-        uuid4(),
-        UUID(parent_call_id) if parent_call_id else None,
-        replace(caller, conversation_id=request.thread_id, run_id=UUID(run)),
-        perf_counter(),
-    )
-    token = current_call.set(context)
-    failure = None
+    # The run is this logged call; its tool calls are child calls of it.
+    context = current_call.get()
+    assert context is not None
+    context.caller = replace(caller, conversation_id=data.thread_id, run_id=run)
     try:
-        with runtime.read_only_query() if read_only else nullcontext():
-            iterator = runtime.run(caller, request)
+        with runtime.read_only_query() if request.read_only else nullcontext():
+            iterator = runtime.run(caller, data)
             # RUN_FINISHED and RUN_ERROR wait until the runtime has saved the run, so a client
             # that sees them also sees the run's final status.
             final = None
@@ -81,34 +77,18 @@ async def agent_run(
                 await write(final)
     except asyncio.CancelledError:
         # Stopped through the cancel route; the runtime has already saved the run as cancelled.
-        failure = ApiError()
         await write(service.CANCELLED)
         raise
     except ApiError as error:
         # Raised before the run started (a conflict, a missing conversation): the POST
         # answers with that error.
-        failure = error
+        context.error_code = error.code
         await write({"type": "CRAFT_ERROR", "code": error.code})
     except Exception:
-        failure = ApiError()
+        context.error_code = ApiError.code
         await write({"type": "CRAFT_ERROR", "code": "internal_error"})
-    finally:
-        current_call.reset(token)
-        await asyncio.to_thread(finish, context, None, "agent.agent_run", "operation", failure)
     if not ended:
         await write({"type": "CRAFT_ERROR", "code": "internal_error"})
 
 
-def interrupted(sessions, args: dict) -> None:
-    service.interrupt(sessions, UUID(args["run"]), args["segment"])
-
-
-register_job(
-    "agent_run",
-    agent_run,
-    queue="agent",
-    retry=False,
-    lock_key=lambda args: service.RUN_LOCK + args["run"],
-    interrupted=interrupted,
-)
 register_maintenance(service.prune_events)

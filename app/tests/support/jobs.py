@@ -1,51 +1,57 @@
-"""Test-only job kinds; `python -m app.tests.support.jobs` runs a worker that knows them."""
+"""Test-only job operations; `python -m app.tests.support.job_worker` runs them."""
 
 import asyncio
 import time
 
 from procrastinate.exceptions import JobAborted
 
-from app.infrastructure.queue import (
-    KINDS,
-    JobRun,
-    PermanentError,
-    TransientError,
-    register_job,
-    run_worker,
-)
+from app.infrastructure.access import SIGNED_IN, Caller
+from app.infrastructure.operations import Job, operation
+from app.infrastructure.operations.jobs import current_job, should_abort
+from app.infrastructure.queue import PermanentError, TransientError
+from app.infrastructure.shapes import Shape
 
 
-async def sleep(job: JobRun, seconds: float = 0, fail: str | None = None, times: int = 1) -> None:
+class Sleep(Shape):
+    seconds: float = 0
+    fail: str | None = None
+    times: int = 1
+    key: str = ""
+
+
+@operation(SIGNED_IN, job=Job(queue="interactive", lock=lambda request: request.key))
+async def sleep(caller: Caller, request: Sleep) -> None:
     """Sleep on the first attempt only; fail `times` attempts transiently or permanently."""
-    if job.attempt == 1:
-        await asyncio.sleep(seconds)
-    if fail == "transient" and job.attempt <= times:
+    attempt = current_job.get().attempt
+    if attempt == 1:
+        await asyncio.sleep(request.seconds)
+    if request.fail == "transient" and attempt <= request.times:
         raise TransientError(retry_after=0)
-    if fail == "permanent":
+    if request.fail == "permanent":
         raise PermanentError()
 
 
-def blocking(job: JobRun, seconds: float = 0) -> None:
+@operation(SIGNED_IN, job=Job(queue="bulk"))
+async def bulk(caller: Caller, request: Sleep) -> None:
+    """Sleep in the bulk queue."""
+    await asyncio.sleep(request.seconds)
+
+
+@operation(SIGNED_IN, job=Job(queue="agent", retry=False))
+async def agent(caller: Caller) -> None:
+    """Finish at once in the agent queue."""
+
+
+@operation(SIGNED_IN, job=Job(queue="interactive"))
+def blocking(caller: Caller, request: Sleep) -> None:
     """A blocking job that stops between steps when asked to."""
-    deadline = time.monotonic() + seconds
+    deadline = time.monotonic() + request.seconds
     while time.monotonic() < deadline:
-        if job.should_abort():
+        if should_abort():
             raise JobAborted()
         time.sleep(0.05)
 
 
-def register() -> None:
-    if "test.sleep" not in KINDS:
-        register_job(
-            "test.sleep", sleep, queue="interactive", lock_key=lambda a: a.get("key") or ""
-        )
-        register_job("test.bulk", sleep, queue="bulk")
-        register_job("test.agent", sleep, queue="agent", retry=False)
-        register_job("test.blocking", blocking, queue="interactive")
-
-
-if __name__ == "__main__":
-    from app.infrastructure.config.settings import Settings
-
-    register()
-    run_worker(Settings.from_env())
+@operation("accounts.manage", job=Job(queue="interactive"))
+def managed(caller: Caller) -> None:
+    """Only a manager's job may run."""

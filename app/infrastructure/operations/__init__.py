@@ -9,6 +9,7 @@ from typing import Any
 from app.infrastructure.access import PUBLIC as PUBLIC
 from app.infrastructure.access import SIGNED_IN as SIGNED_IN
 from app.infrastructure.access import Caller
+from app.infrastructure.operations.registry import Job as Job
 
 NONE = "NONE"
 DATA = "DATA"
@@ -28,6 +29,7 @@ def operation(
     tool: bool = False,
     effects: str = NONE,
     prepare_approved: Callable[[Caller, Any], object] | None = None,
+    job: Job | None = None,
 ) -> Any:
     from app.infrastructure.operations.pipeline import wrap
     from app.infrastructure.operations.registry import declare, registry
@@ -40,13 +42,25 @@ def operation(
             tool,
             effects,
             prepare_approved,
+            job,
         )
-        wrapper = wrap(declaration)
         from dataclasses import replace
 
+        if job is not None:
+            from app.infrastructure.operations.jobs import Queued, deferring
+
+            # Calling a job operation queues it; the worker runs the declared function.
+            declaration = replace(
+                declaration, function=deferring(declaration), output=Queued, run=function
+            )
+        wrapper = wrap(declaration)
         registered = replace(declaration, function=wrapper)
         wrapper.__dict__["__operation__"] = registered
         registry[registered.name] = registered
+        if job is not None:
+            from app.infrastructure.operations.jobs import register
+
+            register(registered)
         return wrapper
 
     return decorate
