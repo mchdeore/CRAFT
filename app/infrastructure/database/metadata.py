@@ -197,7 +197,7 @@ drafts = Table(
     timestamp("created_at"),
 )
 Index("ix_drafts_owner_id_created_at", drafts.c.owner_id, drafts.c.created_at.desc())
-# CRAFT's own revisions: immutable full copies pointing at their source version (0024).
+# CRAFT's own revisions: immutable full copies pointing at their source version (0025).
 document_revisions = Table(
     "document_revisions",
     metadata,
