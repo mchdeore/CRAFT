@@ -84,7 +84,7 @@ def test_a_lock_returns_the_active_job(jobs):
     assert jobs.defer(test_jobs.sleep, key=key) == held
     jobs.cancel(held)
     # A worker may have started it already; cancelling then takes effect when it stops.
-    jobs.wait(held, {"canceled", "finished", "failed"})
+    jobs.wait(held, {"canceled", "stopped", "finished", "failed"})
     assert jobs.defer(test_jobs.sleep, key=key) != held
 
 
