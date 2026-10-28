@@ -32,7 +32,7 @@ Copy `.env.example` to an untracked `.env`. Set separate administrative, owner a
 cp .env.example .env
 uv sync --locked
 scripts/seed
-uv run craft users reset demo --as admin
+uv run craft users reset analyst --as admin
 uv run uvicorn app.main:app --reload
 uv run craft worker
 ```

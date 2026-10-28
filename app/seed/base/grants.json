@@ -1,11 +1,11 @@
 [
   {
-    "username": "demo",
+    "username": "analyst",
     "mission": "msn-sim-01",
     "silo": null
   },
   {
-    "username": "demo",
+    "username": "analyst",
     "mission": "msn-sim-02",
     "silo": "engineering"
   }

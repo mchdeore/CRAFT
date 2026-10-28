@@ -26,7 +26,7 @@ FAMILIES = (
         42000,
     ),
     (
-        "technology-demonstrator",
+        "technology-pathfinder",
         "modular avionics trial",
         "clock stability and experimental interfaces",
         120,
