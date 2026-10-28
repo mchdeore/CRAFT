@@ -197,6 +197,25 @@ drafts = Table(
     timestamp("created_at"),
 )
 Index("ix_drafts_owner_id_created_at", drafts.c.owner_id, drafts.c.created_at.desc())
+# CRAFT's own revisions: immutable full copies pointing at their source version (0024).
+document_revisions = Table(
+    "document_revisions",
+    metadata,
+    Column("id", UUID, primary_key=True, server_default=text("uuidv7()")),
+    Column("item", Text, nullable=False),
+    Column("source_version", Integer, nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("file_name", Text, nullable=False),
+    Column("media_type", Text, nullable=False),
+    Column("size_bytes", Integer, nullable=False),
+    Column("content_sha256", LargeBinary, nullable=False),
+    Column("bytes", LargeBinary, nullable=False),
+    Column("author_id", UUID, ForeignKey("users.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("item", "revision"),
+    CheckConstraint("octet_length(content_sha256) = 32", name="content_sha256"),
+    CheckConstraint("source_version >= 1 AND revision >= 1", name="numbers"),
+)
 workspace_files = Table(
     "workspace_files",
     metadata,

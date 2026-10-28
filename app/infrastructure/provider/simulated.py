@@ -3,6 +3,7 @@
 import hashlib
 import json
 import mimetypes
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -46,6 +47,30 @@ def captured_source(file: Path, directory: Path) -> Iterator[tuple[Path, str]]:
         yield path, digest.hexdigest()
     finally:
         path.unlink(missing_ok=True)
+
+
+def tags(path: str) -> dict[str, Any]:
+    """Mission, silo and stage from a path like missions/<mission>/<silo>/<stage>/..."""
+    parts = Path(path).parts
+    mission = (
+        parts[1]
+        if len(parts) >= 2 and parts[0] == "missions" and parts[1].startswith("msn-")
+        else None
+    )
+    silo = parts[2] if mission and len(parts) > 2 and parts[2] in SILOS else None
+    stage = parts[3] if silo and len(parts) > 3 and parts[3] in STAGES else None
+    return {
+        "mission_key": mission,
+        "silo": silo,
+        "stage": stage,
+        "warnings": ["unknown_silo"] if mission and len(parts) > 3 and silo is None else [],
+    }
+
+
+def under(path: str, folders: list[str]) -> bool:
+    return any(
+        folder in {"", "."} or path.startswith(folder.rstrip("/") + "/") for folder in folders
+    )
 
 
 class SimulatedProvider:
@@ -94,34 +119,18 @@ class SimulatedProvider:
         return record
 
     def tags(self, path: str) -> dict[str, Any]:
-        parts = Path(path).parts
-        mission = (
-            parts[1]
-            if len(parts) >= 2 and parts[0] == "missions" and parts[1].startswith("msn-")
-            else None
-        )
-        silo = parts[2] if mission and len(parts) > 2 and parts[2] in SILOS else None
-        stage = parts[3] if silo and len(parts) > 3 and parts[3] in STAGES else None
-        return {
-            "mission_key": mission,
-            "silo": silo,
-            "stage": stage,
-            "warnings": ["unknown_silo"] if mission and len(parts) > 3 and silo is None else [],
-        }
+        return tags(path)
 
     @synchronized
     def scan(self) -> list[dict[str, Any]]:
         self.root.mkdir(parents=True, exist_ok=True)
         items = self.items()
         active = {r["path"]: r for r in items.values() if r["deleted_at"] is None}
-        files = {
-            p.relative_to(self.root).as_posix(): p
-            for p in self.root.rglob("*")
-            if p.is_file()
-            and not p.is_symlink()
-            and not any(part.startswith(".") for part in p.relative_to(self.root).parts)
+        files, unread = self.walk()
+        # A folder that could not be read keeps its items: a partial scan is not a deletion.
+        absent = {
+            path: r for path, r in active.items() if path not in files and not under(path, unread)
         }
-        absent = {path: r for path, r in active.items() if path not in files}
         changes = []
         now = self.clock or datetime.now(UTC).isoformat()
         for path, file in sorted(files.items()):
@@ -190,6 +199,26 @@ class SimulatedProvider:
             changes.append(self.feed(record["item"], "deleted"))
         self.save(items)
         return changes
+
+    def walk(self) -> tuple[dict[str, Path], list[str]]:
+        """Visible files by relative path, and the folders that could not be read."""
+        files: dict[str, Path] = {}
+        unread: list[str] = []
+
+        def failed(error: OSError) -> None:
+            unread.append(Path(error.filename).relative_to(self.root).as_posix())
+
+        for folder, folders, names in os.walk(self.root, onerror=failed):
+            base = Path(folder)
+            folders[:] = [name for name in folders if not name.startswith(".")]
+            relative = base.relative_to(self.root)
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            for name in names:
+                file = base / name
+                if not name.startswith(".") and file.is_file() and not file.is_symlink():
+                    files[(relative / name).as_posix()] = file
+        return files, unread
 
     @synchronized_read
     def list_changes(self, cursor: int) -> tuple[list[dict[str, Any]], int]:

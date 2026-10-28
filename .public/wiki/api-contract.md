@@ -104,6 +104,10 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | signed in; live resource access | `explore` |
 | `GET /api/library/documents/:item/preview` | —; query `{ version: number; locator?: string }` | `Blob` | signed in; live resource access | — |
 | `GET /api/library/documents/:item/download` | —; query `{ version: number; locator?: string }` | `Blob` | signed in; live resource access | — |
+| `POST /api/library/documents/:item/revisions` | `Blob`; query `{ version: number }` | `Revision` | signed in; live resource access | — |
+| `GET /api/library/documents/:item/revisions` | — | `Revision[]` | signed in; live resource access | — |
+| `GET /api/library/documents/:item/revisions/:revision` | — | `Revision` | signed in; live resource access | — |
+| `GET /api/library/documents/:item/revisions/:revision/content` | — | `Blob` | signed in; live resource access | — |
 | `GET /api/auth/login` | `returnTo?` (query) | `302` to the identity provider | public | — |
 | `GET /api/auth/callback` | the provider's `code`, `state` (query) | `302` to `returnTo`, or to `/?signIn=failed` or `/?signIn=no-access` | public | — |
 | `POST /api/auth/logout` | — | `SignedOut` | signed in | — |
@@ -377,6 +381,9 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `PATCH /api/conversations/:id` | `ConversationSummary` | `app/contract/examples/conversation-summary.json` |
 | `GET /api/conversations/:id/files` | `WorkspaceFile[]` | `app/contract/examples/workspace-files.json` |
 | `POST /api/conversations/:id/files` | `WorkspaceFile` | `app/contract/examples/workspace-file.json` |
+| `POST /api/library/documents/:item/revisions` | `Revision` | `app/contract/examples/revision.json` |
+| `GET /api/library/documents/:item/revisions` | `Revision[]` | `app/contract/examples/revisions.json` |
+| `GET /api/library/documents/:item/revisions/:revision` | `Revision` | `app/contract/examples/revision.json` |
 | `PUT /api/notes` | `Note` | `app/contract/examples/note.json` |
 | `GET /api/notes` | `NoteSummary[]` | `app/contract/examples/notes.json` |
 | `GET /api/notes/:id` | `Note` | `app/contract/examples/note.json` |

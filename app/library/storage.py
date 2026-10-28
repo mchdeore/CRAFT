@@ -363,3 +363,55 @@ def candidates(session: Session, caller: Caller, request, query_vector, model, *
         )
         selected.extend(pool[:50])
     return selected
+
+
+document_revisions = m.document_revisions
+REVISION_COLUMNS = [c for c in document_revisions.c if c.name != "bytes"]
+
+
+def add_revision(session: Session, values: dict) -> dict:
+    """The next revision number for the item, under a per-item lock."""
+    session.execute(
+        text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": "revision:" + values["item"]},
+    )
+    number = session.execute(
+        select(func.coalesce(func.max(document_revisions.c.revision), 0) + 1).where(
+            document_revisions.c.item == values["item"]
+        )
+    ).scalar_one()
+    return dict(
+        session.execute(
+            document_revisions.insert()
+            .values(values | {"revision": number})
+            .returning(*REVISION_COLUMNS)
+        )
+        .mappings()
+        .one()
+    )
+
+
+def revisions(session: Session, item: str) -> list[dict]:
+    return [
+        dict(row)
+        for row in session.execute(
+            select(*REVISION_COLUMNS)
+            .where(document_revisions.c.item == item)
+            .order_by(document_revisions.c.revision)
+            .limit(500)
+        ).mappings()
+    ]
+
+
+def revision(session: Session, item: str, number: int, *, content: bool = False) -> dict | None:
+    columns = list(document_revisions.c) if content else REVISION_COLUMNS
+    row = (
+        session.execute(
+            select(*columns).where(
+                document_revisions.c.item == item, document_revisions.c.revision == number
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row else None

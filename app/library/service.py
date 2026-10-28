@@ -14,7 +14,7 @@ from app.infrastructure.database.unit_of_work import has_ambient_transaction, un
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
 from app.infrastructure.operations import observe
 from app.infrastructure.operations.context import current_call
-from app.infrastructure.provider import get_provider
+from app.infrastructure.provider import source_provider as configured_provider
 from app.library import storage
 from app.library.embed import embed, model_name
 
@@ -294,7 +294,7 @@ def source_item(provider, key: str):
 def source_provider(settings):
     if has_ambient_transaction():
         raise NotFound()
-    return get_provider(settings.provider_root)
+    return configured_provider(settings)
 
 
 def source_items(provider):
@@ -761,6 +761,89 @@ def original(caller: Caller, request, attachment: bool) -> Response:
         media_type=version["media_type"],
         headers={
             "Content-Disposition": f'{disposition}; filename="{name}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+    )
+
+
+def _revision_source(caller: Caller, key: str, version: int | None):
+    """The readable source record and version a revision belongs to; checks access."""
+    sessions, settings = scope(caller)
+    live = source_item(source_provider(settings), key)
+    with unit_of_work(sessions, read_only=True) as session:
+        item, selected, _ = readable_source_version(session, caller, key, version, live)
+    return sessions, item, selected
+
+
+def _revision(row, item) -> dict:
+    return {
+        key: row[key]
+        for key in ("item", "revision", "source_version", "file_name", "media_type", "size_bytes")
+    } | {
+        "content_sha256": bytes(row["content_sha256"]).hex(),
+        "author_id": row["author_id"],
+        "created_at": row["created_at"].isoformat(),
+        "simulated": item["simulated"],
+        "classification": item["classification"],
+    }
+
+
+def create_revision(caller: Caller, request) -> dict:
+    import hashlib
+    import re
+
+    name = request.file_name
+    if name in {".", ".."} or any(c in name for c in "/\\") or any(ord(c) < 32 for c in name):
+        raise InvalidInput()
+    if not re.fullmatch(r"[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+", request.media_type):
+        raise InvalidInput()
+    sessions, item, selected = _revision_source(caller, request.item, request.version)
+    with unit_of_work(sessions) as session:
+        row = storage.add_revision(
+            session,
+            {
+                "item": request.item,
+                "source_version": selected["version"],
+                "file_name": name,
+                "media_type": request.media_type,
+                "size_bytes": len(request.content),
+                "content_sha256": hashlib.sha256(request.content).digest(),
+                "bytes": request.content,
+                "author_id": caller.user_id,
+            },
+        )
+    return _revision(row, item)
+
+
+def list_revisions(caller: Caller, key: str) -> list[dict]:
+    sessions, item, _ = _revision_source(caller, key, None)
+    with unit_of_work(sessions, read_only=True) as session:
+        return [_revision(row, item) for row in storage.revisions(session, key)]
+
+
+def read_revision(caller: Caller, request) -> dict:
+    sessions, item, _ = _revision_source(caller, request.item, None)
+    with unit_of_work(sessions, read_only=True) as session:
+        row = storage.revision(session, request.item, request.revision)
+    if row is None:
+        raise NotFound()
+    return _revision(row, item)
+
+
+def export_revision(caller: Caller, request) -> Response:
+    sessions, _, _ = _revision_source(caller, request.item, None)
+    with unit_of_work(sessions, read_only=True) as session:
+        row = storage.revision(session, request.item, request.revision, content=True)
+    if row is None:
+        raise NotFound()
+    name = row["file_name"].replace('"', "")
+    return Response(
+        bytes(row["bytes"]),
+        media_type=row["media_type"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox",

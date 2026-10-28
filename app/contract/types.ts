@@ -102,6 +102,8 @@ export interface FilingSuggestion { value: string | null; confidence: number; ev
 export interface Confidence { score: number; level: "high" | "medium" | "low"; reason: string }
 export interface SummaryResult { source: SummarySource; sentences: SummarySentence[]; mission: FilingSuggestion; silo: FilingSuggestion; stage: FilingSuggestion; confidence: Confidence; status: "supported" | "insufficient_evidence" }
 
+/** CRAFT's own full copy of a document; it always names the source version it came from and is never written back. */
+export interface Revision { item: string; revision: number; sourceVersion: number; fileName: string; mediaType: string; sizeBytes: number; contentSha256: string; authorId: Id; createdAt: string; simulated: boolean; classification: string }
 export interface CitationCheck { handle: CitationHandle }
 export interface CitationStatus { status: "current" | "changed" | "newer_version" | "withdrawn"; latestVersion: number }
 export interface CompareVersions { item: string; fromVersion: number; toVersion: number }
