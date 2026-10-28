@@ -12,14 +12,16 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 | Platform | Settings, database initialization, short transactions, request IDs, logs and health | Locked dependencies and the non-root application image |
 | Records | Accounts, conversations, runs, approvals, library, drafts, files, notes and skills | Numbered migrations with explicit grants |
 | Operations | One registry for HTTP routes, MCP tools and checked Python calls, with access checks | Trusted caller context and strict shapes |
-| Documents | Local provider with stable external-style IDs, office conversion for file inspection, search, citations and version differences over a frozen library index | Immutable source versions and mission grants |
+| Documents | Local provider with stable external-style IDs, office conversion for file inspection, search, citations and version differences over a frozen library index; one provider interface with a simulated adapter and a LiveLink-shaped test adapter (`CRAFT_PROVIDER`), and CRAFT-owned revisions of documents | Immutable source versions and mission grants |
 | Datacube | Missions, parameters, values, facets, comparisons, similarity and approved value publication | Library evidence and requester approval |
 | Agent | Model adapter, chat stream, saved history, approval recovery, working notes, saved skills, chart and calculation tools; turns run on the agent worker and survive a closed page or an app restart | Native HTTP MCP, server-owned state and requester decisions |
 | Chat | Rename, grouping, archive and unarchive | Owned conversations |
 | Languages | Each person picks English or French replies; French replies show the English originals of what they cite | `PATCH /api/me` |
-| Workspace | A personal JupyterLab beside chat, the `craft` package, analysis and graphing helpers, editable local copies, and workspace skills | Owned containers and workspace tokens |
+| Workspace | A personal JupyterLab beside chat, the `craft` package (`import craft` is the only import a notebook needs; `craft.check()` lists missing tools), analysis and graphing helpers, editable local copies, and workspace skills | Owned containers and workspace tokens |
+| Charts, notebooks and Office files | Charts the agent makes, notebooks co-edited with the agent, Word and PowerPoint output with a page preview, and notebook runs as sandboxed background jobs | Workspace image with LibreOffice and Poppler |
 | Background work | Jobs on PostgreSQL with three workers (agent, interactive, bulk), retries for transient failures, crash recovery and job routes; a job is declared on its operation | Procrastinate; no separate queue service |
 | Dataset | A frozen library index and datacube, loaded by `scripts/seed` with no model calls | The private frozen set and the numbered migrations |
+| Local cluster | The API, the three workers, craft-id and PostgreSQL run from one Helm chart on Colima's k3s, beside Compose ([deploy/README.md](../../deploy/README.md)) | The same chart the hosted VM will use |
 | Interface | No interface in this repository. The product interface is the separate `craft-frontend` repository | It compiles against `app/contract/` |
 
 ### Next
@@ -27,9 +29,10 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 Each item is planned and has a trigger met or close. The maintainer chooses the order; the list is not a sequence.
 
 - **One API contract with the product interface**: `app/contract/` is the single source, published to the partner team's contract repository, with sign-in and the routes the product interface calls.
-- **Azure deployment**: staging, then production, on Azure Container Apps with Azure Database for PostgreSQL, Azure Files for the document lake, Key Vault, and Azure Front Door on the project's domain.
-- **Charts, notebooks and Office files**: charts the agent makes, notebooks worked on with the agent, Word and PowerPoint output, and notebook runs as sandboxed background jobs.
-- **Provider adapters and CRAFT revisions**: one provider interface with several adapters, a LiveLink-shaped test server, and CRAFT-owned revisions of documents (full copies that point at their source version), exported at any point in time and pushed back only after approval.
+- **Workspaces on Kubernetes**: JupyterHub starts each person's workspace when needed and stops it when idle, keeping their files; notebook runs become Kubernetes Jobs; a person's own JupyterLab activity is logged without code or content.
+- **One small Azure VM**: a cheap proof of concept on one VM running k3s with the same Helm chart, under the project's domain. AKS, a registry, managed databases, Azure Files, Front Door, Key Vault and CI wait until there is a concrete reason.
+- **One way to run**: once Kubernetes works locally and on the VM, the Docker runtime paths and Compose are removed.
+- **End-to-end verification**: the whole stack checked start to finish on one machine, with real model calls capped at $10 in total.
 
 ## Deferred
 
@@ -46,15 +49,15 @@ Each row stays as it is until its trigger happens. Not planned: moving sign-in t
 | Retrieval | PostgreSQL hybrid | Azure AI Search with the semantic ranker | A real corpus outgrows PostgreSQL |
 | Data | Simulated corpus; next, a LiveLink-shaped test server | Real LiveLink, then SharePoint and OneDrive through Microsoft Graph | Access and a service account are granted |
 | Document analysis | Text extraction and optional OCR over the frozen dataset | Structured table intake: document-analysis rows become datacube candidates a person approves | The dataset is unfrozen and reindexed |
-| Hosting | Docker Compose | Azure Container Apps with continuous deployment | Next (see above) |
+| Hosting | Docker Compose, and the same services on a local k3s cluster | One small VM running k3s (next), then AKS, a registry and continuous deployment | A concrete reason to expand past the VM |
 | Security | Local only | Security assessment (Protected B), private endpoints, secret scanning | Before production data |
 | Audit | Append-only approval history | Write-once storage, retention, export | Deployment |
 | Logs | stdout and `call_log` | OpenTelemetry, Azure Monitor, retention | Deployment |
 | Run limits | Starting values | Measured values | Evaluation set exists |
 | Confidence calibration | Six evidence inputs and configured gate | Calibrated weights and thresholds | The labelled evaluation set exists |
-| Code execution | Approved `run_code` in the owner's JupyterLab | Hosted sandbox (Container Apps dynamic sessions) | Azure deployment and a sessions trial |
+| Code execution | Approved `run_code` in the owner's JupyterLab; notebook jobs in Docker containers | Notebook jobs as Kubernetes Jobs (next) | Workspaces on Kubernetes |
 | Load | Not sized | Sized to the load profile | Before sizing infrastructure |
-| Database hosting | Local container | Azure Database for PostgreSQL with pgvector, same migrations | Next (see above) |
+| Database hosting | Local container or a PostgreSQL pod in the cluster | Azure Database for PostgreSQL with pgvector, same migrations | A concrete reason to expand past the VM |
 | Database logins | Logins created by `initdb.sh` | Logins and grants from infrastructure code; managed identity | Deployment |
 | Database recovery | Simulated data, no backups | Managed backups, retention and recovery | Before real data |
 | Document permissions | Mission grants ([access](datacube.md#access)) | Source-system permissions | Real connectors |
