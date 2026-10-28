@@ -2,12 +2,12 @@
 
 import base64
 import hashlib
+import logging
 import secrets
 from collections import defaultdict, deque
 from datetime import timedelta
 from functools import lru_cache
 from threading import Lock
-from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -18,10 +18,19 @@ from app.infrastructure import access
 from app.infrastructure.access import Caller
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.database.unit_of_work import unit_of_work
-from app.infrastructure.errors import Conflict, InvalidInput, NotFound, NotSignedIn, RateLimited
+from app.infrastructure.errors import (
+    ApiError,
+    Conflict,
+    InvalidInput,
+    NotFound,
+    NotSignedIn,
+    RateLimited,
+)
 from app.infrastructure.grants import insert_grant, remove_grant
 from app.infrastructure.operations.context import current_call, session_cookie, signin_cookie
 from app.infrastructure.provider.simulated import SILOS
+
+logger = logging.getLogger("craft.accounts")
 
 
 def change(caller: Caller, request, remove: bool) -> None:
@@ -213,9 +222,10 @@ def finish_sign_in(caller: Caller, cookie: str | None, state, code) -> tuple[str
     target = row["return_to"]
     try:
         claims = oidc.finish(settings, row["flow"], state, code)
-    except oidc.SignInFailed:
+    except ApiError as error:  # SignInFailed, or the provider unreachable or misconfigured
+        logger.warning("sign-in failed", extra={"fields": {"error_type": type(error).__name__}})
         return target, "failed"
-    tenant, oid = UUID(claims["tid"]), UUID(claims["oid"])
+    tenant, oid = claims["tid"], claims["oid"]
     email = str(claims.get("email") or claims.get("preferred_username") or "").lower() or None
     with unit_of_work(caller.sessions) as session:
         user = storage.linked(session, tenant, oid, email)

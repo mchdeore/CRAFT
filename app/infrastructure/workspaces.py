@@ -260,9 +260,12 @@ async def write_text(target: JupyterTarget, path: str, content: str) -> dict[str
         return saved.json()
 
 
-async def read_notebook(target: JupyterTarget, path: str) -> dict[str, Any]:
+async def read_notebook(target: JupyterTarget, path: str) -> dict[str, Any] | None:
+    """The notebook, or None when Jupyter says it is missing; any other failure raises."""
     async with jupyter_http(target) as http:
         found = await http.get(_contents(path), params={"type": "notebook", "content": "1"})
+        if found.status_code == 404:
+            return None
         found.raise_for_status()
         return found.json()["content"]
 

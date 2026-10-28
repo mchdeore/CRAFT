@@ -216,7 +216,7 @@ def run_job_state(caller, run) -> str | None:
 
 def cancel_run(caller, run) -> None:
     """Stop the run's job; one still queued ends here, a running one ends on its worker."""
-    from app.jobs.handlers import active_job, cancel_job_by_id, job_state
+    from app.jobs.handlers import active_job, cancel_job_by_id, cancel_queued_job
 
     with unit_of_work(scope(caller)) as session:
         segment = storage.owned_segment(session, caller.user_id, run)
@@ -225,10 +225,12 @@ def cancel_run(caller, run) -> None:
         job = active_job(session, RUN_LOCK + str(run))
         if job is None:
             raise Conflict()
-        queued = job_state(session, job) in {"queued", "scheduled"}
-        cancel_job_by_id(session, job)
-        if queued:
+        # Deciding "still queued" and cancelling in one statement means a worker
+        # that claims the job meanwhile is stopped instead and writes the end itself.
+        if cancel_queued_job(session, job):
             storage.append_event(session, run, segment, CANCELLED)
+        else:
+            cancel_job_by_id(session, job)
 
 
 # Worker side: sessions come from the worker, not a request.

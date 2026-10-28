@@ -7,6 +7,7 @@ Job arguments are JSON and hold IDs only: never document text, prompts or tokens
 """
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import os
@@ -16,7 +17,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import import_module
@@ -300,6 +301,14 @@ def _sample_queues(sessions: sessionmaker[Session], queues: list[str], concurren
         storage.sample_queues(session, queues, concurrency, STALLED_SECONDS)
 
 
+async def _step(name: str, step: Awaitable[object]) -> None:
+    try:
+        await step
+    except Exception as error:
+        fields = {"name": name, "error_type": type(error).__name__}
+        logger.warning("job maintenance failed", extra={"fields": fields})
+
+
 async def _maintain(
     app: App,
     settings: Settings,
@@ -310,16 +319,16 @@ async def _maintain(
     next_sample = time.monotonic()
     while True:
         HEARTBEAT_FILE.touch()
-        try:
-            await recover(app, settings, sessions)
-            for func in MAINTENANCE:
-                await asyncio.to_thread(func, sessions)
-            now = time.monotonic()
-            if now >= next_sample:
-                await asyncio.to_thread(_sample_queues, sessions, queues, concurrency)
-                next_sample = now + SAMPLE_SECONDS
-        except Exception:
-            logger.warning("job maintenance failed")
+        # Each step logs its own failure, so one failing step doesn't skip the others.
+        await _step("recover", recover(app, settings, sessions))
+        for func in MAINTENANCE:
+            await _step(func.__name__, asyncio.to_thread(func, sessions))
+        now = time.monotonic()
+        if now >= next_sample:
+            await _step(
+                "sample_queues", asyncio.to_thread(_sample_queues, sessions, queues, concurrency)
+            )
+            next_sample = now + SAMPLE_SECONDS
         await asyncio.sleep(RECOVER_SECONDS)
 
 
@@ -354,6 +363,8 @@ async def work(
             await worker.run()
         finally:
             maintenance.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await maintenance
             engine.dispose()
 
 

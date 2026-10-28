@@ -8,6 +8,7 @@ from uuid import uuid4
 import jwt
 import msgspec
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
@@ -191,3 +192,40 @@ def test_only_the_three_provider_settings_change_for_entra() -> None:
         "oidc_client_id",
         "oidc_client_secret",
     }
+
+
+@pytest.mark.parametrize("document", ["list", "no-endpoints"])
+def test_a_malformed_discovery_document_is_refused(site, monkeypatch, document) -> None:
+    document = [] if document == "list" else {"issuer": site.provider.authority}
+    answer = SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: document)
+    monkeypatch.setattr(site.provider.http, "get", lambda *a, **k: answer)
+    with pytest.raises(oidc.ApiError):
+        oidc.metadata(site.settings.oidc_authority)
+
+
+def test_a_non_uuid_object_id_is_refused(site, monkeypatch) -> None:
+    _, flow = oidc.begin(site.settings)
+    answer = SimpleNamespace(
+        status_code=200, json=lambda: {"id_token": forged(site, flow, oid="x")}
+    )
+    monkeypatch.setattr(site.provider.http, "post", lambda *a, **k: answer, raising=False)
+    with pytest.raises(oidc.SignInFailed):
+        oidc.finish(site.settings, flow, flow["state"], "code")
+
+
+def test_an_unreachable_provider_at_the_callback_fails_the_sign_in(site, monkeypatch) -> None:
+    username, password, _ = site.provider.account()
+    start = site.browser.get("/api/auth/login", params={"returnTo": "/after"})
+    authorize = start.headers["location"]
+    form = dict(parse_qsl(urlsplit(authorize).query))
+    answer = site.provider.client.post(
+        authorize.split("?")[0], data=form | {"username": username, "password": password}
+    )
+    monkeypatch.setattr(oidc, "_metadata", {})
+
+    def down(*args, **kwargs):
+        raise requests.ConnectionError()
+
+    monkeypatch.setattr(site.provider.http, "get", down)
+    done = site.browser.get(answer.headers["location"])
+    assert done.status_code == 302 and done.headers["location"] == "/?signIn=failed"

@@ -123,6 +123,14 @@ def cancel(session: Session, job_id: int) -> bool:
     return cancelled is not None
 
 
+def cancel_queued(session: Session, job_id: int) -> bool:
+    """Cancel the job only if no worker has claimed it yet, in one statement."""
+    cancelled = session.execute(
+        text("select procrastinate_cancel_job_v1(:id, false, false)"), {"id": job_id}
+    ).scalar_one()
+    return cancelled is not None
+
+
 def counts(session: Session):
     return list(
         session.execute(
