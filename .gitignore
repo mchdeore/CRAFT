@@ -32,3 +32,6 @@ instance/
 /app/contract/node_modules/
 
 # Frontend dependencies and test output
+/workspace/labextension/node_modules/
+/workspace/labextension/lib/
+/workspace/src/craft_preview/labextension/

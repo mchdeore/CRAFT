@@ -38,6 +38,7 @@ dev = [
     "pyright==1.1.414",
     "fpdf2==2.8.9",
     "pandas==2.3.3",  # the workspace package's tests read and write tables
+    "docxtpl==0.20.1",  # and fill Word templates
     "msal>=1.39.0",
 ]
 

@@ -17,6 +17,7 @@ analysis = [
   "scikit-learn==1.9.1",
   "python-docx==1.2.0",
   "python-pptx==1.0.2",
+  "docxtpl==0.20.1",
   "pypdf==6.21.1",
   "pyarrow==26.0.0",
   "sympy==1.14.0",
@@ -48,3 +49,4 @@ members = []
 testpaths = ["tests"]
 pythonpath = ["src", "../.."]
 addopts = "-q --import-mode=importlib"
+markers = ["docker: requires the workspace image and Docker daemon"]

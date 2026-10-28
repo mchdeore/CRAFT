@@ -48,7 +48,8 @@ class JupyterTarget:
             or not self.token
             or any(value.isspace() for value in self.token)
             or str(UUID(self.kernel_id)) != self.kernel_id
-            or self.bridge_host not in {"127.0.0.1", "localhost", "host.docker.internal"}
+            # "app": the compose app container, which the workspace reaches on its network.
+            or self.bridge_host not in {"127.0.0.1", "localhost", "host.docker.internal", "app"}
             or not isinstance(self.bridge_port, int)
             or isinstance(self.bridge_port, bool)
             or not 0 <= self.bridge_port <= 65535
@@ -64,6 +65,8 @@ def owner_entry(user_id: UUID | None) -> dict | None:
     path = os.environ.get("USER_WORKSPACES_FILE")
     if not path or user_id is None:
         return None
+    if not Path(path).is_file():
+        return None  # no workspace has been started (scripts/workspace up writes the file)
     endpoints = json.loads(Path(path).read_text())
     if not isinstance(endpoints, dict):
         raise ValueError("Invalid private workspace configuration")

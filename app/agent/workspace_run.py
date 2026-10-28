@@ -222,7 +222,9 @@ class WorkspaceRunController:
             await self._resources.enter_async_context(self._bridge.run())
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._resources.callback(listener.close)
-            listener.bind(("127.0.0.1", self._target.bridge_port))
+            # In compose the workspace connects from its own container; the port is never published.
+            listen = "0.0.0.0" if self._target.bridge_host == "app" else "127.0.0.1"
+            listener.bind((listen, self._target.bridge_port))
             listener.listen(128)
             listener.setblocking(False)
             port = listener.getsockname()[1]
