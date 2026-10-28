@@ -1,0 +1,18 @@
+# Values for the local cluster (Colima's k3s): the three workers compose runs.
+workers:
+  - name: worker-agent
+    queues: agent
+    concurrency: { agent: 50 }
+    memory: 1Gi
+    stopSeconds: 900         # a chat turn's ceiling
+    inApiPod: true           # calls the API's MCP on 127.0.0.1
+  - name: worker-interactive
+    queues: interactive
+    concurrency: { interactive: 50 }
+    memory: 768Mi
+    stopSeconds: 120
+  - name: worker-bulk
+    queues: bulk
+    concurrency: { bulk: 50 }
+    memory: 768Mi
+    stopSeconds: 120

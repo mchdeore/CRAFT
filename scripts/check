@@ -3,13 +3,15 @@
 #   scripts/check        quick: lint, format, types, fast tests (+ contract types when the contract changed)
 #   scripts/check full   milestone: lock, migrations, every test except live, the workspace image, compose, contract types
 # Tests use a disposable PostgreSQL container (craft-check-db) on port 55481 and the passwords in .env.
+# CHECK_DB_PORT=<port> uses the database already on 127.0.0.1:<port> instead, such as the
+# local cluster's through kubectl port-forward (deploy/README.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mode=${1:-quick}
 [ "$mode" = quick ] || [ "$mode" = full ] || { echo "usage: scripts/check [full]" >&2; exit 2; }
 [ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
 export DOCKER_CONTEXT=${DOCKER_CONTEXT:-colima} UV_NO_PROGRESS=1
-export CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_PORT=55481
+export CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_PORT=${CHECK_DB_PORT:-55481}
 DB=craft-check-db
 failed=()
 step() { # name command...
@@ -19,6 +21,10 @@ step() { # name command...
 }
 
 start_db() {
+  if [ -n "${CHECK_DB_PORT:-}" ]; then
+    pg_isready -q -h 127.0.0.1 -p "$CHECK_DB_PORT" && return 0
+    echo "No database answers on 127.0.0.1:$CHECK_DB_PORT" >&2; return 1
+  fi
   if [ "$(docker inspect -f '{{.State.Health.Status}}' $DB 2>/dev/null)" = healthy ]; then return; fi
   docker rm -f $DB >/dev/null 2>&1 || true
   # Only the passwords come from .env; the port stays the check port.

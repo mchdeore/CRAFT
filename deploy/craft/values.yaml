@@ -1,0 +1,70 @@
+# Defaults for the CRAFT chart. deploy/local.yaml holds the local cluster's values.
+image:
+  repository: craft-app
+  tag: local
+  pullPolicy: Never          # built by Colima's Docker engine, which k3s uses directly
+
+# Settings come from one Secret made from .env (deploy/README.md). Each container reads only the
+# keys it needs, as compose passes them; a key missing from .env leaves the app's default.
+secret: craft-env
+settings:
+  - CRAFT_APP_DB_PASSWORD
+  - CRAFT_DATABASE_NAME
+  - CRAFT_LOG_LEVEL
+  - CRAFT_ALLOWED_ORIGINS
+  - CRAFT_CROSS_ORIGIN_BROWSER
+  - CRAFT_MODEL_MAIN
+  - CRAFT_MODEL_CHECK
+  - CRAFT_MODEL_EMBEDDING
+  - CRAFT_MODEL_ENDPOINT
+  - CRAFT_MODEL_KEY
+  - CRAFT_MODEL_MAX_OUTPUT_TOKENS
+  - CRAFT_AGENT_RUN_SECONDS
+  - CRAFT_WOLFRAM_APP_ID
+  - CRAFT_MCP_URL
+  - CRAFT_OIDC_AUTHORITY
+  - CRAFT_OIDC_CLIENT_ID
+  - CRAFT_OIDC_CLIENT_SECRET
+  - CRAFT_OIDC_REDIRECT_URI
+
+# Each container's memory limit is in its own values; this is what each one reserves, so a
+# small node can start everything.
+memoryRequest: 256Mi
+
+# The provider files, mounted read-only at /provider. Empty: an empty folder.
+provider:
+  hostPath: ""
+
+api:
+  port: 8000
+  service:
+    type: ClusterIP
+  memory: 1Gi
+
+# One Deployment per worker, each with its queues and jobs at once per queue
+# (app/infrastructure/queue.py).
+# inApiPod: the worker runs inside the API's pod instead, sharing its localhost, because chat
+# turns call the API's MCP on 127.0.0.1 (CRAFT_MCP_URL must be a loopback address).
+workers:
+  - name: worker
+    queues: agent,interactive,bulk
+    concurrency: { agent: 50, interactive: 50, bulk: 50 }
+    memory: 1Gi
+    stopSeconds: 900         # a chat turn's ceiling
+    inApiPod: true
+
+# craft-id, the stand-in for Entra (needs CRAFT_ID_DB_PASSWORD in the Secret).
+id:
+  enabled: true
+  port: 8100
+  publicUrl: http://localhost:8100
+  service:
+    type: ClusterIP
+  memory: 256Mi
+
+# PostgreSQL with pgvector, first booted by app/infrastructure/database/initdb.sh.
+postgres:
+  enabled: true
+  image: pgvector/pgvector:0.8.7-pg18
+  storage: 5Gi
+  memory: 1Gi

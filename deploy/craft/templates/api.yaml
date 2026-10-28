@@ -1,0 +1,62 @@
+{{- $inPod := list }}
+{{- range .Values.workers }}{{ if .inApiPod }}{{ $inPod = append $inPod . }}{{ end }}{{ end }}
+{{- $grace := 30 }}
+{{- range $inPod }}{{ if gt (int .stopSeconds) $grace }}{{ $grace = int .stopSeconds }}{{ end }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
+    spec:
+      terminationGracePeriodSeconds: {{ $grace }}
+      # No service-link variables: services named craft-* would add unknown CRAFT_* settings.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: api
+          {{- include "craft.image" . | nindent 10 }}
+          {{- include "craft.env" . | nindent 10 }}
+          ports: [{ name: http, containerPort: {{ .Values.api.port }} }]
+          {{- include "craft.appMounts" "api" | nindent 10 }}
+          startupProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 10
+          # Ready once the database answers at the expected migration (after scripts/seed).
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 4
+          resources:
+            limits: { memory: {{ .Values.api.memory }} }
+            requests: { memory: {{ .Values.memoryRequest }} }
+          {{- include "craft.containerSecurity" . | nindent 10 }}
+        {{- range $inPod }}
+        {{- include "craft.worker" (dict "worker" . "root" $) | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- include "craft.provider" . | nindent 8 }}
+        - { name: tmp-api, emptyDir: {} }
+        {{- range $inPod }}
+        - { name: tmp-{{ .name }}, emptyDir: {} }
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+spec:
+  type: {{ .Values.api.service.type }}
+  selector: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports: [{ name: http, port: {{ .Values.api.port }}, targetPort: http }]
