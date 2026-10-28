@@ -45,6 +45,10 @@ def cancel_by_id(session: Session, job_id: int) -> bool:
     return storage.cancel(session, job_id)
 
 
+def cancel_queued(session: Session, job_id: int) -> bool:
+    return storage.cancel_queued(session, job_id)
+
+
 def shape(row) -> dict[str, Any]:
     result = {
         "job_id": str(row["job_id"]),

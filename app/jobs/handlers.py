@@ -86,6 +86,11 @@ def cancel_job_by_id(session, job_id: int) -> bool:
     return service.cancel_by_id(session, job_id)
 
 
+def cancel_queued_job(session, job_id: int) -> bool:
+    """Cancel a job the calling feature authorized, only while it is still queued."""
+    return service.cancel_queued(session, job_id)
+
+
 def queue_counts(sessions) -> dict:
     """Counts and last-hour percentiles for /health/queue."""
     return service.health(sessions)

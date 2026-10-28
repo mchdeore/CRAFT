@@ -88,6 +88,20 @@ def test_a_lock_returns_the_active_job(jobs):
     assert jobs.defer(test_jobs.sleep, key=key) != held
 
 
+def test_a_claimed_job_is_not_cancelled_as_queued(jobs, owner_engine):
+    from app.jobs.handlers import cancel_queued_job
+
+    held = jobs.defer(test_jobs.sleep, key="claimed-" + str(time.time_ns()))
+    with owner_engine.begin() as connection:
+        connection.execute(
+            text("update procrastinate_jobs set status = 'doing' where id = :id"), {"id": held}
+        )
+    with jobs.sessions.begin() as session:
+        assert cancel_queued_job(session, held) is False
+    assert jobs.row(held).state == "started"
+    jobs.cancel(held)
+
+
 def test_calling_a_job_operation_queues_it_and_the_worker_logs_a_child_call(settings, jobs):
     caller = jobs.caller
     with queue.worker_thread(settings, ["interactive"]):
