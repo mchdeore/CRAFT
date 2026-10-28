@@ -5,7 +5,9 @@ subfolder. The file type follows the extension. Hidden files and symlinks are
 outside these helpers.
 """
 
+import contextlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -130,11 +132,17 @@ def save(value: Any, name: str | Path, **options: Any) -> str:
     own files. Dictionaries and lists save as JSON; text saves as text. Parent
     folders are created.
     """
-    target = path(name)
-    suffix = target.suffix.lower()
+    final = path(name)
+    suffix = final.suffix.lower()
     if not suffix:
         raise ValueError("Give the name an extension, such as results.csv or chart.png")
-    target.parent.mkdir(parents=True, exist_ok=True)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    with _replace(final) as target:
+        _write(value, target, suffix, options)
+    return final.relative_to(_root.USER_ROOT).as_posix()
+
+
+def _write(value: Any, target: Path, suffix: str, options: dict[str, Any]) -> None:
     kind = type(value).__module__.split(".")[0]
     if kind == "pandas":
         frame = value.to_frame() if hasattr(value, "to_frame") and value.ndim == 1 else value
@@ -160,15 +168,29 @@ def save(value: Any, name: str | Path, **options: Any) -> str:
         target.write_bytes(value)
     else:
         target.write_text(str(value), encoding="utf-8")
-    return target.relative_to(_root.USER_ROOT).as_posix()
 
 
 def excel(name: str | Path, **sheets: Any) -> str:
     """Save several DataFrames as named sheets of one workbook."""
-    target = path(name)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _excel(sheets, target)
-    return target.relative_to(_root.USER_ROOT).as_posix()
+    final = path(name)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    with _replace(final) as target:
+        _excel(sheets, target)
+    return final.relative_to(_root.USER_ROOT).as_posix()
+
+
+@contextlib.contextmanager
+def _replace(final: Path) -> Iterator[Path]:
+    """Write to a hidden file beside ``final``, then swap it in: a failed save keeps the old file.
+
+    The hidden name keeps the extension, so writers still pick the format from it.
+    """
+    partial = final.with_name(f".{final.stem}.part{final.suffix}")
+    try:
+        yield partial
+        partial.replace(final)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def sql(query: str, **tables: Any):

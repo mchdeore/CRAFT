@@ -403,3 +403,47 @@ print("ok")
         tmpfs={"/tmp": "", "/workspace": "uid=1000"},
     )
     assert output.strip().endswith(b"ok")
+
+
+def test_a_failed_save_keeps_the_previous_file_and_leaves_nothing_behind(tmp_path, monkeypatch):
+    from craft import _root, files
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    assert files.save({"a": 1}, "out/data.json") == "out/data.json"
+
+    class Broken:
+        def __str__(self):
+            raise RuntimeError("serializer failed")
+
+    with pytest.raises(RuntimeError):
+        files.save(Broken(), "out/data.json")
+    assert (tmp_path / "out/data.json").read_text() == '{\n  "a": 1\n}\n'
+    assert [p.name for p in (tmp_path / "out").iterdir()] == ["data.json"]
+
+
+def test_the_preview_refuses_an_oversized_source_without_converting(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from craft import _root
+
+    # Jupyter Server lives only in the workspace image; stand in for the two names used.
+    handlers = ModuleType("jupyter_server.base.handlers")
+    handlers.APIHandler = object  # type: ignore[attr-defined]
+    utils = ModuleType("jupyter_server.utils")
+    utils.url_path_join = lambda *parts: "/".join(parts)  # type: ignore[attr-defined]
+    for name, module in {
+        "jupyter_server": ModuleType("jupyter_server"),
+        "jupyter_server.base": ModuleType("jupyter_server.base"),
+        "jupyter_server.base.handlers": handlers,
+        "jupyter_server.utils": utils,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delitem(sys.modules, "craft_preview", raising=False)
+    import craft_preview
+
+    monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
+    monkeypatch.setattr(craft_preview, "MAX_BYTES", 10)
+    (tmp_path / "big.docx").write_bytes(b"x" * 11)
+    with pytest.raises(craft_preview.TooLarge):
+        asyncio.run(craft_preview.preview("big.docx"))

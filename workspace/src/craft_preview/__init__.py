@@ -16,8 +16,13 @@ from jupyter_server.utils import url_path_join  # pyright: ignore[reportMissingI
 from tornado import web
 
 SUFFIXES = {".docx", ".xlsx", ".pptx"}
+MAX_BYTES = 25 * 1024 * 1024  # CRAFT's file limit
 CACHE = Path(tempfile.gettempdir(), "craft-preview")
 _one_at_a_time = asyncio.Lock()
+
+
+class TooLarge(Exception):
+    pass
 
 
 def _jupyter_server_extension_points():
@@ -35,7 +40,10 @@ async def preview(name: str) -> bytes:
     source = files.path(name)
     if source.suffix.lower() not in SUFFIXES or not source.is_file():
         raise FileNotFoundError(name)
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    if source.stat().st_size > MAX_BYTES:
+        raise TooLarge(name)
+    with source.open("rb") as file:
+        digest = hashlib.file_digest(file, "sha256").hexdigest()
     cached = CACHE / f"{digest}.pdf"
     if cached.is_file():
         return cached.read_bytes()
@@ -57,6 +65,8 @@ class PreviewHandler(APIHandler):
             pdf = await preview(name)
         except (FileNotFoundError, ValueError):
             raise web.HTTPError(404) from None
+        except TooLarge:
+            raise web.HTTPError(413, "The file is too large to preview here") from None
         except Exception:
             raise web.HTTPError(502, "The preview could not be rendered") from None
         self.set_header("Content-Type", "application/pdf")
