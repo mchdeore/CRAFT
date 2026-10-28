@@ -7,6 +7,7 @@ from collections import defaultdict, deque
 from datetime import timedelta
 from functools import lru_cache
 from threading import Lock
+from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -19,7 +20,7 @@ from app.infrastructure.database.metadata import metadata
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound, NotSignedIn, RateLimited
 from app.infrastructure.grants import insert_grant, remove_grant
-from app.infrastructure.operations.context import current_call, session_cookie
+from app.infrastructure.operations.context import current_call, session_cookie, signin_cookie
 from app.infrastructure.provider.simulated import SILOS
 
 
@@ -54,6 +55,8 @@ def dummy_hash() -> str:
 def sign_in(caller: Caller, request):
     if caller.sessions is None or caller.settings is None:
         raise NotSignedIn()
+    if not caller.settings.local_password_signin:
+        raise NotFound()  # people sign in at the identity provider (auth_login)
     username = request.username.lower()
     at = access.now()
     with ATTEMPT_LOCK:
@@ -74,8 +77,6 @@ def sign_in(caller: Caller, request):
         raise NotSignedIn()
     # Hashing and verification finish before the write transaction.
     replacement = PASSWORDS.hash(request.password) if PASSWORDS.check_needs_rehash(digest) else None
-    raw = secrets.token_bytes(32)
-    cookie = base64.urlsafe_b64encode(raw).decode().rstrip("=")
     with unit_of_work(caller.sessions) as session:
         current = storage.account(session, username, lock=True)
         if (
@@ -90,40 +91,153 @@ def sign_in(caller: Caller, request):
                 .where(storage.local_credentials.c.user_id == user["id"])
                 .values(password_hash=replacement, updated_at=at)
             )
-        identifier = session.execute(
-            storage.auth_sessions.insert()
-            .values(
-                user_id=user["id"],
-                token_sha256=hashlib.sha256(raw).digest(),
-                created_at=at,
-                last_seen_at=at,
-                idle_expires_at=at + timedelta(hours=caller.settings.session_idle_hours),
-                expires_at=at + timedelta(hours=caller.settings.session_absolute_hours),
-            )
-            .returning(storage.auth_sessions.c.id)
-        ).scalar_one()
-        assigned = storage.roles_for(session, user["id"])
+        assigned = open_session(caller, session, user["id"])
     from app.accounts.handlers import Me
 
-    context = current_call.get()
-    if context is not None:
-        from dataclasses import replace
-
-        context.caller = replace(
-            caller, user_id=user["id"], roles=frozenset(assigned), auth_session_id=identifier
-        )
-    session_cookie(
-        cookie,
-        caller.settings.session_absolute_hours * 3600,
-        cross_origin_browser=caller.settings.cross_origin_browser,
-    )
     return Me(
         id=user["id"],
         username=user["username"],
         display_name=user["display_name"],
         roles=assigned,
         language=user["language"],
+        email=user["email"],
     )
+
+
+def open_session(caller: Caller, session, user) -> list:
+    """A new browser session for `user` in the caller's transaction; the cookie is set on reply."""
+    assert caller.settings is not None
+    at = access.now()
+    raw = secrets.token_bytes(32)
+    cookie = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    identifier = session.execute(
+        storage.auth_sessions.insert()
+        .values(
+            user_id=user,
+            token_sha256=hashlib.sha256(raw).digest(),
+            created_at=at,
+            last_seen_at=at,
+            idle_expires_at=at + timedelta(hours=caller.settings.session_idle_hours),
+            expires_at=at + timedelta(hours=caller.settings.session_absolute_hours),
+        )
+        .returning(storage.auth_sessions.c.id)
+    ).scalar_one()
+    assigned = storage.roles_for(session, user)
+    context = current_call.get()
+    if context is not None:
+        from dataclasses import replace
+
+        context.caller = replace(
+            caller, user_id=user, roles=frozenset(assigned), auth_session_id=identifier
+        )
+    session_cookie(
+        cookie,
+        caller.settings.session_absolute_hours * 3600,
+        cross_origin_browser=caller.settings.cross_origin_browser,
+    )
+    return assigned
+
+
+FLOW_LIFETIME = timedelta(minutes=10)
+
+
+def return_target(settings, value: str | None) -> str:
+    """A same-origin path, or a URL on an allowed browser origin; anything else is `/`."""
+    from urllib.parse import urlsplit
+
+    value = value or "/"
+    if value.startswith("/") and not value.startswith("//") and "\\" not in value:
+        return value
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "/"
+    origins = {origin.strip() for origin in settings.allowed_origins.split(",")}
+    return value if f"{parsed.scheme}://{parsed.netloc}" in origins and not parsed.username else "/"
+
+
+def start_sign_in(caller: Caller, return_to: str | None) -> str:
+    """Remember the round trip under a fresh cookie and return the provider's authorize URL."""
+    from app.accounts import oidc
+
+    settings = caller.settings
+    if caller.sessions is None or settings is None or not settings.oidc_authority:
+        raise NotFound()
+    url, flow = oidc.begin(settings)
+    raw = secrets.token_bytes(32)
+    at = access.now()
+    with unit_of_work(caller.sessions) as session:
+        session.execute(
+            storage.sign_in_flows.delete().where(storage.sign_in_flows.c.expires_at < at)
+        )
+        session.execute(
+            storage.sign_in_flows.insert().values(
+                id_sha256=hashlib.sha256(raw).digest(),
+                flow=flow,
+                return_to=return_target(settings, return_to),
+                expires_at=at + FLOW_LIFETIME,
+            )
+        )
+    signin_cookie(base64.urlsafe_b64encode(raw).decode().rstrip("="), FLOW_LIFETIME)
+    return url
+
+
+def finish_sign_in(caller: Caller, cookie: str | None, state, code) -> tuple[str, str | None]:
+    """Check the provider's answer and open a session: (where to go, problem or None).
+
+    Problems: `failed` (the round trip or token did not check out) or `no-access` (a real person
+    CRAFT has not let in yet; their request is recorded for `craft users approve`).
+    """
+    from app.accounts import oidc
+
+    settings = caller.settings
+    if caller.sessions is None or settings is None or not settings.oidc_authority:
+        raise NotFound()
+    signin_cookie("", timedelta(0))
+    try:
+        raw = base64.urlsafe_b64decode((cookie or "") + "=" * (-len(cookie or "") % 4))
+    except ValueError:
+        raw = b""
+    with unit_of_work(caller.sessions) as session:
+        row = (
+            session.execute(
+                storage.sign_in_flows.delete()
+                .where(storage.sign_in_flows.c.id_sha256 == hashlib.sha256(raw).digest())
+                .returning(storage.sign_in_flows)
+            )
+            .mappings()
+            .first()
+        )
+    if row is None or len(raw) != 32 or row["expires_at"] <= access.now():
+        return "/", "failed"
+    target = row["return_to"]
+    try:
+        claims = oidc.finish(settings, row["flow"], state, code)
+    except oidc.SignInFailed:
+        return target, "failed"
+    tenant, oid = UUID(claims["tid"]), UUID(claims["oid"])
+    email = str(claims.get("email") or claims.get("preferred_username") or "").lower() or None
+    with unit_of_work(caller.sessions) as session:
+        user = storage.linked(session, tenant, oid, email)
+        if user is None or user["disabled_at"] is not None:
+            if user is None:
+                storage.request_access(session, tenant, oid, email, str(claims.get("name") or ""))
+            return target, "no-access"
+        open_session(caller, session, user["id"])
+    return target, None
+
+
+def provider_logout(caller: Caller) -> str | None:
+    """Where the browser goes to end the provider's own sign-in, after the session is revoked."""
+    from urllib.parse import urlsplit
+
+    from app.accounts import oidc
+
+    settings = caller.settings
+    if settings is None or not settings.oidc_authority:
+        return None
+    redirect = urlsplit(settings.oidc_redirect_uri)
+    return oidc.logout_url(settings, f"{redirect.scheme}://{redirect.netloc}/")
 
 
 def change_language(caller: Caller, language: str) -> None:
@@ -158,21 +272,71 @@ def sign_out(caller: Caller) -> None:
 def add(caller: Caller, request) -> None:
     if caller.sessions is None or caller.settings is None:
         raise NotFound()
-    if len(request.password) < caller.settings.password_min_length:
+    email = request.email.strip().lower() if request.email else None
+    if request.password is None and email is None:
         raise InvalidInput()
-    password_hash = PASSWORDS.hash(request.password)
+    if request.password is not None and len(request.password) < caller.settings.password_min_length:
+        raise InvalidInput()
+    password_hash = PASSWORDS.hash(request.password) if request.password is not None else None
     with unit_of_work(caller.sessions) as session:
-        if storage.account(session, request.username.lower()):
+        if storage.account(session, request.username.lower()) or (
+            email and storage.by_email(session, email)
+        ):
             raise Conflict()
         user = session.execute(
             storage.users.insert()
-            .values(username=request.username.lower(), display_name=request.display_name)
+            .values(
+                username=request.username.lower(), display_name=request.display_name, email=email
+            )
             .returning(storage.users.c.id)
         ).scalar_one()
-        session.execute(
-            storage.local_credentials.insert().values(user_id=user, password_hash=password_hash)
-        )
+        if password_hash is not None:
+            session.execute(
+                storage.local_credentials.insert().values(user_id=user, password_hash=password_hash)
+            )
         session.execute(storage.user_roles.insert().values(user_id=user, role="member"))
+
+
+def approve(caller: Caller, email: str):
+    """Turn an access request into a linked member; the username is the email's local part."""
+    from app.accounts.handlers import Me
+
+    if caller.sessions is None:
+        raise NotFound()
+    email = email.strip().lower()
+    with unit_of_work(caller.sessions) as session:
+        pending = storage.take_request(session, email)
+        if pending is None:
+            raise NotFound()
+        if storage.by_email(session, email):
+            raise Conflict()
+        username = email.partition("@")[0]
+        if storage.account(session, username):
+            username = email
+        user = (
+            session.execute(
+                storage.users.insert()
+                .values(
+                    username=username,
+                    display_name=pending["name"] or username,
+                    email=email,
+                    idp_tenant_id=pending["tenant_id"],
+                    idp_object_id=pending["object_id"],
+                )
+                .returning(storage.users)
+            )
+            .mappings()
+            .one()
+        )
+        session.execute(storage.user_roles.insert().values(user_id=user["id"], role="member"))
+    return Me(
+        id=user["id"],
+        username=user["username"],
+        display_name=user["display_name"],
+        roles=["member"],
+        language=user["language"],
+        email=email,
+    )
 
 
 def list_users(caller: Caller):
@@ -188,6 +352,7 @@ def list_users(caller: Caller):
                 display_name=row["display_name"],
                 roles=storage.roles_for(session, row["id"]),
                 language=row["language"],
+                email=row["email"],
             )
             for row in session.execute(
                 select(storage.users).order_by(storage.users.c.username)

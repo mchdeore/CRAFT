@@ -22,7 +22,9 @@ TEST_DATABASE = "craft_test"
 @pytest.fixture(scope="session")
 def settings() -> Settings:
     source = read_env() | scripted_model.ENVIRONMENT
-    return msgspec.structs.replace(Settings.from_env(source), database_name=TEST_DATABASE)
+    return msgspec.structs.replace(
+        Settings.from_env(source), database_name=TEST_DATABASE, local_password_signin=True
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

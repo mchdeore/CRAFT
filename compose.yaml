@@ -5,6 +5,7 @@ services:
       POSTGRES_PASSWORD: ${CRAFT_DB_ADMIN_PASSWORD:?set it in .env}
       CRAFT_OWNER_DB_PASSWORD: ${CRAFT_OWNER_DB_PASSWORD:?set it in .env}
       CRAFT_APP_DB_PASSWORD: ${CRAFT_APP_DB_PASSWORD:?set it in .env}
+      CRAFT_ID_DB_PASSWORD: ${CRAFT_ID_DB_PASSWORD:-}  # craft_id is created only when set
     ports: ["${CRAFT_DATABASE_PORT:-5432}:5432"]
     volumes:
       - db:/var/lib/postgresql                          # the PostgreSQL 18 image's path
@@ -34,9 +35,13 @@ services:
       CRAFT_AGENT_RUN_SECONDS: ${CRAFT_AGENT_RUN_SECONDS:-120}
       CRAFT_WOLFRAM_APP_ID: ${CRAFT_WOLFRAM_APP_ID:-}
       CRAFT_MCP_URL: ${CRAFT_MCP_URL:-http://127.0.0.1:8000/mcp}
+      CRAFT_OIDC_AUTHORITY: ${CRAFT_OIDC_AUTHORITY:-}
+      CRAFT_OIDC_CLIENT_ID: ${CRAFT_OIDC_CLIENT_ID:-}
+      CRAFT_OIDC_CLIENT_SECRET: ${CRAFT_OIDC_CLIENT_SECRET:-}
+      CRAFT_OIDC_REDIRECT_URI: ${CRAFT_OIDC_REDIRECT_URI:-http://localhost:8000/api/auth/callback}
     volumes: &provider_mount
       - ${CRAFT_PROVIDER_ROOT:-./.local/runtime/provider}:/provider:ro
-    ports: ["8000:8000"]
+    ports: ["8000:8000", "8100:8100"]                  # 8100: craft-id, which shares this network
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://localhost:8000/health/live', timeout=2)"]
       interval: 2s
@@ -95,6 +100,25 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # craft-id, the stand-in for Entra. It shares the app's network so that the same address,
+  # http://localhost:8100, works from the browser and from craft-app.
+  id:
+    build: { context: ., dockerfile: app/Dockerfile }
+    restart: unless-stopped
+    command: ["craft", "id", "serve"]
+    network_mode: "service:app"
+    environment:
+      CRAFT_DATABASE_HOST: db
+      CRAFT_DATABASE_PORT: "5432"
+      CRAFT_DATABASE_NAME: ${CRAFT_DATABASE_NAME:-craft_dev}
+      CRAFT_ID_DB_PASSWORD: ${CRAFT_ID_DB_PASSWORD:-}
+      CRAFT_ID_SIGNING_KEY: ${CRAFT_ID_SIGNING_KEY:-}
+      CRAFT_ID_PUBLIC_URL: http://localhost:8100
+      CRAFT_LOG_LEVEL: ${CRAFT_LOG_LEVEL:-INFO}
+    depends_on:
+      app:
+        condition: service_started
 
   mcp:
     build: { context: ., dockerfile: app/Dockerfile }

@@ -1,4 +1,4 @@
-"""The craft command: mcp, worker, operations, call, provider, users and missions."""
+"""The craft command: mcp, worker, operations, call, provider, users, missions and id."""
 
 import argparse
 from importlib.metadata import version
@@ -23,18 +23,34 @@ def main(argv: list[str] | None = None) -> None:
     provider.add_argument("file", nargs="?")
     users = commands.add_parser("users")
     users.add_argument(
-        "action", choices=["grant", "revoke", "add", "list", "promote", "reset", "disable"]
+        "action",
+        choices=["grant", "revoke", "add", "list", "promote", "reset", "disable", "approve"],
     )
-    users.add_argument("username", nargs="?")
+    users.add_argument("username", nargs="?", help="for approve: the email")
     users.add_argument("mission", nargs="?")
     users.add_argument("--silo")
+    users.add_argument("--email", help="add: sign in at the identity provider with this email")
     users.add_argument("--as", dest="actor", default="admin")
     missions = commands.add_parser("missions")
     missions.add_argument("action", choices=["stage"])
     missions.add_argument("mission")
     missions.add_argument("stage")
+    identity = commands.add_parser("id", help="craft-id, the stand-in for Entra")
+    identity.add_argument(
+        "action", choices=["serve", "users", "clients"], help="users and clients take a verb"
+    )
+    identity.add_argument("verb", nargs="?", choices=["add", "disable", "reset-password"])
+    identity.add_argument("name", nargs="?", help="username, or the client's name")
+    identity.add_argument("--email")
+    identity.add_argument("--display-name")
+    identity.add_argument("--redirect-uri", action="append", default=[])
+    identity.add_argument("--port", type=int, default=8100)
     args = parser.parse_args(argv)
-    if args.command == "mcp":
+    if args.command == "id":
+        from app.identity.cli import run
+
+        run(parser, args)
+    elif args.command == "mcp":
         from app.infrastructure.mcp.stdio import run_stdio
 
         run_stdio(args.username)
@@ -125,9 +141,17 @@ def main(argv: list[str] | None = None) -> None:
                         handlers.NewUser(
                             username=args.username,
                             display_name=args.username,
-                            password=getpass.getpass("Password: "),
+                            password=None if args.email else getpass.getpass("Password: "),
+                            email=args.email,
                         ),
                     )
+                elif args.action == "approve":
+                    if not args.username:
+                        parser.error("email required")
+                    approved = handlers.approve(
+                        caller, handlers.AccessApproval(email=args.username)
+                    )
+                    print(msgspec.json.encode(approved).decode())
                 elif args.action == "reset":
                     if not args.username:
                         parser.error("account required")

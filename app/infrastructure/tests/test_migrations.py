@@ -226,3 +226,30 @@ def test_workspace_call_rows_survive_an_incompatible_downgrade(
     assert (
         connection.execute(text("select version_num from alembic_version")).scalar_one() == expected
     )
+
+
+def test_existing_passwords_move_to_craft_id_and_users_stay_linked(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0021")
+    user = connection.execute(
+        text("insert into users (username, display_name) values ('moved', 'Moved') returning id")
+    ).scalar_one()
+    connection.execute(
+        text("insert into local_credentials (user_id, password_hash) values (:u, 'hash')"),
+        {"u": user},
+    )
+    command.upgrade(config, "head")
+    moved = connection.execute(
+        text(
+            "select a.id, a.username, c.password_hash from id_accounts a "
+            "join id_credentials c on c.account_id = a.id where a.id = :u"
+        ),
+        {"u": user},
+    ).one()
+    assert tuple(moved) == (user, "moved", "hash")
+    linked = connection.execute(
+        text("select idp_object_id from users where id = :u"), {"u": user}
+    ).scalar_one()
+    assert linked == user

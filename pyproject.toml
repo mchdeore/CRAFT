@@ -28,6 +28,7 @@ dependencies = [
   "procrastinate==3.10.0",
   "supervisor==4.3.0",
   "docker==7.2.0",
+  "pyjwt[crypto]>=2.15.1",
 ]
 
 [dependency-groups]
@@ -37,6 +38,7 @@ dev = [
     "pyright==1.1.414",
     "fpdf2==2.8.9",
     "pandas==2.3.3",  # the workspace package's tests read and write tables
+    "msal>=1.39.0",
 ]
 
 [project.scripts]

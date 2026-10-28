@@ -422,6 +422,7 @@ dependencies = [
     { name = "pgvector" },
     { name = "procrastinate" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "pypdf" },
     { name = "python-docx" },
     { name = "python-pptx" },
@@ -434,6 +435,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fpdf2" },
+    { name = "msal" },
     { name = "pandas" },
     { name = "pyright" },
     { name = "pytest" },
@@ -459,6 +461,7 @@ requires-dist = [
     { name = "pgvector", specifier = "==0.5.1" },
     { name = "procrastinate", specifier = "==3.10.0" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
     { name = "pypdf", specifier = "==6.19.0" },
     { name = "python-docx", specifier = "==1.2.0" },
     { name = "python-pptx", specifier = "==1.0.2" },
@@ -471,6 +474,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fpdf2", specifier = "==2.8.9" },
+    { name = "msal", specifier = ">=1.39.0" },
     { name = "pandas", specifier = "==2.3.3" },
     { name = "pyright", specifier = "==1.1.414" },
     { name = "pytest", specifier = "==9.1.1" },

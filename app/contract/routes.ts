@@ -27,7 +27,10 @@ export interface Routes {
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
   "GET /api/library/documents/:item/preview": { query: { version: number; locator?: string }; response: Blob };
   "GET /api/library/documents/:item/download": { query: { version: number; locator?: string }; response: Blob };
-  "POST /api/session": { body: T.SignIn; response: T.Me };
+  "GET /api/auth/login": { query: { returnTo?: string }; response: void }; // 302 to the identity provider
+  "GET /api/auth/callback": { query: { code?: string; state?: string; error?: string }; response: void }; // the provider's redirect back; 302 onward
+  "POST /api/auth/logout": { response: T.SignedOut }; // then send the browser to logoutUrl when it is set
+  "POST /api/session": { body: T.SignIn; response: T.Me }; // tests only (CRAFT_LOCAL_PASSWORD_SIGNIN)
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
   "PATCH /api/me": { body: T.MeChange; response: T.Me };

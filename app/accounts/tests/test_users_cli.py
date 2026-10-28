@@ -31,7 +31,10 @@ def test_users_add_list_and_password_policy(owner_engine, monkeypatch, capsys) -
     main(["users", "--as", actor, "list"])
     output = json.loads(capsys.readouterr().out)
     assert any(row["username"] == name for row in output)
-    assert all(set(row) == {"id", "username", "displayName", "roles", "language"} for row in output)
+    assert all(
+        set(row) == {"id", "username", "displayName", "roles", "language", "email"}
+        for row in output
+    )
     with owner_engine.begin() as connection:
         user = connection.execute(
             select(storage.users.c.id).where(storage.users.c.username == name)

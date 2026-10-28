@@ -10,6 +10,7 @@ from app.infrastructure.config.env import read_env
 
 PREFIX = "CRAFT_"
 OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account"}  # setup and Compose only
+IDENTITY = {"id_db_password", "id_signing_key", "id_public_url"}  # craft-id's own settings
 # Settings of the deleted indexer, RQ queue and demo page; older .env files may still set them.
 RETIRED = {
     "model_ocr",
@@ -47,6 +48,13 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     agent_run_seconds: Annotated[int, msgspec.Meta(ge=30, le=900)] = 120
     wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"
+    # Sign-in: craft-id now, Entra later. Only these three settings change at the switch.
+    oidc_authority: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = "http://localhost:8000/api/auth/callback"
+    # Username and password straight to craft-app (POST /api/session): tests only.
+    local_password_signin: bool = False
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -58,7 +66,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             name: value
             for key, value in source.items()
             if key.startswith(PREFIX)
-            and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS | RETIRED
+            and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS | IDENTITY | RETIRED
         }
         try:
             settings = msgspec.convert(raw, cls, strict=False)
@@ -78,6 +86,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
                 raise SystemExit("bad setting: allowed_origins: invalid configuration")
             validate_models(settings, access=False)
             validate_mcp_url(settings.mcp_url)
+            validate_oidc(settings)
             if not settings.queue_names():
                 raise SystemExit("bad setting: worker_queues: invalid configuration")
             return settings
@@ -100,6 +109,35 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"
 
     __str__ = __repr__
+
+
+def validate_oidc(settings: Settings) -> None:
+    """https addresses, or http on this machine; the client ID and secret come with an authority."""
+    from urllib.parse import urlsplit
+
+    def web(value: str) -> bool:
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return False
+        local = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
+        return (
+            (parsed.scheme == "https" or local)
+            and bool(parsed.hostname)
+            and parsed.username is None
+            and not parsed.query
+            and not parsed.fragment
+        )
+
+    if not settings.oidc_authority:
+        return
+    if not web(settings.oidc_authority) or settings.oidc_authority.endswith("/"):
+        raise SystemExit("bad setting: oidc_authority: invalid configuration")
+    for field in ["oidc_client_id", "oidc_client_secret"]:
+        if not getattr(settings, field).strip():
+            raise SystemExit(f"bad setting: {field}: invalid configuration")
+    if not web(settings.oidc_redirect_uri):
+        raise SystemExit("bad setting: oidc_redirect_uri: invalid configuration")
 
 
 def validate_mcp_url(value: str) -> None:

@@ -9,8 +9,10 @@ from sqlalchemy import (
     LargeBinary,
     Table,
     Text,
+    UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.infrastructure.database.metadata import metadata
 
@@ -23,8 +25,33 @@ users = Table(
     Column("disabled_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("language", Text, nullable=False, server_default=text("'en'")),
+    Column("idp_tenant_id", UUID),
+    Column("idp_object_id", UUID),
+    Column("email", Text, unique=True),
     CheckConstraint("username = lower(username)", name="lower_username"),
     CheckConstraint("language IN ('en', 'fr')", name="language"),
+    CheckConstraint("email = lower(email)", name="lower_email"),
+    CheckConstraint("(idp_tenant_id IS NULL) = (idp_object_id IS NULL)", name="idp_key"),
+    UniqueConstraint("idp_tenant_id", "idp_object_id"),
+)
+access_requests = Table(
+    "access_requests",
+    metadata,
+    Column("tenant_id", UUID, primary_key=True),
+    Column("object_id", UUID, primary_key=True),
+    Column("email", Text),
+    Column("name", Text, nullable=False),
+    Column("first_seen_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)
+sign_in_flows = Table(
+    "sign_in_flows",
+    metadata,
+    Column("id_sha256", LargeBinary, primary_key=True),
+    Column("flow", JSONB, nullable=False),
+    Column("return_to", Text, nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("octet_length(id_sha256) = 32", name="id_sha256"),
 )
 local_credentials = Table(
     "local_credentials",
@@ -86,6 +113,79 @@ def language(session, user) -> str | None:
     from sqlalchemy import select
 
     return session.execute(select(users.c.language).where(users.c.id == user)).scalar_one_or_none()
+
+
+def linked(session, tenant, oid, email: str | None):
+    """The user with this provider key; else link an unlinked user with this email to it."""
+    from sqlalchemy import select, update
+
+    row = (
+        session.execute(
+            select(users)
+            .where(users.c.idp_tenant_id == tenant, users.c.idp_object_id == oid)
+            .with_for_update()
+        )
+        .mappings()
+        .first()
+    )
+    if row is not None or email is None:
+        return row
+    # Microsoft's stable key is (tid, oid); the email only finds the person the first time.
+    return (
+        session.execute(
+            update(users)
+            .where(users.c.email == email, users.c.idp_object_id.is_(None))
+            .values(idp_tenant_id=tenant, idp_object_id=oid)
+            .returning(users)
+        )
+        .mappings()
+        .first()
+    )
+
+
+def by_email(session, email: str):
+    from sqlalchemy import select
+
+    return session.execute(select(users).where(users.c.email == email)).mappings().first()
+
+
+def take_request(session, email: str):
+    """Remove and return the newest access request with this email."""
+    from sqlalchemy import select
+
+    row = (
+        session.execute(
+            select(access_requests)
+            .where(access_requests.c.email == email)
+            .order_by(access_requests.c.last_seen_at.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        .mappings()
+        .first()
+    )
+    if row is not None:
+        session.execute(
+            access_requests.delete().where(
+                access_requests.c.tenant_id == row["tenant_id"],
+                access_requests.c.object_id == row["object_id"],
+            )
+        )
+    return row
+
+
+def request_access(session, tenant, oid, email: str | None, name: str) -> None:
+    from sqlalchemy.dialects.postgresql import insert
+
+    statement = insert(access_requests).values(
+        tenant_id=tenant, object_id=oid, email=email, name=name
+    )
+    session.execute(
+        statement.on_conflict_do_update(
+            index_elements=["tenant_id", "object_id"],
+            set_={"email": email, "name": name, "last_seen_at": text("now()")},
+        )
+    )
 
 
 def credentials(session, user):

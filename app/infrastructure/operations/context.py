@@ -60,3 +60,20 @@ def session_cookie(value: str, max_age: int, *, cross_origin_browser: bool = Fal
                 "path": "/",
             }
         )
+
+
+def signin_cookie(value: str, lifetime) -> None:
+    """The sign-in round trip's handle; Lax so the provider's redirect back carries it."""
+    actions = response_actions.get()
+    if actions is not None:
+        actions.append(
+            {
+                "key": "__Host-craft_signin",
+                "value": value,
+                "max_age": int(lifetime.total_seconds()),
+                "secure": True,
+                "httponly": True,
+                "samesite": "lax",
+                "path": "/",
+            }
+        )

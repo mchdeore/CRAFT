@@ -5,8 +5,10 @@ export type Role = "member" | "admin";
 export interface SignIn { username: string; password: string }
 export type Language = "en" | "fr";
 /** `language` is the reply language; change it with PATCH /api/me. */
-export interface Me { id: Id; username: string; displayName: string; roles: Role[]; language: Language }
+export interface Me { id: Id; username: string; displayName: string; roles: Role[]; language: Language; email?: string | null }
 export interface MeChange { language: Language }
+/** Browser sign-in goes to GET /api/auth/login?returnTo=…; failures come back to /?signIn=failed or /?signIn=no-access. */
+export interface SignedOut { logoutUrl: string | null }
 export interface NewWorkspaceToken { label: string; hours?: number }
 export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
