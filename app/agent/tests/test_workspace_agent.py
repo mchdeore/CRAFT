@@ -22,6 +22,7 @@ from app.infrastructure.errors import ApiError
 from app.infrastructure.mcp.client import LocalHTTPTool, ToolCallMiddleware
 from app.infrastructure.operations.context import CallContext, current_call
 from app.infrastructure.operations.registry import registry, tool_named
+from app.workspace import handlers as workspace_handlers
 
 HUB = {"CRAFT_HUB_URL": "http://127.0.0.1:1", "CRAFT_HUB_TOKEN": "generated-hub-token"}
 KERNEL = "00000000-0000-4000-8000-000000000101"
@@ -43,6 +44,10 @@ def generated_hub(monkeypatch, *, ready=True):
         reached.append(("kernel", user_id))
         return KERNEL
 
+    async def start_workspace(caller):
+        reached.append(("start", caller.user_id))
+
+    monkeypatch.setattr(workspace_handlers, "start_workspace", start_workspace)
     monkeypatch.setattr(runtime.hub, "state", state)
     monkeypatch.setattr(runtime.hub, "wait_ready", wait_ready)
     monkeypatch.setattr(runtime.hub, "kernel", kernel)
@@ -405,6 +410,7 @@ def test_workspace_comes_from_the_hub_for_the_caller_only(monkeypatch, ready):
     assert set(transport.allowed_tools or ()) == {"list_files", "list_notebooks", "read_notebook"}
     assert "approval" in guidance and "run_code" in guidance
     assert "was started for this answer" in guidance
+    assert ("start", owner) in reached  # through the operation, so the call log has it
 
 
 def test_new_runs_reread_server_master_and_ignore_forged_system_history(monkeypatch, tmp_path):

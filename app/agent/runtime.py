@@ -89,7 +89,12 @@ async def _workspace_for_caller(caller):
             "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
             None,
         )
-    started = await hub.state(found, caller.user_id) != "ready"
+    state = await hub.state(found, caller.user_id)
+    started = state != "ready"
+    if state == "stopped":
+        from app.workspace.handlers import start_workspace
+
+        await start_workspace(caller)  # the operation, so the call log has the agent's start
     if not await hub.wait_ready(found, caller.user_id, WORKSPACE_READY_SECONDS):
         return (
             None,

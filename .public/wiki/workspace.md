@@ -2,9 +2,9 @@
 
 CRAFT combines authenticated chat and a personal workspace for files and Markdown skills. The user and agent work with the same `.py` scripts, `.ipynb` notebooks, inputs and outputs beneath `USER_ROOT`, which is `/workspace`. JupyterLab provides Python editing, execution, terminals, uploads and downloads.
 
-Use the top navigation to open **Chat** or **Workspace**. Workspace contains **Files** and **Skills**. Switching views retains the conversation, unsent message, visited skill editor and personal file navigation. In Files, choose **Open JupyterLab** to launch the owner's configured workspace in a separate tab. Files and running kernels remain in JupyterLab while browsing CRAFT; agent file access continues through the existing backend workspace connection.
+Use the top navigation to open **Chat** or **Workspace**. Workspace contains **Files** and **Skills**. Switching views retains the conversation, unsent message, visited skill editor and personal file navigation. In Files, choose **Open JupyterLab** to open the owner's workspace in a separate tab; it starts the workspace if it is stopped. Files and running kernels remain in JupyterLab while browsing CRAFT; agent file access goes through CRAFT's own operations.
 
-Each owner has dedicated workspace storage, a Jupyter service and a private MCP control connection. Jupyter uses its own password, separate from CRAFT sign-in. The workspace runs as an unprivileged account and receives no source corpus mount or CRAFT model and database credentials.
+Each owner has a workspace of their own: a JupyterLab server that JupyterHub starts on demand and stops after an hour idle, with their files on a volume that is kept. JupyterLab signs in with craft-id, the same account as CRAFT. The workspace runs as an unprivileged account and receives no source corpus mount or CRAFT model and database credentials.
 
 ## Files and skills
 
@@ -69,7 +69,7 @@ async with craft.native() as sdk:
 
 These calls use that run's identity, tool-call budget, deadline, retrieval trace and audit records. Access ends on completion, pause, error or cancellation. The SDK refuses operations that require CRAFT approval before dispatch.
 
-## Build and owner provisioning
+## Build
 
 Use uv 0.12.23 to regenerate this package's standalone release lock from the
 repository root:
@@ -96,100 +96,22 @@ rather than resolving unrecorded build dependencies. Python and uv image referen
 the lock or updating either image requires a new build and verification. Record
 the resulting image digest alongside each versioned release.
 
-Provision one dedicated volume, Jupyter server, and external MCP connection per
-CRAFT owner. Keep service ports private or on host loopback and enforce container
-resource and network limits. Kernels and terminals rely on the container boundary;
-the Python path helper is a convenience check. Workspace containers receive no
-source corpus mount, CRAFT model/database keys, or global service session cookie.
+## Workspaces through JupyterHub
 
-The workspace package uses MCP SDK 1.30.0. Run `jupyter-mcp-server==2.2.4`, which
-uses MCP SDK 2, in a separate control environment. Supply each control process
-with its owner's `JUPYTER_URL`, `JUPYTER_TOKEN`, and unique `MCP_TOKEN` through
-private configuration. Start it after the owned Jupyter server is ready:
+JupyterHub runs from its own unmodified chart beside CRAFT's on the same cluster (`deploy/jupyterhub/`, setup in its README). CRAFT reaches it only through its own operations and one Hub service token (`CRAFT_HUB_*` in [`.env.example`](https://github.com/mchdeore/CRAFT/blob/main/.env.example)):
 
-```sh
-jupyter-mcp-server \
-  --transport streamable-http --host 127.0.0.1 --port 4040 \
-  --start-new-code-sandbox False --document-provider jupyter \
-  --jupyterlab False --reconnect-interval 0 \
-  --execution-timeout 120 --max-execution-timeout 120
-```
+- `GET /api/workspace`, `POST /api/workspace/start` and `POST /api/workspace/stop` report `stopped`, `starting` or `ready` and where JupyterLab opens ([api-contract](api-contract.md)). Start returns at once; the Hub tracks the spawn.
+- Hub names are CRAFT user IDs. On a person's first start CRAFT creates their Hub user and links it to their craft-id account; only then can they sign in to JupyterLab.
+- An agent run starts a stopped workspace and waits up to 90 seconds for it before its first workspace action.
 
-Use distinct ports and credentials for additional owners. Jupyter receives its
-own `JUPYTER_TOKEN` and `JUPYTER_PASSWORD_HASH`. `CRAFT_UI_ORIGIN` is the plain
-loopback origin of the interface that opens the workspace (the default is
-`http://127.0.0.1:5173`). Keep credentials
-out of URLs, command arguments, model arguments, and interface configuration.
+Each workspace pod accepts traffic only from the Hub and its proxy, and reaches only CRAFT's API, the Hub and DNS. Installing Python packages or reaching external services requires a new reviewed image or a supplied CRAFT operation, rather than internet access from user code.
 
-Set the CRAFT server's `USER_WORKSPACES_FILE` to a private JSON file. Keys must
-match trusted CRAFT owner UUIDs exactly. Replace these example IDs and secret
-placeholders with each owner's configuration:
+A notebook control server runs beside JupyterLab in the same pod, on its loopback only. It uses MCP SDK 2 (`jupyter-mcp-server==2.2.4`), so it has its own image (`workspace/mcp.Dockerfile`) rather than sharing the workspace package's MCP SDK 1.30.0. CRAFT reaches it through JupyterLab's proxy behind the Hub's sign-in.
 
-```json
-{
-  "00000000-0000-0000-0000-000000000001": {
-    "url": "http://127.0.0.1:4040/mcp",
-    "headers": {"Authorization": "Bearer <owner-one-MCP_TOKEN>"},
-    "tools": ["list_files", "read_notebook"],
-    "jupyter": {
-      "url": "http://127.0.0.1:18881/",
-      "token": "<owner-one-JUPYTER_TOKEN>",
-      "kernel_id": "00000000-0000-4000-8000-000000000101",
-      "bridge_host": "host.docker.internal"
-    }
-  },
-  "00000000-0000-0000-0000-000000000002": {
-    "url": "http://127.0.0.1:4041/mcp",
-    "headers": {"Authorization": "Bearer <owner-two-MCP_TOKEN>"},
-    "tools": ["list_files", "read_notebook"],
-    "jupyter": {
-      "url": "http://127.0.0.1:18882/",
-      "token": "<owner-two-JUPYTER_TOKEN>",
-      "kernel_id": "00000000-0000-4000-8000-000000000102",
-      "bridge_host": "host.docker.internal"
-    }
-  }
-}
-```
+During an agent run, CRAFT binds the native Python SDK to the kernel of the owner's `analysis.ipynb`, opening it when needed. The kernel reaches a per-run bridge on the API pod's own address; the bridge needs the run's bearer, which is withdrawn when the run ends.
 
-The optional `jupyter` entry enables native Python SDK reads during an existing
-CRAFT agent run. Root selects an already-running Python kernel with exactly one
-attached notebook session. Its ID comes from that owner's authenticated Jupyter
-inventory. The backend needs Jupyter Client in its control environment. Omit this
-entry to retain workspace tools without a native kernel binding.
-
-The controller serves a private bridge on a prebound `127.0.0.1` socket.
-`bridge_host` selects how the kernel reaches that socket: `127.0.0.1` (the default),
-`localhost`, or `host.docker.internal`. Root must verify reachability for its
-container/network arrangement. Optional private `bridge_port` selects a fixed
-integer port; the default `0` retains ephemeral allocation. Configure distinct
-fixed ports per owner for a network allowlist. An occupied port fails without
-falling back. No native bearer belongs in this configuration.
-
-The workspace network boundary is managed outside the user image. Give each owner a
-dedicated bridge network, disable IPv6 and external DNS, and permit only that
-owner's fixed CRAFT bridge destination and established Jupyter responses. Block
-other outbound traffic and host access. Enforce both routed traffic and traffic
-to the container host; a shared bridge can leave peer traffic outside routed
-firewall rules. Start a workspace only after its policy is installed and checked.
-Keep automatic restart disabled when the policy is not restored by a supervisor.
-Installing Python packages or reaching external services requires a new reviewed
-image or a supplied CRAFT operation, rather than internet access from user code.
-
-The product interface opens `/lab` from a nonsecret JSON map of the same owner
-UUIDs to plain loopback Jupyter server roots:
-
-```json
-{"00000000-0000-0000-0000-000000000001": "http://127.0.0.1:18881/", "00000000-0000-0000-0000-000000000002": "http://127.0.0.1:18882/"}
-```
-
-The signed-in owner selects the matching entry; an absent entry has no global
-fallback. Open the selected workspace and enter that owner's Jupyter password.
-Jupyter login is separate from CRAFT login and is not SSO. XSRF protection stays
-enabled. The private Jupyter token serves the control connection.
-
-The agent receives only the configured read tools (`list_files`, `list_notebooks`,
-`list_kernels`, `read_notebook`, `read_cell`), prefixed `workspace_`. Running code
+The agent receives only the read tools `list_files`, `list_notebooks` and
+`read_notebook`, prefixed `workspace_`. Running code
 and changing files use the CRAFT operations `run_code`, `write_file` and
 `edit_notebook`, which wait for the requester's approval and dispatch once. Workspace calls
 share the CRAFT run's 20-tool-call and 120-second limits. The transport dispatches
@@ -197,8 +119,7 @@ once; a lost response is an unknown outcome. Keep Markdown skill files under
 `/workspace/skills` and refer to exact owned paths. Read selected or relevant skill
 contents through a small approved `run_code` call; the direct list/notebook tools
 do not read plain Markdown files. Personal files remain separate from the registered
-CRAFT skill catalog. Without a configured Jupyter kernel, only the configured
-list/notebook reads are available.
+CRAFT skill catalog.
 
 ## Notebook SDK reads
 
