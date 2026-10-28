@@ -21,4 +21,4 @@ HTTP means Hypertext Transfer Protocol. Python shapes use msgspec; the protocol 
 | Hybrid search / fusion | Normalized semantic and lexical scores, weighted 0.7/0.3, with permission trimming and deduplication |
 | Foundry | Microsoft Foundry: Azure's platform for models and agents |
 | Protected B | A classification for sensitive information |
-| Slice | One step of the build order ([Now](roadmap.md#now)), ending in a demo and a tag |
+| Slice | One step of the build order ([Now](roadmap.md#now)), ending in a working, tested change and a tag |

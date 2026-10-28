@@ -2,7 +2,7 @@
 # One person's JupyterLab workspace beside the compose API and workers. No seeded content, no model calls.
 #   scripts/workspace up [username]   build the image, start JupyterLab and its notebook control
 #                                     server, open a kernel and write the private workspace map
-#                                     (username defaults to demo)
+#                                     (username defaults to analyst)
 #   scripts/workspace down            stop them; the workspace files stay in the workspace-root volume
 # JupyterLab is at http://localhost:18881 (sign in with the token in .local/runtime/workspace).
 # CSA templates in .local/templates/csa appear read-only at templates/csa. Nothing secret is printed.
@@ -26,7 +26,7 @@ profile() {
 }
 
 up() {
-  local user=${1:-demo} owner
+  local user=${1:-analyst} owner
   secret jupyter-token
   secret mcp-token
   docker compose up -d --wait db app >/dev/null

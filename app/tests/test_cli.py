@@ -40,7 +40,7 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
             "call",
             "library.list_documents",
             "--as",
-            "demo",
+            "analyst",
             "{}",
         ],
         env=env,
@@ -54,7 +54,7 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
 
     async def run():
         parameters = StdioServerParameters(
-            command="uv", args=["run", "craft", "mcp", "--as", "demo"], env=env
+            command="uv", args=["run", "craft", "mcp", "--as", "analyst"], env=env
         )
         async with (
             stdio_client(parameters) as (incoming, outgoing),
