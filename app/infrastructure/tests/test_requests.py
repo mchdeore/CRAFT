@@ -68,13 +68,17 @@ def test_mounted_routes_log_their_mount_path(app: FastAPI) -> None:
     configure_logging("INFO", stream)
     with TestClient(app) as client:
         client.post("/mcp", json={})
-        client.post("/mcp/", json={})
+        client.post("/mcp/", json={}, headers={"Authorization": "Bearer forged-SECRET-TOKEN"})
         client.get("/summarize")
+        client.get("/summarize/handlers.py?token=SECRET-QUERY")
         client.get("/summarize-not-a-mount")
-    http = [json.loads(line) for line in stream.getvalue().splitlines() if '"event":"http"' in line]
+    output = stream.getvalue()
+    http = [json.loads(line) for line in output.splitlines() if '"event":"http"' in line]
     assert [(line["path"], line["status"]) for line in http] == [
         ("/mcp", 401),
         ("/mcp", 401),
         ("/summarize", 200),
+        ("/summarize", 404),  # the mount, never the file asked for
         ("/unmatched", 404),
     ]
+    assert "SECRET" not in output and "handlers.py" not in output
