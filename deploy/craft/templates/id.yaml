@@ -33,9 +33,11 @@ spec:
           livenessProbe:
             httpGet: { path: /health/live, port: http }
             periodSeconds: 10
+            timeoutSeconds: 5
           readinessProbe:
             httpGet: { path: /health/live, port: http }
             periodSeconds: 5
+            timeoutSeconds: 5
           resources:
             limits: { memory: {{ .Values.id.memory }} }
             requests: { memory: {{ .Values.memoryRequest }} }

@@ -40,7 +40,7 @@ volumeMounts:
 {{- end }}
 {{- end }}
 
-{{/* A worker container; the heartbeat `craft worker --check` reads is in its own /tmp. */}}
+{{/* A worker container; the heartbeat its probes read is in its own /tmp. */}}
 {{- define "craft.worker" -}}
 {{- $w := .worker }}
 - name: {{ $w.name }}
@@ -55,17 +55,19 @@ volumeMounts:
     - { name: CRAFT_WORKER_CONCURRENCY_{{ upper $queue }}, value: {{ $jobs | quote }} }
     {{- end }}
   {{- include "craft.appMounts" $w.name | nindent 2 }}
-  # The check starts the craft CLI, which takes several seconds, so the timeouts are compose's.
+  # The heartbeat check runs by path on a bare interpreter, never the craft CLI: importing the
+  # app takes 10 s or more on a busy machine, and exec probes outlive their timeout and pile up
+  # (app/infrastructure/heartbeat.py).
   startupProbe:
-    exec: { command: [craft, worker, --check] }
+    exec: { command: [python, -I, -S, /app/app/infrastructure/heartbeat.py] }
     periodSeconds: 10
     failureThreshold: 18
-    timeoutSeconds: 30
+    timeoutSeconds: 10
   livenessProbe:
-    exec: { command: [craft, worker, --check] }
+    exec: { command: [python, -I, -S, /app/app/infrastructure/heartbeat.py] }
     periodSeconds: 30
     failureThreshold: 3
-    timeoutSeconds: 30
+    timeoutSeconds: 10
   resources:
     limits: { memory: {{ $w.memory }} }
     requests: { memory: {{ .root.Values.memoryRequest }} }
