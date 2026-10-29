@@ -1,4 +1,9 @@
-"""Whole-notebook runs queue a job, run in a sandbox and copy back without overwriting."""
+"""Whole-notebook runs queue a job, run through a NotebookRunner and never overwrite a file.
+
+The service codes only against ``NotebookRunner``; these tests cover how it picks a backend, the
+Docker sandbox's copy-back (``SandboxRunner``) and the Kubernetes Job's lifecycle (``JobRunner``),
+including failures, cancellation and what reaches the logs.
+"""
 
 import asyncio
 import json
@@ -9,7 +14,8 @@ from uuid import uuid4
 import pytest
 
 from app.approvals.tests.test_decisions import context as context
-from app.infrastructure import notebook_sandbox, workspaces
+from app.infrastructure import notebook_jobs, notebook_sandbox, workspaces
+from app.infrastructure.notebook_runs import NotebookRunner, RunError
 from app.workspace import service
 from app.workspace.handlers import RunNotebook, run_notebook
 from app.workspace.tests.test_actions import workspace as workspace
@@ -83,6 +89,111 @@ def test_a_run_copies_back_its_notebook_and_outputs_without_overwriting(
     assert len(renamed) == 1 and written[renamed[0]] == b"new\n"
     assert "work/outputs/table.csv" not in written and "work/outputs/same.csv" not in written
     assert "work/fit.ipynb" not in written
+
+
+class FakeSandbox:
+    """Stands in for the Docker container: returns ``made`` with exit ``code``, or blocks."""
+
+    killed = 0
+
+    def __init__(self, image, code=0, made=None, block=None):
+        self.image, self.code, self.made, self.block = image, code, made or {}, block
+
+    def run(self, files, notebook, output):
+        if self.block is not None:
+            self.block.wait(5)
+        return self.code, self.made
+
+    def kill(self):
+        FakeSandbox.killed += 1
+        if self.block is not None:
+            self.block.set()
+
+
+def _sandbox_runner(monkeypatch, written, **fake):
+    async def read_folder(target, folder, limit):
+        return {"nb.ipynb": b"{}"}
+
+    async def exists(target, path):
+        return False
+
+    async def write_bytes(target, path, content):
+        written[path] = content
+
+    monkeypatch.setattr(workspaces, "read_folder", read_folder)
+    monkeypatch.setattr(workspaces, "exists", exists)
+    monkeypatch.setattr(workspaces, "write_bytes", write_bytes)
+    monkeypatch.setattr(notebook_sandbox, "Sandbox", lambda image: FakeSandbox(image, **fake))
+    target = workspaces.JupyterTarget("http://jupyter/user/x/", "generated-never-sent", "")
+    runner: NotebookRunner = notebook_sandbox.SandboxRunner(target, "image")
+    return runner
+
+
+def test_a_sandbox_run_that_fails_keeps_its_results_and_reports_a_fixed_code(monkeypatch):
+    written = {}
+    runner = _sandbox_runner(monkeypatch, written, code=1, made={"o.ipynb": b"{}"})
+    with pytest.raises(RunError, match="^run_failed$"):
+        asyncio.run(runner.run("", "nb.ipynb", "o.ipynb"))
+    assert written == {"o.ipynb": b"{}"}  # the executed copy shows where it stopped
+    # A cell that raised (exit 3) is a finished run, with the error in the executed copy.
+    asyncio.run(_sandbox_runner(monkeypatch, {}, code=3).run("", "nb.ipynb", "o.ipynb"))
+
+
+def test_a_sandbox_result_named_outside_the_folder_is_refused(monkeypatch):
+    written = {}
+    runner = _sandbox_runner(monkeypatch, written, made={"../../escape.txt": b"x"})
+    with pytest.raises(RunError, match="^copy_failed$"):
+        asyncio.run(runner.run("work", "nb.ipynb", "o.ipynb"))
+    assert written == {}
+
+
+def test_cancelling_a_sandbox_run_kills_its_container(monkeypatch):
+    import threading
+
+    block = threading.Event()
+    runner = _sandbox_runner(monkeypatch, {}, block=block)
+    FakeSandbox.killed = 0
+
+    async def cancel():
+        task = asyncio.ensure_future(runner.run("", "nb.ipynb", "o.ipynb"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel())
+    assert FakeSandbox.killed == 1
+
+
+def test_on_the_cluster_the_service_runs_a_job_for_the_caller(context, workspace, monkeypatch):
+    _, files = workspace
+    started = []
+
+    async def run(self, folder, notebook, output):
+        started.append((self.owner, self.image, folder, notebook, output))
+
+    cluster = notebook_jobs.Cluster("https://k8s", "craft", {})
+    monkeypatch.setattr(notebook_jobs, "in_cluster", lambda: cluster)
+    monkeypatch.setattr(notebook_jobs.JobRunner, "run", run)
+    monkeypatch.setattr(notebook_sandbox, "Sandbox", None)  # never reached on the cluster
+    own = replace(context["caller"], origin="http")
+    asyncio.run(service.notebook_job(own, "work/fit.ipynb", "fit.run-1.ipynb"))
+    image = own.settings.notebook_image
+    assert started == [(own.user_id, image, "work", "fit.ipynb", "fit.run-1.ipynb")]
+
+
+def test_each_backend_stands_alone():
+    import ast
+    import inspect
+
+    for module, other in ((notebook_jobs, "notebook_sandbox"), (notebook_sandbox, "notebook_jobs")):
+        imported = {
+            name
+            for node in ast.walk(ast.parse(inspect.getsource(module)))
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for name in [getattr(node, "module", None) or "", *(a.name for a in node.names)]
+        }
+        assert not any(other in name for name in imported), module.__name__
 
 
 def _notebook(*sources):
@@ -163,7 +274,8 @@ def _cluster(answers, requests):
             return httpx.Response(200, json={"status": answers.pop(0)})
         return answers.pop(0) if answers else httpx.Response(200, json={})
 
-    return Cluster("https://k8s", "craft", {}, transport=httpx.MockTransport(handle))
+    headers = {"Authorization": "Bearer generated-service-account-token"}
+    return Cluster("https://k8s", "craft", headers, transport=httpx.MockTransport(handle))
 
 
 def test_a_run_job_is_offline_read_only_and_bounded():
@@ -193,9 +305,6 @@ def test_a_run_job_is_offline_read_only_and_bounded():
 def test_a_finished_failed_or_timed_out_job_is_reported_and_deleted(monkeypatch):
     import httpx
 
-    from app.infrastructure import notebook_jobs
-    from app.infrastructure.notebook_sandbox import SandboxError
-
     monkeypatch.setattr(notebook_jobs, "POLL_SECONDS", 0)
     done = {"conditions": [{"type": "Complete", "status": "True"}]}
     failed = {
@@ -205,11 +314,12 @@ def test_a_finished_failed_or_timed_out_job_is_reported_and_deleted(monkeypatch)
     for answers, error in (([{}, done], None), ([failed], "run_failed"), ([late], "run_timeout")):
         requests = []
         cluster = _cluster([*answers, httpx.Response(404)], requests)
-        call = notebook_jobs.run(cluster, "image", uuid4(), "", "nb.ipynb", "o.ipynb")
+        runner: NotebookRunner = notebook_jobs.JobRunner(cluster, "image", uuid4())
+        call = runner.run("", "nb.ipynb", "o.ipynb")
         if error is None:
             asyncio.run(call)
         else:
-            with pytest.raises(SandboxError, match=error):
+            with pytest.raises(RunError, match=f"^{error}$"):
                 asyncio.run(call)
         assert requests[0] == ("POST", "/apis/batch/v1/namespaces/craft/jobs")
         assert requests[-1][0] == "DELETE"  # deleting a Job that is already gone is quiet
@@ -218,8 +328,6 @@ def test_a_finished_failed_or_timed_out_job_is_reported_and_deleted(monkeypatch)
 def test_a_cancelled_run_deletes_its_job_and_a_failed_cleanup_is_logged(monkeypatch, caplog):
     import httpx
 
-    from app.infrastructure import notebook_jobs
-
     monkeypatch.setattr(notebook_jobs, "POLL_SECONDS", 0.01)
     requests = []
     running: list[Any] = [{"active": 1}] * 1000
@@ -227,7 +335,7 @@ def test_a_cancelled_run_deletes_its_job_and_a_failed_cleanup_is_logged(monkeypa
 
     async def cancel():
         task = asyncio.ensure_future(
-            notebook_jobs.run(cluster, "image", uuid4(), "", "nb.ipynb", "o.ipynb")
+            notebook_jobs.JobRunner(cluster, "image", uuid4()).run("", "nb.ipynb", "o.ipynb")
         )
         await asyncio.sleep(0.05)
         running[:] = [httpx.Response(500)]
@@ -240,3 +348,26 @@ def test_a_cancelled_run_deletes_its_job_and_a_failed_cleanup_is_logged(monkeypa
     (line,) = [r for r in caplog.records if r.getMessage() == "notebook run cleanup failed"]
     fields = line.__dict__["fields"]
     assert fields["name"].startswith("notebook-run-") and fields["error_type"] == "HTTPStatusError"
+
+
+def test_a_refused_job_raises_and_no_log_holds_the_account_token(monkeypatch, caplog):
+    import logging
+
+    import httpx
+
+    requests = []
+    refused = httpx.Response(403, json={"message": "jobs is forbidden"})
+
+    def handle(request):
+        requests.append((request.method, request.url.path))
+        return refused if request.method == "POST" else httpx.Response(500)
+
+    headers = {"Authorization": "Bearer generated-service-account-token"}
+    transport = httpx.MockTransport(handle)
+    cluster = notebook_jobs.Cluster("https://k8s", "craft", headers, transport=transport)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        asyncio.run(notebook_jobs.JobRunner(cluster, "image", uuid4()).run("", "nb.ipynb", "o"))
+    assert requests == [("POST", "/apis/batch/v1/namespaces/craft/jobs")]  # nothing to delete
+    assert "generated-service-account-token" not in caplog.text
+    assert "generated-service-account-token" not in str(raised.value)

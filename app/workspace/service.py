@@ -1,6 +1,9 @@
-"""Reach only the caller's own workspace through the Hub; no endpoint comes from a request."""
+"""Reach only the caller's own workspace through the Hub; no endpoint comes from a request.
 
-import asyncio
+Whole-notebook runs go through a ``NotebookRunner`` (``app/infrastructure/notebook_runs.py``),
+so this module knows nothing about Kubernetes Jobs or Docker containers.
+"""
+
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -8,6 +11,7 @@ from uuid import uuid4
 
 from app.infrastructure import hub, workspaces
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
+from app.infrastructure.notebook_runs import NotebookRunner
 
 
 def _hub(caller) -> hub.Hub:
@@ -143,46 +147,18 @@ async def run_notebook(caller, path: str) -> dict[str, Any]:
     return {"job_id": str(job), "notebook": name, "output": f"{folder}/{output}".lstrip("/")}
 
 
-def _free(name: str, taken: set[str], stamp: str) -> str:
-    """The name itself, or name.run-<stamp>.ext beside it when that file already exists."""
-    if name not in taken:
-        return name
-    path = PurePosixPath(name)
-    return str(path.with_name(f"{path.stem}.run-{stamp}{path.suffix}"))
-
-
 async def notebook_job(caller, path: str, output: str) -> None:
-    from app.infrastructure import notebook_jobs
-    from app.infrastructure.notebook_sandbox import FOLDER_LIMIT, Sandbox
-
-    name = _name(path)
-    notebook = PurePosixPath(name)
+    """Run one owned notebook unattended through this deployment's backend (the queued job)."""
+    notebook = PurePosixPath(_name(path))
     folder = "" if str(notebook.parent) == "." else str(notebook.parent)
+    await (await _runner(caller)).run(folder, notebook.name, output)
+
+
+async def _runner(caller) -> NotebookRunner:
+    """A Kubernetes Job on the local cluster; the Docker sandbox under Compose."""
+    from app.infrastructure import notebook_jobs, notebook_sandbox
+
     cluster = notebook_jobs.in_cluster()
     if cluster is not None:
-        # A Job on the owner's volume moves results into place itself, never overwriting.
-        await notebook_jobs.run(
-            cluster, caller.settings.notebook_image, caller.user_id, folder, notebook.name, output
-        )
-        return
-    # The Docker sandbox, until K-remove-docker: the folder is copied in and results back.
-    target = await _target(caller)
-    files = await workspaces.read_folder(target, folder, FOLDER_LIMIT)
-    sandbox = Sandbox(caller.settings.notebook_image)
-    try:
-        code, made = await asyncio.to_thread(sandbox.run, files, notebook.name, output)
-    finally:
-        # A cancelled job lands here first: removing the container stops the run at once.
-        sandbox.kill()
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    before = {f"{folder}/{key}".lstrip("/") for key in files}
-    for relative, content in sorted(made.items()):
-        if relative.split("/", 1)[0] == "outputs" and files.get(relative) == content:
-            continue  # an output the notebook did not change
-        destination = _free(f"{folder}/{relative}".lstrip("/"), before, stamp)
-        # Never overwrite: an existing file keeps its content and the run's copy is renamed.
-        if await workspaces.exists(target, destination):
-            destination = _free(destination, {destination}, stamp + "-" + uuid4().hex[:6])
-        await workspaces.write_bytes(target, _name(destination), content)
-    if code not in (0, 3):
-        raise RuntimeError("The notebook run failed")
+        return notebook_jobs.JobRunner(cluster, caller.settings.notebook_image, caller.user_id)
+    return notebook_sandbox.SandboxRunner(await _target(caller), caller.settings.notebook_image)
