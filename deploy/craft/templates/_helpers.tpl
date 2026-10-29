@@ -48,6 +48,9 @@ volumeMounts:
   command: [craft, worker]
   {{- include "craft.env" .root | nindent 2 }}
     - { name: CRAFT_WORKER_QUEUES, value: {{ $w.queues | quote }} }
+    {{- if has "interactive" (splitList "," $w.queues) }}
+    - { name: CRAFT_NOTEBOOK_IMAGE, value: {{ .root.Values.notebookRuns.image | quote }} }
+    {{- end }}
     {{- range $queue, $jobs := $w.concurrency }}
     - { name: CRAFT_WORKER_CONCURRENCY_{{ upper $queue }}, value: {{ $jobs | quote }} }
     {{- end }}

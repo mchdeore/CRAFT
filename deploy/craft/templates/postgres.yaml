@@ -64,4 +64,29 @@ metadata:
 spec:
   selector: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
   ports: [{ name: postgres, port: 5432, targetPort: postgres }]
+---
+# Only CRAFT's own pods reach the database: the API (with its in-pod workers), the other
+# workers and craft-id. kubectl port-forward still works: it enters the pod's own network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }} }
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - api
+                  - id
+                  {{- range .Values.workers }}{{ if not .inApiPod }}
+                  - {{ .name }}
+                  {{- end }}{{ end }}
+      ports: [{ port: postgres }]
 {{- end }}

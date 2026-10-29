@@ -83,10 +83,11 @@ venv = ".venv"
 testpaths = ["app", "workspace"]
 pythonpath = ["workspace/src"]
 # A plain run is the quick set; scripts/check full adds the docker, live and slow tests.
-addopts = "-q --import-mode=importlib -m 'not docker and not live and not slow'"
+addopts = "-q --import-mode=importlib -m 'not docker and not cluster and not live and not slow'"
 markers = [
   "live: requires configured external service credentials",
   "docker: requires the restricted Python workspace image and Docker daemon",
+  "cluster: requires the local cluster with this branch's images and charts (deploy/README.md)",
   "slow: takes more than about a second; runs only in scripts/check full",
 ]
 

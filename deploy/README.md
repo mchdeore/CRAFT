@@ -115,6 +115,20 @@ Run the probe again: it now fails with a timeout. Then remove the test:
 kubectl delete namespace netpol-test
 ```
 
+## Notebook runs
+
+An unattended notebook run is a Kubernetes Job on the person's volume (`claim-<user ID>`), started by the interactive worker with its own service account (`deploy/craft/templates/notebook-runs.yaml`). The account may only create, read and delete Jobs, an admission policy holds them to the run's shape, and a network policy gives run pods no network. The run sees its folder read-only; a trusted last step moves the executed copy and new outputs beside the notebook without overwriting.
+
+After building both images and upgrading both charts, the cluster tests run real Jobs through the worker:
+
+```bash
+CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_PORT=55481 uv run pytest -m cluster app/workspace/tests/test_notebook_jobs_cluster.py
+```
+
+They need the check database (`scripts/check` starts it). Kubernetes has no per-pod process limit; kubelet's `podPidsLimit` bounds every pod on the node, which `K-vm` sets on the VM.
+
+Volumes made before `claim-{unescaped_username}` are named `claim-x-…` and are no longer mounted; delete them with `kubectl delete pvc <name>` once nothing in them is needed.
+
 ## Stop
 
 ```bash

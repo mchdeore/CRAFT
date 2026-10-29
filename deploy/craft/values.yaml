@@ -48,13 +48,25 @@ api:
 # (app/infrastructure/queue.py).
 # inApiPod: the worker runs inside the API's pod instead, sharing its localhost, because chat
 # turns call the API's MCP on 127.0.0.1 (CRAFT_MCP_URL must be a loopback address).
+# Notebook runs (interactive queue) need their own worker: it holds the Job-creating account.
 workers:
   - name: worker
-    queues: agent,interactive,bulk
-    concurrency: { agent: 50, interactive: 50, bulk: 50 }
+    queues: agent,bulk
+    concurrency: { agent: 50, bulk: 50 }
     memory: 1Gi
     stopSeconds: 900         # a chat turn's ceiling
     inApiPod: true
+  - name: worker-interactive
+    queues: interactive
+    concurrency: { interactive: 50 }
+    memory: 768Mi
+    stopSeconds: 120
+
+# Notebook runs as Kubernetes Jobs on the person's volume (notebook-runs.yaml). The image is
+# the workspace image; the admission policy allows no other.
+notebookRuns:
+  enabled: true
+  image: craft-user-workspace:local
 
 # craft-id, the stand-in for Entra (needs CRAFT_ID_DB_PASSWORD in the Secret).
 id:

@@ -1,4 +1,7 @@
 {{- range .Values.workers }}
+{{- if and .inApiPod $.Values.notebookRuns.enabled (has "interactive" (splitList "," .queues)) }}
+{{- fail "notebookRuns needs the interactive queue in its own worker: the API pod gets no service account" }}
+{{- end }}
 {{- if not .inApiPod }}
 ---
 apiVersion: apps/v1
@@ -18,7 +21,13 @@ spec:
       terminationGracePeriodSeconds: {{ .stopSeconds }}
       # No service-link variables: services named craft-* would add unknown CRAFT_* settings.
       enableServiceLinks: false
+      {{- if and $.Values.notebookRuns.enabled (has "interactive" (splitList "," .queues)) }}
+      # Notebook runs: this worker creates their Jobs (notebook-runs.yaml).
+      serviceAccountName: {{ $.Release.Name }}-notebook-runs
+      automountServiceAccountToken: true
+      {{- else }}
       automountServiceAccountToken: false
+      {{- end }}
       containers:
         {{- include "craft.worker" (dict "worker" . "root" $) | nindent 8 }}
       volumes:

@@ -1,0 +1,93 @@
+{{- if .Values.notebookRuns.enabled }}
+{{- $account := printf "%s-notebook-runs" .Release.Name }}
+# Notebook runs as Jobs (app/infrastructure/notebook_jobs.py). The worker running the
+# interactive queue uses this account, which may only create, read and delete Jobs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $account }}
+automountServiceAccountToken: false     # mounted only where a worker asks for it
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $account }}
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $account }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $account }} }
+subjects:
+  - { kind: ServiceAccount, name: {{ $account }}, namespace: {{ .Release.Namespace }} }
+---
+# A run pod has no network: nothing in, nothing out, not even DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-notebook-runs
+spec:
+  podSelector:
+    matchLabels: { craft-notebook-run: "true" }
+  policyTypes: [Ingress, Egress]
+---
+# Creating Jobs could mount any volume in the namespace, so every Job this account creates is
+# held to the run's shape: labelled for the network policy above, the workspace image only,
+# non-root and unprivileged, no service account token, and only person volumes and scratch.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $account }}.{{ .Release.Namespace }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [batch]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [jobs]
+  matchConditions:
+    - name: notebook-run-account
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:{{ .Release.Namespace }}:{{ $account }}"
+  variables:
+    - name: pod
+      expression: object.spec.template.spec
+    - name: containers
+      expression: >-
+        variables.pod.containers +
+        (has(variables.pod.initContainers) ? variables.pod.initContainers : [])
+  validations:
+    - expression: >-
+        has(object.spec.template.metadata.labels) &&
+        object.spec.template.metadata.labels[?"craft-notebook-run"].orValue("") == "true"
+      message: a run pod must carry the craft-notebook-run label
+    - expression: has(variables.pod.automountServiceAccountToken) && !variables.pod.automountServiceAccountToken
+      message: a run pod gets no service account token
+    - expression: >-
+        !has(variables.pod.hostNetwork) && !has(variables.pod.hostPID) && !has(variables.pod.hostIPC)
+      message: a run pod shares nothing with the node
+    - expression: >-
+        variables.pod.volumes.all(v, has(v.emptyDir) ||
+        (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName.startsWith("claim-")))
+      message: a run pod mounts only a person's volume and scratch space
+    - expression: >-
+        variables.containers.all(c, c.image == {{ .Values.notebookRuns.image | quote }} &&
+        has(c.securityContext) && c.securityContext.runAsNonRoot == true &&
+        c.securityContext.allowPrivilegeEscalation == false &&
+        !(has(c.securityContext.privileged) && c.securityContext.privileged) &&
+        !has(c.ports))
+      message: a run uses the workspace image, non-root and unprivileged
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $account }}.{{ .Release.Namespace }}
+spec:
+  policyName: {{ $account }}.{{ .Release.Namespace }}
+  validationActions: [Deny]
+{{- end }}
