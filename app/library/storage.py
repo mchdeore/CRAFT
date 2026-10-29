@@ -1,8 +1,9 @@
 """Readable library queries use explicit sessions and never choose transactions."""
 
 from collections.abc import Sequence
+from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, text, tuple_
+from sqlalchemy import and_, column, func, or_, select, table, text, tuple_
 from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
@@ -415,3 +416,63 @@ def revision(session: Session, item: str, number: int, *, content: bool = False)
         .first()
     )
     return dict(row) if row else None
+
+
+# The read-only view from migration 0028; not a registered table, so Alembic leaves it alone.
+document_relations = table(
+    "document_relations",
+    column("relation"),
+    column("item"),
+    column("version"),
+    column("target_kind"),
+    column("target"),
+)
+
+
+def relation_documents(session: Session, caller: Caller, items=None, mission=None):
+    """Readable, not deleted documents, by item and/or mission."""
+    query = select(
+        m.provider_items.c.item, m.provider_items.c.title, m.provider_items.c.mission_key
+    ).where(readable(caller), m.provider_items.c.deleted_at.is_(None))
+    if items is not None:
+        query = query.where(m.provider_items.c.item.in_(list(items)))
+    if mission is not None:
+        query = query.where(m.provider_items.c.mission_key == mission)
+    return {row["item"]: dict(row) for row in session.execute(query).mappings()}
+
+
+def relation_rows(session: Session, items=None, targets=None):
+    """The view's rows for these documents, or pointing at these (target_kind, target) pairs."""
+    r = document_relations.c
+    query = select(document_relations).order_by(r.item, r.relation, r.version, r.target)
+    if items is not None:
+        query = query.where(r.item.in_(list(items)))
+    if targets is not None:
+        query = query.where(tuple_(r.target_kind, r.target).in_(list(targets)))
+    return [dict(row) for row in session.execute(query).mappings()]
+
+
+def relation_values(session: Session, caller: Caller, identifiers):
+    """Labels of the cube values the caller's mission and silo grants reach, admin or not."""
+    grant = (
+        select(m.mission_grants.c.user_id)
+        .where(
+            m.mission_grants.c.user_id == caller.user_id,
+            m.mission_grants.c.mission_key == m.cube_values.c.mission_key,
+            or_(m.mission_grants.c.silo.is_(None), m.mission_grants.c.silo == m.cube_values.c.silo),
+        )
+        .exists()
+    )
+    query = (
+        select(m.cube_values.c.id, m.parameters.c.label)
+        .join(m.parameters, m.parameters.c.key == m.cube_values.c.parameter)
+        .where(grant, m.cube_values.c.id.in_([UUID(value) for value in identifiers]))
+    )
+    return {str(row["id"]): row["label"] for row in session.execute(query).mappings()}
+
+
+def relation_facets(session: Session, identifiers):
+    query = select(m.facet_texts.c.id, m.facet_texts.c.facet, m.facet_texts.c.sources).where(
+        m.facet_texts.c.id.in_([UUID(value) for value in identifiers])
+    )
+    return {str(row["id"]): dict(row) for row in session.execute(query).mappings()}

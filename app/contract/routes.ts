@@ -27,6 +27,7 @@ export interface Routes {
   "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
   "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };
   "POST /api/library/explore": { body: T.ExploreInput; response: T.ChunkPage };
+  "GET /api/library/relations": { query: T.RelationsRequest; response: T.Graph };
   "GET /api/library/documents/:item/preview": { query: { version: number; locator?: string }; response: Blob };
   "GET /api/library/documents/:item/download": { query: { version: number; locator?: string }; response: Blob };
   "POST /api/library/documents/:item/revisions": { body: Blob; query: { version: number }; response: T.Revision };

@@ -253,6 +253,51 @@ def explore(caller: Caller, request: ExploreInput) -> ChunkPage:
     return service.explore(caller, request)
 
 
+class RelationsRequest(Shape):
+    item: Annotated[str, msgspec.Meta(pattern=r"^itm_[0-9a-f]{12}$")] | None = None
+    mission: Annotated[str, msgspec.Meta(min_length=1, max_length=100)] | None = None
+
+
+class GraphNode(Shape, omit_defaults=True):
+    id: str
+    kind: Literal["file", "document", "version", "value", "facet", "mission"]
+    label: str
+    linked: bool
+    missing: bool
+    path: str | None = None
+    item: str | None = None
+    group: str | None = None
+
+
+class GraphEdge(Shape, omit_defaults=True):
+    id: str
+    from_node: str = msgspec.field(name="from")
+    to_node: str = msgspec.field(name="to")
+    relation: str
+    note: str | None = None
+
+
+class GraphGroup(Shape, omit_defaults=True):
+    id: str
+    label: str
+    parent: str | None = None
+
+
+class Graph(Shape):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    groups: list[GraphGroup]
+
+
+@operation(SIGNED_IN, get="/library/relations", tool=True)
+def relations(caller: Caller, request: RelationsRequest) -> Graph:
+    """Show how readable documents relate: versions, citing cube values, facets and mission.
+
+    Give an item for its neighbourhood or a mission for all its documents; for example one item.
+    """
+    return service.relations(caller, request)
+
+
 @operation(SIGNED_IN, get="/library/documents/{item}/preview")
 def preview(caller: Caller, request: OriginalRef) -> Response:
     """Open a readable original version inline."""

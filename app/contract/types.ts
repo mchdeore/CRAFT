@@ -75,6 +75,12 @@ export interface LibraryDocument { item: string; version: number; title: string;
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }
 export interface ChunkPage { chunks: ChunkText[]; truncated: boolean }
+export interface RelationsRequest { item?: string | null; mission?: string | null }
+/** One graph shape for library relations and workspace graphs. Library node IDs: an item, `item@version`, `value:<id>`, `facet:<id>`, `mission:<key>`. */
+export interface GraphNode { id: string; kind: "file" | "document" | "version" | "value" | "facet" | "mission"; label: string; linked: boolean; missing: boolean; path?: string; item?: string; group?: string }
+export interface GraphEdge { id: string; from: string; to: string; relation: string; note?: string }
+export interface GraphGroup { id: string; label: string; parent?: string }
+export interface Graph { nodes: GraphNode[]; edges: GraphEdge[]; groups: GraphGroup[] }
 export type ValueKind = "exact" | "range" | "unknown" | "not_applicable";
 export interface Parameter {
   key: string; label: string; unit: string; min: number | null; max: number | null; whole: boolean;

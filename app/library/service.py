@@ -849,3 +849,79 @@ def export_revision(caller: Caller, request) -> Response:
             "Content-Security-Policy": "sandbox",
         },
     )
+
+
+def relations(caller: Caller, request):
+    """One item's neighbourhood, or a mission's documents, from the document_relations view.
+
+    Only frozen rows are read: no provider call and no model. A document appears when the
+    caller may read it; a cube value when their grants reach its mission and silo (admins
+    too, as for every cube read); a facet text only when every one of its sources is
+    readable, as read_facets requires.
+    """
+    from app.library.handlers import Graph, GraphEdge, GraphNode
+
+    if request.item is None and request.mission is None:
+        raise InvalidInput()
+    sessions, _ = scope(caller)
+    with unit_of_work(sessions, read_only=True) as session:
+        items = None if request.item is None else [request.item]
+        documents = storage.relation_documents(session, caller, items, request.mission)
+        if request.item is not None and not documents:
+            raise NotFound()
+        found = storage.relation_rows(session, items=documents)
+        wanted = {kind: {r["target"] for r in found if r["target_kind"] == kind} for kind in KINDS}
+        values = storage.relation_values(session, caller, wanted["value"])
+        facets = storage.relation_facets(session, wanted["facet"])
+        sources = {item for facet in facets.values() for item in facet["sources"]}
+        readable = storage.relation_documents(session, caller, sources).keys()
+        labels = {
+            "value": values,
+            "facet": {k: f["facet"] for k, f in facets.items() if set(f["sources"]) <= readable},
+            # Mission titles are cube data; the key is already a tag on the readable document.
+            "mission": {key: key for key in wanted["mission"]},
+        }
+        shared = {(kind, target) for kind, named in labels.items() for target in named}
+        neighbours = {row["item"] for row in storage.relation_rows(session, targets=shared)}
+        documents |= storage.relation_documents(
+            session, caller, neighbours - documents.keys(), request.mission
+        )
+        rows = storage.relation_rows(session, items=documents)
+
+    nodes = {
+        key: GraphNode(
+            id=key, kind="document", label=row["title"], linked=True, missing=False, item=key
+        )
+        for key, row in documents.items()
+    }
+    edges = {}
+    for row in rows:
+        kind, target, item = row["target_kind"], row["target"], row["item"]
+        source = item if row["version"] is None else f"{item}@{row['version']}"
+        if kind == "document":
+            to = item
+            nodes[source] = GraphNode(
+                id=source,
+                kind="version",
+                label=f"v{row['version']}",
+                linked=True,
+                missing=False,
+                item=item,
+            )
+        elif (kind, target) in shared:
+            to = f"{kind}:{target}"
+            nodes[to] = GraphNode(
+                id=to, kind=kind, label=labels[kind][target], linked=True, missing=False
+            )
+        else:
+            continue
+        key = f"{row['relation']}:{source}:{to}"
+        edges[key] = GraphEdge(id=key, from_node=source, to_node=to, relation=row["relation"])
+    return Graph(
+        nodes=sorted(nodes.values(), key=lambda node: node.id),
+        edges=list(edges.values()),
+        groups=[],
+    )
+
+
+KINDS = ("value", "facet", "mission")
