@@ -72,9 +72,23 @@ def _owned(session: Session, caller: Caller, job_id: int):
 
 
 def read(caller: Caller, job_id: int) -> dict[str, Any]:
+    """One job, with its progress if it reported any."""
     assert caller.sessions is not None
     with unit_of_work(caller.sessions, read_only=True) as session:
-        return shape(_owned(session, caller, job_id))
+        row = shape(_owned(session, caller, job_id))
+        progress = storage.progress(session, job_id)
+    return row | {"progress": dict(progress) if progress else None}
+
+
+def save_progress(sessions, job_id: int, done: int, total: int, note: str | None) -> None:
+    """Record a running job's progress in its own short transaction."""
+    with unit_of_work(sessions) as session:
+        storage.save_progress(session, job_id, done, total, note)
+
+
+def prune_progress(session: Session, days: int) -> None:
+    """Delete progress not updated for this many days."""
+    storage.prune_progress(session, days)
 
 
 def page(caller: Caller, state: str | None, offset: int, limit: int) -> dict[str, Any]:

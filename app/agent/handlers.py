@@ -55,6 +55,9 @@ class RunAgentInput(Shape, forbid_unknown_fields=False):
     messages: list[dict[str, Any]]
     resume: Any = None
     skill: SkillVersionRef | None = None
+    # task: 60 tool calls and 15 minutes, one at a time per person, with a notification when
+    # it ends or waits for approval. A resume keeps the mode the run started with.
+    mode: Literal["chat", "task"] = "chat"
 
 
 class AGUIEvent(Shape, omit_defaults=True):

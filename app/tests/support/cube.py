@@ -163,7 +163,7 @@ def cube_source(settings, owner_engine, tmp_path):
         runs = select(inputs.c.run_id).where(inputs.c.owner_id == user)
         connection.execute(events.delete().where(events.c.run_id.in_(runs)))
         connection.execute(inputs.delete().where(inputs.c.owner_id == user))
-        for name in ["auth_sessions", "local_credentials", "user_roles"]:
+        for name in ["auth_sessions", "local_credentials", "user_roles", "notifications"]:
             table = m.metadata.tables[name]
             connection.execute(table.delete().where(table.c.user_id == user))
         connection.execute(

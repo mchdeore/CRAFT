@@ -3,6 +3,7 @@
 import json
 import time
 
+import msgspec
 from sqlalchemy import text
 
 from app.cli import main, parse_since
@@ -112,6 +113,12 @@ def test_sample_queues_writes_row(settings, owner_engine):
 def test_concurrency_comes_from_per_queue_settings(settings):
     assert settings.concurrency_for(["agent"]) == settings.worker_concurrency_agent
     assert settings.concurrency_for(["interactive"]) == settings.worker_concurrency_interactive
-    assert settings.concurrency_for(["agent", "bulk"]) == min(
+    # One worker taking a small queue beside a large one keeps the large one's number.
+    assert settings.concurrency_for(["agent", "bulk"]) == max(
         settings.worker_concurrency_agent, settings.worker_concurrency_bulk
     )
+    sized = msgspec.structs.replace(
+        settings, worker_concurrency_agent=20, worker_concurrency_bulk=2
+    )
+    assert sized.concurrency_for(["agent", "bulk"]) == 20
+    assert sized.concurrency_for(["bulk"]) == 2

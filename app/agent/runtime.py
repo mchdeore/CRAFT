@@ -45,6 +45,7 @@ from app.skills import native as saved_skills
 LANGUAGES = {"en": "English", "fr": "French"}
 RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
+TASK_TOOL_LIMIT = 60  # a task-mode run's limits: 60 tool calls in RUN_SECONDS
 WORKSPACE_READY_SECONDS = 90  # a stopped workspace starts with the run; wait this long for it
 _read_only_query = ContextVar("read_only_query", default=False)
 
@@ -391,8 +392,9 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             set(allowed),
         )
     if resuming:
-        state, resume_payload = await run_in_threadpool(service.resume, caller, request)
+        state, resume_payload, mode = await run_in_threadpool(service.resume, caller, request)
     else:
+        mode = request.mode
         state = await run_in_threadpool(service.start, caller, request, version)
     trusted = replace(caller, conversation_id=request.thread_id, run_id=request.run_id)
     parent = current_call.get()
@@ -400,7 +402,9 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         parent.caller = trusted
     started = asyncio.get_running_loop().time()
     elapsed = 0
-    limit = min(RUN_SECONDS, caller.settings.agent_run_seconds)
+    task = mode == "task"
+    limit = RUN_SECONDS if task else min(RUN_SECONDS, caller.settings.agent_run_seconds)
+    tool_limit = TASK_TOOL_LIMIT if task else TOOL_LIMIT
     deadline = started + limit
     status = "failed"
     end_reason = "failed"
@@ -483,14 +487,14 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             WorkspaceToolCallMiddleware(
                 trace,
                 budget,
-                TOOL_LIMIT,
+                tool_limit,
                 skills.completed,
                 external_tools=external_tools,
                 kernel_id=jupyter.kernel_id,
             )
             if jupyter is not None
             else ToolCallMiddleware(
-                trace, budget, TOOL_LIMIT, skills.completed, external_tools=external_tools
+                trace, budget, tool_limit, skills.completed, external_tools=external_tools
             )
         )
         if jupyter is not None:

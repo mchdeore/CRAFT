@@ -18,6 +18,11 @@ class Job:
 
     lock maps the input to a key: a second call while one is queued or running returns that
     job. interrupted(sessions, input) runs when a worker died and the job will not be retried.
+    every is a cron string: the workers queue the job once per tick, as the system (a PUBLIC
+    operation with no input, never retried: the next tick runs it again). Runs never overlap:
+    a tick during a run waits for it, and further ticks while one waits are dropped.
+    notify tells the person who queued the job when it finishes or finally fails (a worker
+    shutting down mid-run counts as failing; the owner's own cancel doesn't notify).
     """
 
     queue: str
@@ -25,6 +30,8 @@ class Job:
     timeout: float | None = None
     lock: Callable[[Any], str] | None = None
     interrupted: Callable[[Any, Any], None] | None = None
+    every: str | None = None
+    notify: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,6 +162,15 @@ def declare(
         or inspect.isasyncgenfunction(function)
     ):
         raise ValueError("A job returns nothing, needs no approval and is not a tool")
+    if job is not None and job.every is not None:
+        from croniter import croniter
+
+        from app.infrastructure.access import PUBLIC
+
+        if access != PUBLIC or input_shape is not None or path or job.notify or job.retry:
+            raise ValueError("A scheduled job runs as the system: public, no input, no retry")
+        if not croniter.is_valid(job.every):
+            raise ValueError("A scheduled job needs a valid cron string")
     return Operation(
         name,
         function,

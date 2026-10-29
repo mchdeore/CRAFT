@@ -19,7 +19,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -27,6 +27,7 @@ from typing import Any
 import psycopg
 from procrastinate import App, BaseRetryStrategy, JobContext, PsycopgConnector, RetryDecision
 from procrastinate.exceptions import JobAborted
+from procrastinate.job_context import AbortReason
 from procrastinate.jobs import Job, Status
 from procrastinate.worker import Worker
 from sqlalchemy.orm import Session, sessionmaker
@@ -37,7 +38,7 @@ from app.infrastructure.database.engine import conninfo, make_engine, make_sessi
 logger = logging.getLogger("craft.jobs")
 
 # Modules that declare job operations (`@operation(..., job=Job(...))`); the worker imports them.
-KIND_MODULES = ("app.agent.jobs", "app.workspace.jobs")
+KIND_MODULES = ("app.agent.jobs", "app.maintenance.jobs", "app.workspace.jobs")
 # Waits between automatic retries (transient errors only) and the SIGTERM grace per queue.
 WAITS = {"agent": (), "interactive": (5, 30, 120), "bulk": (60, 300, 1800)}
 GRACE = {"agent": 900.0, "interactive": 120.0, "bulk": 120.0}
@@ -116,6 +117,8 @@ class JobRun:
     id: int
     attempt: int
     context: JobContext
+    # When the job last wrote its progress (report_progress writes at most once a second).
+    progress_at: list[float] = field(default_factory=lambda: [0.0], repr=False, compare=False)
 
     def should_abort(self) -> bool:
         """Blocking jobs check this between steps; async jobs are cancelled instead."""
@@ -131,6 +134,9 @@ class Kind:
     retry: bool
     lock_key: Callable[[dict], str] | None
     interrupted: Callable[[sessionmaker[Session], dict], None] | None
+    every: str | None = None
+    every_args: dict | None = None
+    notify: bool = False
 
 
 KINDS: dict[str, Kind] = {}
@@ -145,6 +151,9 @@ def register_job(
     retry: bool = True,
     lock_key: Callable[[dict], str] | None = None,
     interrupted: Callable[[sessionmaker[Session], dict], None] | None = None,
+    every: str | None = None,
+    every_args: dict | None = None,
+    notify: bool = False,
 ) -> Kind:
     """Register a job kind: `func(job: JobRun, **args)`, sync (run in a thread) or async.
     Features declare jobs as operations instead (`Job` in app.infrastructure.operations).
@@ -155,13 +164,16 @@ def register_job(
     turns and notebook runs: tools can change things and every attempt costs model money).
     lock_key maps the arguments to a key: a second request while one is queued or running
     returns that job. timeout applies to async jobs. interrupted runs when the job's worker
-    died and the job will not be retried.
+    died and the job will not be retried. every (cron) queues the job once per tick with the
+    arguments every_args; notify tells the requester when the job finishes or finally fails.
     """
     if queue not in QUEUES:
         raise ValueError(f"unknown queue {queue}")
     if kind in KINDS:
         raise ValueError(f"job kind {kind} is already registered")
-    KINDS[kind] = Kind(kind, func, queue, timeout, retry, lock_key, interrupted)
+    KINDS[kind] = Kind(
+        kind, func, queue, timeout, retry, lock_key, interrupted, every, every_args, notify
+    )
     return KINDS[kind]
 
 
@@ -188,6 +200,28 @@ def _record_failure(settings: Settings, job_id: int, attempt: int, error: BaseEx
         logger.warning("job error not recorded", extra={"fields": {"job_id": job_id}})
 
 
+def _retries(kind: Kind, job: Job, error: BaseException) -> bool:
+    """Whether the queue runs the job again after this failure, as Backoff decides."""
+    return kind.retry and job.attempts < len(WAITS[kind.queue]) and transient(error)
+
+
+def _ended(settings: Settings, sessions: sessionmaker[Session], job: Job, *, failed: bool) -> None:
+    """Tell the person who queued a notify kind that it finished or finally failed."""
+    from uuid import UUID
+
+    from app.infrastructure.access import Caller
+    from app.notifications.handlers import JobEnded, job_ended
+
+    requested_by = job.task_kwargs.get("requested_by")
+    if not isinstance(requested_by, str) or job.id is None:
+        return
+    ended = JobEnded(user=UUID(requested_by), job_id=job.id, failed=failed)
+    try:
+        job_ended(Caller(sessions=sessions, settings=settings), ended)
+    except Exception:
+        logger.warning("job notification not recorded", extra={"fields": {"job_id": job.id}})
+
+
 def _log(kind: Kind, job: Job, outcome: str, started: float) -> None:
     fields = {
         "kind": kind.name,
@@ -197,6 +231,8 @@ def _log(kind: Kind, job: Job, outcome: str, started: float) -> None:
         "outcome": outcome,
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
+    if "timestamp" in job.task_kwargs:
+        fields["scheduled"] = True
     logger.info("job", extra={"fields": fields})
 
 
@@ -204,7 +240,10 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
     def arguments(context: JobContext, args: dict) -> tuple[JobRun, dict]:
         job = context.job
         assert job.id is not None
-        values = {key: value for key, value in args.items() if key != "requested_by"}
+        # The periodic deferrer adds the tick's timestamp; the job itself doesn't take it.
+        values = {
+            key: value for key, value in args.items() if key not in {"requested_by", "timestamp"}
+        }
         return JobRun(settings, sessions, job.id, job.attempts + 1, context), values
 
     if inspect.iscoroutinefunction(kind.func):
@@ -216,12 +255,19 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
                 async with asyncio.timeout(kind.timeout):
                     result = await kind.func(run, **values)
             except asyncio.CancelledError:
+                # Stopped by its owner, or by a worker shutting down: only the latter is news.
+                if kind.notify and context.abort_reason() == AbortReason.SHUTDOWN:
+                    await asyncio.to_thread(_ended, settings, sessions, context.job, failed=True)
                 _log(kind, context.job, "stopped", started)
                 raise
             except BaseException as error:
                 await asyncio.to_thread(_record_failure, settings, run.id, run.attempt, error)
+                if kind.notify and not _retries(kind, context.job, error):
+                    await asyncio.to_thread(_ended, settings, sessions, context.job, failed=True)
                 _log(kind, context.job, "failed", started)
                 raise
+            if kind.notify:
+                await asyncio.to_thread(_ended, settings, sessions, context.job, failed=False)
             _log(kind, context.job, "finished", started)
             return result
 
@@ -233,29 +279,50 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
         try:
             result = kind.func(run, **values)
         except JobAborted:
+            if kind.notify and context.abort_reason() == AbortReason.SHUTDOWN:
+                _ended(settings, sessions, context.job, failed=True)
             _log(kind, context.job, "stopped", started)
             raise
         except BaseException as error:
             _record_failure(settings, run.id, run.attempt, error)
+            if kind.notify and not _retries(kind, context.job, error):
+                _ended(settings, sessions, context.job, failed=True)
             _log(kind, context.job, "failed", started)
             raise
+        if kind.notify:
+            _ended(settings, sessions, context.job, failed=False)
         _log(kind, context.job, "finished", started)
         return result
 
     return run_sync
 
 
-def make_app(settings: Settings, sessions: sessionmaker[Session]) -> App:
-    """A Procrastinate app on the app's own login, with every registered kind."""
+def make_app(settings: Settings, sessions: sessionmaker[Session], *, schedules: bool = True) -> App:
+    """A Procrastinate app on the app's own login, with every registered kind.
+
+    With schedules, its workers queue the scheduled kinds: every worker tries each tick, and
+    procrastinate_periodic_defers lets one job per kind and tick through. The lock runs one
+    at a time, and the queueing lock drops a tick while another is still waiting."""
     app = App(connector=PsycopgConnector(conninfo=conninfo(settings), min_size=1, max_size=4))
     for kind in kinds().values():
         waits = WAITS[kind.queue] if kind.retry else ()
-        app.task(
+        task = app.task(
             name=kind.name,
             queue=kind.queue,
             pass_context=True,
             retry=Backoff(waits) if waits else False,
         )(_task(settings, sessions, kind))
+        if schedules and kind.every:
+            app.periodic_registry.register_task(
+                task=task,
+                cron=kind.every,
+                periodic_id="",
+                configure_kwargs={
+                    "task_kwargs": dict(kind.every_args or {}),
+                    "lock": kind.name,
+                    "queueing_lock": kind.name,
+                },
+            )
     return app
 
 
@@ -273,6 +340,8 @@ async def recover(app: App, settings: Settings, sessions: sessionmaker[Session])
                 await app.job_manager.finish_job(job, status=Status.FAILED, delete_job=False)
                 if kind and kind.interrupted:
                     await asyncio.to_thread(kind.interrupted, sessions, dict(job.task_kwargs))
+                if kind and kind.notify:
+                    await asyncio.to_thread(_ended, settings, sessions, job, failed=True)
         except Exception:
             # Another worker recovered it first.
             continue
@@ -340,10 +409,11 @@ async def work(
     started: Callable[[Worker], None] | None = None,
     install_signal_handlers: bool = True,
     grace: float | None = None,
+    schedules: bool = True,
 ) -> None:
     engine = make_engine(settings)
     sessions = make_sessions(engine)
-    app = make_app(settings, sessions)
+    app = make_app(settings, sessions, schedules=schedules)
     async with app.open_async():
         worker = Worker(
             app,
@@ -404,8 +474,11 @@ def check_worker() -> bool:
 
 
 @contextmanager
-def worker_thread(settings: Settings, queues: list[str], concurrency: int = 4) -> Iterator[None]:
-    """An in-process worker on its own event loop, for tests that need jobs to run."""
+def worker_thread(
+    settings: Settings, queues: list[str], concurrency: int = 4, *, schedules: bool = False
+) -> Iterator[None]:
+    """An in-process worker on its own event loop, for tests that need jobs to run.
+    It queues no scheduled jobs unless asked, so tests see only the jobs they queue."""
     ready = threading.Event()
     state: dict[str, Any] = {}
 
@@ -423,6 +496,7 @@ def worker_thread(settings: Settings, queues: list[str], concurrency: int = 4) -
                     started=started,
                     install_signal_handlers=False,
                     grace=5.0,
+                    schedules=schedules,
                 )
             )
         except BaseException as error:

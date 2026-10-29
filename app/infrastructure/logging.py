@@ -11,7 +11,7 @@ ALLOWED_FIELDS = (
     "method", "path", "status", "duration_ms", "request_id", "error_type",
     "kind", "name", "origin", "outcome", "error_code", "db_statements", "db_ms",
     "call_id", "parent_call_id", "user_id", "auth_session_id",
-    "conversation_id", "run_id", "tool_call_id", "job_id", "queue", "attempt",
+    "conversation_id", "run_id", "tool_call_id", "job_id", "queue", "attempt", "scheduled",
 )  # fmt: skip
 QUIET = (
     "httpx",
