@@ -58,16 +58,22 @@ Kernels and terminal shells start with an outbound guard. Python connections, na
 
 ## Native tools from Python
 
-During an active chat run, the selected notebook kernel also has run-bound native access:
+During an active chat run, the kernel of the owner's `analysis.ipynb` also has run-bound native access:
 
 ```python
 import craft
 
 async with craft.native() as sdk:
-    sources = await sdk.search("project requirements")
+    sources = await sdk.search("project requirements", limit=5)
 ```
 
-These calls use that run's identity, tool-call budget, deadline, retrieval trace and audit records. Access ends on completion, pause, error or cancellation. The SDK refuses operations that require CRAFT approval before dispatch.
+The SDK ([`workspace/src/craft/client.py`](https://github.com/mchdeore/CRAFT/blob/main/workspace/src/craft/client.py)) wraps CRAFT's existing read tools (search, documents and chunks, missions, parameters and the cube, catalogs) and returns their MCP results unchanged (`isError`, `content`, `structuredContent`); it adds no data API of its own. Calls use the run's identity, tool-call budget, deadline, retrieval trace and audit records, and the SDK refuses any operation that needs approval before dispatching it. How the agent uses it is in its instructions ([`app/agent/instructions.md`](https://github.com/mchdeore/CRAFT/blob/main/app/agent/instructions.md)).
+
+- CRAFT opens `analysis.ipynb` when needed and injects the run's bridge capability into its kernel with a silent execution (`store_history=False`); it stays in kernel memory. The kernel reaches a per-run bridge on the API pod's own address with the run's bearer. A second run for the same owner is refused, and an existing binding is never overwritten.
+- Finish, an approval pause, an error or cancellation withdraws the bridge and clears the binding. If the kernel connection is lost, the bridge is still withdrawn and the in-memory binding expires at the run's deadline.
+- Another kernel or a separate Python process has no binding and gets an explicit missing-binding error. To run an owned script with native access, execute it in that notebook.
+- `owned_path()` refuses absolute paths, traversal and existing symlinks: pass `outputs/result.txt`, not `/workspace/outputs/result.txt`. It is a convenience check; the pod is the boundary.
+- `craft.client.Craft(session)` and `craft.client.connect(url, run_token=...)` use only authentication passed to them; they issue no credentials or runs.
 
 ## Build
 
@@ -109,18 +115,7 @@ Each workspace pod accepts traffic only from the Hub and its proxy, and reaches 
 
 A notebook control server runs beside JupyterLab in the same pod, on its loopback only. It uses MCP SDK 2 (`jupyter-mcp-server==2.2.4`), so it has its own image (`workspace/mcp.Dockerfile`) rather than sharing the workspace package's MCP SDK 1.30.0. CRAFT reaches it through JupyterLab's proxy behind the Hub's sign-in.
 
-During an agent run, CRAFT binds the native Python SDK to the kernel of the owner's `analysis.ipynb`, opening it when needed. The kernel reaches a per-run bridge on the API pod's own address; the bridge needs the run's bearer, which is withdrawn when the run ends.
-
-The agent receives only the read tools `list_files`, `list_notebooks` and
-`read_notebook`, prefixed `workspace_`. Running code
-and changing files use the CRAFT operations `run_code`, `write_file` and
-`edit_notebook`, which wait for the requester's approval and dispatch once. Workspace calls
-share the CRAFT run's 20-tool-call and 120-second limits. The transport dispatches
-once; a lost response is an unknown outcome. Keep Markdown skill files under
-`/workspace/skills` and refer to exact owned paths. Read selected or relevant skill
-contents through a small approved `run_code` call; the direct list/notebook tools
-do not read plain Markdown files. Personal files remain separate from the registered
-CRAFT skill catalog.
+The agent receives only the read tools `list_files`, `list_notebooks` and `read_notebook`, prefixed `workspace_`; they don't read plain files such as Markdown skills, which the agent reads with a small approved `run_code`. Running code and changing files use the operations `run_code`, `write_file` and `edit_notebook`, which wait for the requester's approval. Workspace calls share the run's 20-tool-call and 120-second limits and are dispatched once ([tools over MCP](agent.md#tools-over-mcp)). Personal files stay separate from the registered CRAFT skill catalog.
 
 ## Notebook runs
 
@@ -144,84 +139,5 @@ A person's own work in JupyterLab never passes through CRAFT's operations, so th
 - Requests that change something, and failures, with method, path, status and duration, never the query string.
 
 No line holds code, outputs or file content.
-
-## Notebook SDK reads
-
-`owned_path()` rejects absolute paths, traversal, and existing symlinks. Pass
-`outputs/result.txt`, not `/workspace/outputs/result.txt`. It is a convenience
-check; the container boundary confines the process.
-
-The agent can run an inspected owned script through its existing workspace
-execution tool. When native SDK reads are needed, execute in the active run's
-selected notebook and kernel. Starting a separate Python process loses that
-binding. For example, execute an already-read `scripts/report.py` in the notebook:
-
-```python
-from craft import owned_path
-
-script = owned_path("scripts/report.py")
-code = script.read_text(encoding="utf-8")
-exec(compile(code, str(script), "exec"), {"__name__": "__main__", "__file__": str(script)})
-```
-
-During a native CRAFT run with `jupyter` configured, use top-level `await` in
-that selected notebook:
-
-```python
-import craft
-
-async with craft.native() as sdk:
-    result = await sdk.search("authorized source", limit=5, kinds=["chunk"])
-    if result.isError:
-        raise RuntimeError("CRAFT search failed; inspect the tool result.")
-    print(result.structuredContent)
-```
-
-The SDK exposes existing tools and preserves MCP results (`isError`, `content`
-and `structuredContent`); it does not add a separate data API:
-
-| Call | Purpose |
-| --- | --- |
-| `await sdk.tools()` | Read allowed native tool names and input schemas when needed |
-| `await sdk.missions(query="sim", limit=5)` | Resolve readable mission names and aliases to returned keys |
-| `await sdk.parameters()` | Read parameter keys and registered units before numeric filters |
-| `await sdk.search(query, **filters)` | Search readable source text |
-| `await sdk.document(item, version=version)` | Read the selected exact item/version metadata and ordered outline |
-| `await sdk.chunks(item, version, from_block=1, to_block=20)` | Read an inclusive block range from the selected exact version |
-| `await sdk.skills(limit=10)` | List the legacy saved-skill registry only when explicitly requested |
-
-`search` takes a 1–500 character `query`, optional `missions`, `silos`, `stages`
-and `kinds` lists, and `limit` from 1 to 8. `kinds` accepts `chunk` or `document`.
-Group hits by their handle's item/version, show the returned title and a sentence
-preview, and retain those exact identities when the user selects a document.
-Report bounded results and ambiguous choices. Scores are ranking values, not
-confidence. Use the existing citation/source preview flow, not an owned-file
-link, for sources that have not been imported.
-
-Document metadata and search hits do not establish a complete summary. Read all
-outline blocks with the existing `read_chunks` tool's inclusive ranges of at most
-20 blocks, keeping the selected item/version and checking for missing blocks.
-Report partial coverage when the run budget or available text prevents completion.
-For numeric datacube questions, use declared `find_missions`, `get_mission` or
-`compare_missions` schemas after resolving dictionary keys and units. Preserve
-`silo`, `stage`, `at`, `knownAt`, gaps and value citations; text search does not
-execute numeric conditions. Exact owned paths and known tool schemas do not
-require repeated inventory calls.
-
-Root injects the ephemeral bridge capability through authenticated, silent
-Jupyter kernel execution with `store_history=False`. It stays in kernel memory.
-Native SDK calls borrow the agent's exact middleware, deadline, call budget,
-retrieval trace and trusted run identity. Approved `run_code` calls execute in
-the configured kernel. An overlapping run for the same
-owner is rejected, and an existing kernel binding cannot be overwritten.
-
-Finish, approval pause, error and cancellation withdraw the bridge before the
-native transport closes and clear the same run's kernel binding. A lost kernel
-connection still leaves the bridge withdrawn; the memory binding expires at the
-run's original deadline. Unprovisioned kernels and standalone Python processes
-raise an explicit missing-binding error. Native SDK mutations remain unavailable
-until the CRAFT approval/resume path is integrated. `craft.client.Craft(session)` and
-`craft.client.connect(url, run_token=...)` still consume explicitly injected authentication;
-they issue no credentials or persistent runs.
 
 See [agent runtime](runtime.md).

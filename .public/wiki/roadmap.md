@@ -73,6 +73,9 @@ Each row stays as it is until its trigger happens. Not planned: moving sign-in t
 | Database logins | Logins created by `initdb.sh` | Logins and grants from infrastructure code; managed identity | Deployment |
 | Database recovery | Simulated data, no backups; a nightly dump to the node's disk is in review | A copy off the disk, then managed backups, retention and recovery | Real data or people's work on the VM |
 | Document permissions | Mission grants ([access](datacube.md#access)) | Source-system permissions | Real connectors |
+| Workspace execution | One controller per workspace, guarded in process; an approved external action records consumption, not its outcome | A runtime lease with fencing, and a record of each external call's outcome | More than one controller can run code in the same workspace |
+| Outside MCP servers | None: the agent uses only CRAFT's own tools | Connections each person owns, with a protected secret reference and rotation | People need tools from outside services |
+| Saved skills, notes and drafts | Kept in PostgreSQL beside the personal Markdown skills | Retired with an export and a data migration | Nothing calls them any more |
 
 ## Vision
 

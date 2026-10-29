@@ -93,7 +93,7 @@ Database initialization runs once on an empty volume. It creates owner/applicati
 
 The production image runs as numeric user `10001` and omits uv, development packages and build tools. Compose forwards application database, model, provider, Origin and MCP settings. The app receives no administrative or owner database password.
 
-The application agent uses PostgreSQL conversations and sessions with native HTTP MCP. Its `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. Approved local effects consume their matching approval in the write transaction.
+The application agent uses PostgreSQL conversations and sessions with native HTTP MCP ([tools over MCP](agent.md#tools-over-mcp)).
 
 The optional lifecycle attachment starts with no services. Controller code supplies owned process/container specifications; HTTP and MCP cannot create them. Owned Jupyter workspaces connect to chat through private MCP controls and share files with the user. Native Python reads use only the selected kernel's active chat binding.
 
