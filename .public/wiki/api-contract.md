@@ -124,6 +124,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/me/workspace-tokens` | `NewWorkspaceToken` | `IssuedWorkspaceToken` | signed-in browser session or command line | — |
 | `GET /api/me/workspace-tokens` | — | `WorkspaceToken[]` | signed-in browser session or command line | — |
 | `DELETE /api/me/workspace-tokens/:id` | — | `void` | signed-in browser session or command line | — |
+| `POST /api/workspace-tokens/hub` | — | `IssuedWorkspaceToken` | `Authorization: token <Hub token>` from the person's own workspace; a 12-hour token for the account the Hub names | — |
 | `GET /api/workspace` | — | `Workspace` | signed in; own workspace | — |
 | `POST /api/workspace/start` | — | `Workspace` | signed in; own workspace; returns at once while the Hub starts it | — |
 | `POST /api/workspace/stop` | — | `Workspace` | signed in; own workspace; files are kept | — |
@@ -375,6 +376,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/me/tokens` | `WorkspaceToken[]` | `app/contract/examples/tokens.json` |
 | `POST /api/me/workspace-tokens` | `IssuedWorkspaceToken` | `app/contract/examples/workspace-token.json` |
 | `GET /api/me/workspace-tokens` | `WorkspaceToken[]` | `app/contract/examples/workspace-tokens.json` |
+| `POST /api/workspace-tokens/hub` | `IssuedWorkspaceToken` | `app/contract/examples/workspace-token.json` |
 | `GET /api/workspace` | `Workspace` | `app/contract/examples/workspace.json` |
 | `POST /api/workspace/start` | `Workspace` | `app/contract/examples/workspace.json` |
 | `POST /api/workspace/stop` | `Workspace` | `app/contract/examples/workspace-stopped.json` |

@@ -335,3 +335,96 @@ def test_guard_is_off_without_the_flag():
     if craft_guard.installed():
         pytest.skip("this test process already runs guarded")
     socket.getaddrinfo("127.0.0.1", 80)
+
+
+def test_a_hub_workspace_swaps_its_server_token_and_renews_once(hub_workspace, monkeypatch):
+    import craft
+
+    requests, replies = hub_workspace
+    swaps = []
+
+    def post(url, **options):
+        swaps.append((url, options["headers"]))
+        return httpx.Response(200, json={"token": f"swapped-{len(swaps)}"})
+
+    monkeypatch.setattr(httpx, "post", post)
+    craft.whoami()
+    craft.whoami()
+    assert swaps == [
+        (
+            "http://127.0.0.1:8000/api/workspace-tokens/hub",
+            {"Authorization": "token generated0server0token"},
+        )
+    ]
+    assert [r.headers["authorization"] for r in requests] == ["Bearer swapped-1"] * 2
+
+    # An expired swapped token is swapped again once, then the call goes through.
+    replies[("GET", "/api/me")] = (401, {"code": "not_signed_in"})
+    with pytest.raises(craft.CraftError):
+        craft.whoami()
+    assert len(swaps) == 2  # once, not in a loop
+    assert requests[-1].headers["authorization"] == "Bearer swapped-2"
+
+
+def test_without_any_token_the_message_says_how_to_sign_in(api, monkeypatch, tmp_path):
+    import craft
+    import craft.access as access
+
+    monkeypatch.setattr(access, "_session_token", None)
+    monkeypatch.setattr(access, "TOKEN_FILE", tmp_path / "missing")
+    monkeypatch.delenv("JUPYTERHUB_API_TOKEN", raising=False)
+    with pytest.raises(craft.CraftError, match="craft.login"):
+        craft.whoami()
+
+
+@pytest.fixture
+def hub_workspace(api, monkeypatch, tmp_path):
+    """A kernel in a Hub workspace: no login, no token file, the server's own Hub token."""
+    import craft.access as access
+
+    monkeypatch.setattr(access, "_session_token", None)
+    monkeypatch.setattr(access, "_hub_token", None)
+    monkeypatch.setattr(access, "TOKEN_FILE", tmp_path / "missing")
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "generated0server0token")
+    yield api
+    monkeypatch.setattr(access, "_hub_token", None)
+    monkeypatch.setattr(access, "_client", None)
+
+
+def test_a_refused_swap_says_how_to_sign_in_and_never_shows_the_hub_token(
+    hub_workspace, monkeypatch
+):
+    import craft
+
+    requests, _ = hub_workspace
+    monkeypatch.setattr(
+        httpx, "post", lambda url, **options: httpx.Response(401, json={"code": "not_signed_in"})
+    )
+    with pytest.raises(craft.CraftError) as refused:
+        craft.whoami()
+    assert "craft.login" in str(refused.value) and "401" in str(refused.value)
+    assert "generated0server0token" not in str(refused.value)
+    assert requests == []  # no API request goes out without a token
+
+
+def test_login_and_a_token_file_come_before_the_swap(hub_workspace, monkeypatch, tmp_path):
+    import craft
+    import craft.access as access
+
+    requests, replies = hub_workspace
+    swaps = []
+    monkeypatch.setattr(httpx, "post", lambda url, **options: swaps.append(url))
+    token_file = tmp_path / "workspace-token"
+    token_file.write_text("generated-file-token\n")
+    monkeypatch.setattr(access, "TOKEN_FILE", token_file)
+    craft.whoami()
+    monkeypatch.setattr(access, "_client", None)
+    craft.login("generated-login-token")
+    replies[("GET", "/api/me")] = (401, {"code": "not_signed_in"})
+    with pytest.raises(craft.CraftError):
+        craft.whoami()  # a refused login token is the person's to replace, never swapped
+    assert [r.headers["authorization"] for r in requests] == [
+        "Bearer generated-file-token",
+        "Bearer generated-login-token",
+    ]
+    assert swaps == []

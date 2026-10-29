@@ -71,8 +71,8 @@ def workspace(monkeypatch, context):
     monkeypatch.setattr(
         hub, "from_settings", lambda _: hub.Hub("http://127.0.0.1:1", "", "generated")
     )
-    monkeypatch.setattr(hub, "state", ready)
-    monkeypatch.setattr(hub, "kernel", kernel)
+    monkeypatch.setattr(hub.Hub, "state", ready)
+    monkeypatch.setattr(hub.Hub, "kernel", kernel)
     monkeypatch.setattr(workspaces, "run_in_kernel", run)
     monkeypatch.setattr(workspaces, "write_text", write)
     monkeypatch.setattr(workspaces, "read_notebook", read_nb)

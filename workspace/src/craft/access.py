@@ -4,6 +4,11 @@ Each function sends one HTTP request to a CRAFT route with this account's
 workspace token and returns a ``Result``. The server resolves the token to the
 account, applies its mission and silo grants, allows only read routes and logs
 every call with the ``workspace`` origin.
+
+The token is, in order: the one ``login()`` set for this kernel, the file at
+``CRAFT_TOKEN_FILE``, or, in a workspace JupyterHub started, one CRAFT issues for
+this server's own Hub token (``JUPYTERHUB_API_TOKEN``) through
+``POST /api/workspace-tokens/hub``. A swapped token is kept in kernel memory only.
 """
 
 import getpass
@@ -107,6 +112,7 @@ def _snake_to_api(values: dict[str, Any]) -> dict[str, Any]:
 
 TOKEN_FILE = Path(os.environ.get("CRAFT_TOKEN_FILE", "/run/craft/workspace-token"))
 _session_token: str | None = None
+_hub_token: str | None = None  # swapped for this server's own Hub token, once per kernel
 _client = None
 
 
@@ -143,11 +149,53 @@ def _token() -> str:
         value = TOKEN_FILE.read_text(encoding="utf-8").strip()
     except OSError:
         value = ""
-    if not value:
+    if value:
+        return value
+    if os.environ.get("JUPYTERHUB_API_TOKEN"):
+        return _from_hub()
+    raise CraftError(
+        "No CRAFT workspace token. Create one in CRAFT and run craft.login() in this kernel."
+    )
+
+
+def _from_hub() -> str:
+    """A workspace token for the person the Hub started this server for; kept in memory only."""
+    global _hub_token
+    if _hub_token is not None:
+        return _hub_token
+    import httpx
+
+    swapped = httpx.post(
+        _api_url() + "/api/workspace-tokens/hub",
+        headers={"Authorization": "token " + os.environ["JUPYTERHUB_API_TOKEN"]},
+        trust_env=False,
+        follow_redirects=False,
+        timeout=30,
+    )
+    if swapped.status_code != 200:
         raise CraftError(
-            "No CRAFT workspace token. Create one in CRAFT and run craft.login() in this kernel."
+            f"CRAFT gave this workspace no token (HTTP {swapped.status_code}). "
+            "Create one in CRAFT and run craft.login() in this kernel."
         )
-    return value
+    token = str(swapped.json()["token"])
+    _hub_token = token
+    return token
+
+
+def _renew() -> bool:
+    """Forget a swapped token CRAFT refused (expired or revoked) so the next request swaps again.
+
+    False when no swapped token was in use. The server's Hub token stays the credential: while
+    the server runs and the account is enabled, a new swap succeeds.
+    """
+    global _hub_token, _client
+    if _session_token or _hub_token is None:
+        return False
+    _hub_token = None
+    if _client is not None:
+        _client.close()
+        _client = None
+    return True
 
 
 def _http():
@@ -170,10 +218,15 @@ def _http():
 
 def _request(tool: str, method: str, path: str, payload: dict[str, Any] | None = None) -> Result:
     values = {key: value for key, value in (payload or {}).items() if value is not None}
-    if method == "GET":
-        response = _http().get(path, params=values)
-    else:
-        response = _http().request(method, path, json=values)
+
+    def send():
+        if method == "GET":
+            return _http().get(path, params=values)
+        return _http().request(method, path, json=values)
+
+    response = send()
+    if response.status_code == 401 and _renew():
+        response = send()  # a refused swapped token is swapped again, once
     try:
         data = response.json() if response.content else {}
     except ValueError:

@@ -50,6 +50,7 @@ export interface Routes {
   "POST /api/me/workspace-tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
   "GET /api/me/workspace-tokens": { response: T.WorkspaceToken[] };
   "DELETE /api/me/workspace-tokens/:id": { response: void };
+  "POST /api/workspace-tokens/hub": { response: T.IssuedWorkspaceToken };
   "GET /api/workspace": { response: T.Workspace };
   "POST /api/workspace/start": { response: T.Workspace };
   "POST /api/workspace/stop": { response: T.Workspace };

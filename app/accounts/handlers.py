@@ -1,5 +1,6 @@
 """Account entry points: sign-in, the signed-in account, administration, mission grants, and
-personal tokens (`workspace` for /api, `mcp` for /mcp)."""
+personal tokens (`workspace` for /api, `mcp` for /mcp; a Hub workspace swaps its server's Hub
+token for a `workspace` one)."""
 
 from typing import Annotated, Literal
 from uuid import UUID
@@ -273,6 +274,12 @@ def revoke_token(caller: Caller, request: WorkspaceTokenRef) -> None:
 def create_workspace_token(caller: Caller, request: NewWorkspaceToken) -> IssuedWorkspaceToken:
     """The earlier name of POST /api/me/tokens."""
     return IssuedWorkspaceToken(**service.create_workspace_token(caller, request))
+
+
+@operation(PUBLIC, post="/workspace-tokens/hub")
+async def workspace_token_from_hub(caller: Caller) -> IssuedWorkspaceToken:
+    """Swap a workspace's own JupyterHub token (Authorization: token) for a workspace token."""
+    return IssuedWorkspaceToken(**await service.workspace_token_from_hub(caller))
 
 
 @operation(SIGNED_IN, get="/me/workspace-tokens")
