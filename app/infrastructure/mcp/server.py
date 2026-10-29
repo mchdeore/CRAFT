@@ -140,13 +140,17 @@ class HttpTransport:
         from app.infrastructure.errors import error_response
         from app.infrastructure.mcp import auth
 
+        request = Request(scope, receive)
+        request.state.operation = "mcp"  # read by the traffic middleware
         try:
-            entry = await auth.authenticate(Request(scope, receive))
+            entry = await auth.authenticate(request)
         except ApiError as error:
             response = error_response(error)
             response.headers["WWW-Authenticate"] = "Bearer"
             await response(scope, receive, send)
             return
+        base, _, principal = entry
+        request.state.caller = replace(base, user_id=principal.user)
         token = auth.credential.set(entry)
         try:
             if self.manager is None:

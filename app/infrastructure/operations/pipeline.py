@@ -147,6 +147,7 @@ def checked_access(operation: Operation, caller: Caller) -> Caller:
         and (call is None or call.parent_call_id is None)
     ):
         caller = resolve_http(http)
+        http.state.caller = caller  # read by the traffic middleware once the response ends
         context = current_call.get()
         if context is not None:
             context.caller = caller
@@ -410,6 +411,7 @@ def endpoint(operation: Operation) -> Any:
     wrapper = operation.function
 
     async def handle(request: Request) -> Response:
+        request.state.operation = operation.name  # read by the traffic middleware
         caller = anonymous_http(request)
         token = transport_request.set(request)
         action_token = response_actions.set([])
