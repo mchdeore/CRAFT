@@ -8,7 +8,8 @@ set -euo pipefail
 folder=${1:-/var/lib/craft-backup/db}
 image=$(kubectl get statefulset craft-postgres -o jsonpath='{.spec.template.spec.containers[0].image}')
 pod=craft-backup-check
-trap 'kubectl delete pod "$pod" --ignore-not-found --wait=false >/dev/null' EXIT
+kubectl delete pod "$pod" --ignore-not-found >/dev/null    # one left by an interrupted run
+trap 'kubectl delete pod "$pod" --ignore-not-found >/dev/null' EXIT
 
 kubectl apply -f - >/dev/null <<EOF
 apiVersion: v1

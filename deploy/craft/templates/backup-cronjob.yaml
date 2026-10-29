@@ -1,5 +1,5 @@
 {{- if .Values.backup.enabled }}
-# The nightly database dump (K2). The folder is on the node's disk, outside every volume claim,
+# The nightly database dump. The folder is on the node's disk, outside every volume claim,
 # so deleting the release, the database's claim or the namespace keeps the dumps.
 apiVersion: batch/v1
 kind: CronJob
