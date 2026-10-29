@@ -1,0 +1,46 @@
+This is not an open-source license. The source is public to be read, not to
+be used.
+
+CRAFT
+Copyright (c) 2026 mchdeore. All rights reserved.
+
+1. Nothing is granted by default. This repository and everything in it,
+   including source code, documentation, data and other files (the
+   "Software"), belong to the copyright holder. Apart from viewing under
+   section 2, you may not use the Software in any way without the copyright
+   holder's prior written permission.
+
+2. Viewing. You may view the Software on GitHub. GitHub's Terms of Service
+   also let GitHub users view and fork public repositories on GitHub. That is
+   the only use allowed without permission, and a fork gives no other rights.
+
+3. What needs permission. Without prior written permission you may not,
+   in whole or in part:
+   - copy or reproduce the Software outside GitHub;
+   - modify it or make works based on it;
+   - run, install, deploy or host it;
+   - distribute, publish, sublicense, sell or otherwise share it;
+   - use it for any commercial purpose; or
+   - use it to train, fine-tune or evaluate machine-learning or AI models,
+     or include it in a dataset for that purpose.
+
+4. Permission. Permission must come in writing from the copyright holder. It
+   may be granted to a specific person or project, and may be limited in
+   scope, duration or conditions. It covers only what it expressly says. The
+   copyright holder may revoke a permission at any time; revocation applies
+   to use after notice is given, not to use made before it.
+
+5. Asking for permission. Open an issue at
+   https://github.com/mchdeore/CRAFT/issues, or contact the copyright holder
+   through their GitHub profile at https://github.com/mchdeore.
+
+6. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING ANY WARRANTY OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, TITLE OR NON-INFRINGEMENT.
+
+7. NO LIABILITY. TO THE FULLEST EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER
+   IS NOT LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER DIRECT,
+   INDIRECT, INCIDENTAL, SPECIAL OR CONSEQUENTIAL, AND WHETHER IN CONTRACT,
+   TORT OR OTHERWISE, ARISING FROM OR CONNECTED WITH THE SOFTWARE OR ANY USE
+   OF IT, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THIS APPLIES TO
+   ANY USE, WITH OR WITHOUT PERMISSION.
