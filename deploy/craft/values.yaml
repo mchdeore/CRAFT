@@ -83,3 +83,12 @@ postgres:
   image: pgvector/pgvector:0.8.7-pg18
   storage: 5Gi
   memory: 1Gi
+
+# The nightly dump of the whole database (backup-cronjob.yaml): pg_dump -Fc into hostPath on the
+# node's disk, the newest `keep` files kept. Off here; on in local.yaml.
+backup:
+  enabled: false
+  schedule: "30 3 * * *"     # UTC
+  keep: 14
+  hostPath: /var/lib/craft-backup/db
+  memory: 512Mi

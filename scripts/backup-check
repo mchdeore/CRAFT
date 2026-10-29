@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Check the newest nightly dump (deploy/README.md "Backups"): a short-lived pod on the node mounts
+# the backup folder read-only, restores the dump into its own throwaway PostgreSQL and prints row
+# counts. The cluster's database is never touched; the pod and its scratch space are deleted after.
+#   scripts/backup-check            the newest dump in /var/lib/craft-backup/db
+#   scripts/backup-check <folder>   another backup.hostPath
+set -euo pipefail
+folder=${1:-/var/lib/craft-backup/db}
+image=$(kubectl get statefulset craft-postgres -o jsonpath='{.spec.template.spec.containers[0].image}')
+pod=craft-backup-check
+kubectl delete pod "$pod" --ignore-not-found >/dev/null    # one left by an interrupted run
+trap 'kubectl delete pod "$pod" --ignore-not-found >/dev/null' EXIT
+
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $pod
+  labels: { app.kubernetes.io/name: backup-check }
+spec:
+  restartPolicy: Never
+  enableServiceLinks: false
+  automountServiceAccountToken: false
+  securityContext: { runAsUser: 999, runAsGroup: 999, runAsNonRoot: true }
+  containers:
+    - name: check
+      image: $image
+      command: [bash, -c]
+      args:
+        - |
+          set -euo pipefail
+          dump=\$(ls -1 /backup/*.dump | sort | tail -n 1)
+          echo "restoring \$(basename "\$dump") (\$(stat -c %s "\$dump") bytes)"
+          export PGDATA=/scratch/data PGHOST=/scratch PGUSER=postgres
+          initdb -A trust -U postgres >/dev/null
+          pg_ctl -o "-c listen_addresses='' -k /scratch" -w start >/dev/null
+          createdb check
+          pg_restore --no-owner --no-acl --exit-on-error -d check "\$dump"
+          for table in \$(psql -At -d check -c "select quote_ident(tablename) from pg_tables where schemaname = 'public' order by 1"); do
+            printf '%-40s %s\n' "\$table" "\$(psql -At -d check -c "select count(*) from \$table")"
+          done
+      volumeMounts:
+        - { name: backup, mountPath: /backup, readOnly: true }
+        - { name: scratch, mountPath: /scratch }
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: [ALL] }
+  volumes:
+    - name: backup
+      hostPath: { path: $folder, type: Directory }
+    - name: scratch
+      emptyDir: {}
+EOF
+
+kubectl wait pod "$pod" --for=jsonpath='{.status.phase}'=Running --timeout=60s >/dev/null 2>&1 || true
+kubectl logs -f "$pod"
+phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}')
+while [ "$phase" = Running ] || [ "$phase" = Pending ]; do sleep 1; phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}'); done
+[ "$phase" = Succeeded ] || { echo "backup check failed ($phase)" >&2; exit 1; }
+echo "backup check passed"

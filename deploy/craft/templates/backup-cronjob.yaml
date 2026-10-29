@@ -1,0 +1,77 @@
+{{- if .Values.backup.enabled }}
+# The nightly database dump. The folder is on the node's disk, outside every volume claim,
+# so deleting the release, the database's claim or the namespace keeps the dumps.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-backup
+  labels: { app.kubernetes.io/name: backup, app.kubernetes.io/instance: {{ .Release.Name }} }
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3             # a failed Job stays for a look
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: backup, app.kubernetes.io/instance: {{ .Release.Name }} }
+        spec:
+          restartPolicy: Never
+          # No service-link variables: services named craft-* would add unknown CRAFT_* settings.
+          enableServiceLinks: false
+          automountServiceAccountToken: false
+          securityContext: { runAsUser: 999, runAsGroup: 999 }
+          initContainers:
+            # Kubernetes creates the hostPath folder as root; hand it to the postgres user once.
+            - name: own-folder
+              image: {{ .Values.postgres.image | quote }}
+              command: [chown, "999:999", /backup]
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+              securityContext:
+                runAsUser: 0
+                runAsNonRoot: false
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL], add: [CHOWN] }
+          containers:
+            - name: backup
+              image: {{ .Values.postgres.image | quote }}
+              command: [bash, -c]
+              args:
+                - |
+                  set -uo pipefail
+                  export PGDATABASE="${CRAFT_DATABASE_NAME:-craft_dev}"    # the app's default
+                  dir=/backup
+                  file="$dir/$(date -u +%F).dump"
+                  if ! pg_dump -Fc -f "$file.part" || [ "$(stat -c %s "$file.part")" -lt 1024 ]; then
+                    echo "backup failed: pg_dump errored or the dump is under 1 KB" >&2
+                    rm -f "$file.part"
+                    exit 1
+                  fi
+                  mv "$file.part" "$file"
+                  echo "wrote $file ($(stat -c %s "$file") bytes)"
+                  # Only after a good dump: keep the newest {{ .Values.backup.keep }}.
+                  ls -1 "$dir"/*.dump | sort -r | tail -n +{{ add 1 .Values.backup.keep }} | xargs -r rm -f --
+              env:
+                - { name: PGHOST, value: {{ .Release.Name }}-postgres }
+                - { name: PGUSER, value: craft_owner }
+                - name: CRAFT_DATABASE_NAME
+                  valueFrom:
+                    secretKeyRef: { name: {{ .Values.secret }}, key: CRAFT_DATABASE_NAME, optional: true }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: {{ .Values.secret }}, key: CRAFT_OWNER_DB_PASSWORD }
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+              resources:
+                limits: { memory: {{ .Values.backup.memory }} }
+                requests: { memory: {{ .Values.memoryRequest }} }
+              {{- include "craft.containerSecurity" . | nindent 14 }}
+          volumes:
+            - name: backup
+              hostPath: { path: {{ .Values.backup.hostPath | quote }}, type: DirectoryOrCreate }
+{{- end }}

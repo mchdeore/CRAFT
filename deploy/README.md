@@ -129,6 +129,42 @@ They need the check database (`scripts/check` starts it). Kubernetes has no per-
 
 Volumes made before `claim-{unescaped_username}` are named `claim-x-…` and are no longer mounted; delete them with `kubectl delete pvc <name>` once nothing in them is needed.
 
+## Backups
+
+With `backup.enabled` (on in `local.yaml`), the `craft-backup` CronJob runs `pg_dump -Fc` of the whole database every night at 03:30 UTC into `/var/lib/craft-backup/db/<UTC date>.dump` on the node's own disk. A dump that fails or is under 1 KB fails the Job and deletes nothing; after a good one, only the newest 14 are kept. The folder is outside every volume claim, so `helm uninstall craft` and deleting the database's volume leave the dumps in place. They share the node's disk, so they don't survive losing it: on the VM, its weekly disk snapshot covers that.
+
+Run one now:
+
+```bash
+kubectl create job --from=cronjob/craft-backup craft-backup-now
+```
+
+See the dumps:
+
+```bash
+colima ssh -p craft-k8s -- ls -l /var/lib/craft-backup/db
+```
+
+Check the newest one: a short-lived pod restores it into its own throwaway PostgreSQL and prints row counts, without touching the cluster's database. Run it monthly:
+
+```bash
+scripts/backup-check
+```
+
+Restore a dump over the database. Stop the API and workers first, then put them back:
+
+```bash
+kubectl scale deployment -l app.kubernetes.io/instance=craft --replicas=0
+```
+
+```bash
+colima ssh -p craft-k8s -- cat /var/lib/craft-backup/db/<date>.dump | kubectl exec -i craft-postgres-0 -- pg_restore -U postgres --clean --if-exists --exit-on-error -d craft_dev
+```
+
+```bash
+kubectl scale deployment -l app.kubernetes.io/instance=craft --replicas=1
+```
+
 ## Stop
 
 ```bash

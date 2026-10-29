@@ -16,3 +16,6 @@ workers:
     concurrency: { bulk: 50 }
     memory: 768Mi
     stopSeconds: 120
+
+backup:
+  enabled: true
