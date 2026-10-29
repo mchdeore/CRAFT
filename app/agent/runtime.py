@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import re
 from collections.abc import AsyncGenerator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -205,6 +206,11 @@ def source_link(handle) -> str:
     )
 
 
+def linked_in(handle, text: str) -> bool:
+    """The text links this exact block; a link to block 12 does not also link block 1."""
+    return re.search(re.escape(source_link(handle)) + r"(?!\d)", text) is not None
+
+
 def citations(results, text, linked=False):
     """Verified quotes the answer uses; with `linked`, a source link also counts (paraphrases)."""
     found = []
@@ -245,7 +251,7 @@ def citations(results, text, linked=False):
                 and (
                     text is None
                     or value["text"] in text
-                    or (linked and source_link(value["handle"]) in text)
+                    or (linked and linked_in(value["handle"], text))
                 )
                 and hashlib.sha256(value["text"].encode()).hexdigest()
                 == value["handle"].get("quoteSha256")
@@ -430,6 +436,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             saved = AgentSession.from_dict(session_state)
         if resuming:
             previous = saved.state.get("craft", {})
+            # A paused run resumes in the language it started in, whatever the setting is now.
+            language = previous.get("replyLanguage", language)
             elapsed = previous.get("activeSeconds", 0)
             budget["calls"] = previous.get("toolCalls", 0)
             trace.extend(previous.get("retrievalPath", []))
@@ -583,6 +591,16 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         "activityType": "craft.answer",
                         "content": answer,
                     }
+                    shown = (
+                        {
+                            "id": str(uuid4()),
+                            "role": "activity",
+                            "activityType": "craft.originals",
+                            "content": found,
+                        }
+                        if found
+                        else None
+                    )
                     retrieval = {
                         "id": str(uuid4()),
                         "role": "activity",
@@ -598,10 +616,13 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                             "originals": len(found["items"]) if found else 0,
                         },
                     }
+                    # Saved before the next yield: a cancel while a snapshot waits keeps them all.
                     output.extend(
                         [
                             {"id": value["messageId"], "role": "assistant", "content": text},
                             activity,
+                            *([shown] if shown else []),
+                            retrieval,
                         ]
                     )
                     yield AGUIEvent(
@@ -610,21 +631,13 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         activity_type="craft.answer",
                         content=answer,
                     )
-                    if found:
-                        shown = {
-                            "id": str(uuid4()),
-                            "role": "activity",
-                            "activityType": "craft.originals",
-                            "content": found,
-                        }
-                        output.append(shown)
+                    if shown:
                         yield AGUIEvent(
                             type="ACTIVITY_SNAPSHOT",
                             message_id=shown["id"],
                             activity_type="craft.originals",
                             content=found,
                         )
-                    output.append(retrieval)
                     continue
                 if kind == "MESSAGES_SNAPSHOT":
                     snapshot = [
@@ -742,6 +755,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                     "activeSeconds": elapsed + asyncio.get_running_loop().time() - started,
                     "model": caller.settings.model_main,
                     "instructionsVersion": version,
+                    "replyLanguage": language,
                 }
                 if snapshot is not None:
                     output = list(

@@ -555,3 +555,27 @@ def test_labelled_hit_keeps_precedence_over_search_neighbor(search_neighbors, si
 
     assert citations([search_neighbors, result], hit[side]["text"]) == expected
     assert citations([result, search_neighbors], hit[side]["text"]) == expected
+
+
+def hit(block: int, text: str) -> dict:
+    return {
+        "text": text,
+        "title": "Generated power budget",
+        "handle": {
+            "item": "itm_generated",
+            "version": 1,
+            "block": block,
+            "quoteSha256": hashlib.sha256(text.encode()).hexdigest(),
+            "simulated": True,
+        },
+    }
+
+
+def test_a_source_link_cites_only_its_own_block() -> None:
+    """A paraphrase cites by link; block 12's link must not also cite block 1."""
+    results = [hit(1, "Peak power is 400 W."), hit(12, "Dry mass is 120 kg.")]
+    reply = "La masse sèche est de 120 kg [budget](/sources/itm_generated?version=1&block=12)."
+    assert [row["quote"] for row in citations(results, reply, linked=True)] == [
+        "Dry mass is 120 kg."
+    ]
+    assert citations(results, reply) == []

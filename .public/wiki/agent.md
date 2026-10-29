@@ -161,6 +161,7 @@ AG-UI: an open protocol of typed events that streams an agent run to a web page.
   - browser-defined tools are off;
   - `threadId` = conversation ID, owner checked every request.
 - Answer metadata: an `ACTIVITY_SNAPSHOT` event, `activityType` `craft.answer`, content `{messageId, citations, confidence}`, after each completed nonempty assistant text message. Empty tool-plan envelopes carry no answer metadata. Saved as an activity message, so the saved history (AG-UI messages) shows the same.
+- Originals: when the reply language is not English, an `ACTIVITY_SNAPSHOT` with `activityType` `craft.originals` follows `craft.answer`, content `{messageId, items}`, each item the English quote behind one citation. Saved the same way.
 - Stream events adhere to the browser event contract. Dependency compatibility is checked with the adapter.
 
 The input JSON body is at most 1 MiB. Unknown browser history, context, tools,
@@ -189,7 +190,7 @@ Each completed text answer also saves a `craft.retrieval` activity. It names the
 
 ## Reply language
 
-Each person chooses English or French replies with `PATCH /api/me` (`Me.language`, English by default). The run instructions name that language. A French reply also saves a `craft.originals` activity with the English quote behind each citation, so a reader can check the wording; a link to a verified source counts as a citation, because a paraphrase never matches the quote word for word. Every source is English for now.
+Each person chooses English or French replies with `PATCH /api/me` (`Me.language`, English by default). The run instructions name that language; a run keeps the language it started in when it resumes after an approval, and its saved run state records it. A French reply also saves a `craft.originals` activity with the English quote behind each citation, so a reader can check the wording; a link to a verified source counts as a citation, because a paraphrase never matches the quote word for word. The link must name that exact block: a link to block 12 does not cite block 1. Every source is English for now.
 
 ## Combined answer
 

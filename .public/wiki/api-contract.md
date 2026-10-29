@@ -270,12 +270,13 @@ A decision alone executes no work. Rejection continues without the proposed chan
 | `TEXT_MESSAGE_START`, `_CONTENT`, `_END` | One output message, in pieces |
 | `TOOL_CALL_START`, `_ARGS`, `_END`, `_RESULT` | A tool call, its arguments and a short result summary |
 | `ACTIVITY_SNAPSHOT`, type `craft.answer` | Citations and confidence for the message just finished; saved as an activity message, so the history shows them too |
+| `ACTIVITY_SNAPSHOT`, type `craft.originals` | Right after `craft.answer` when the reply language is not English: the English quote behind each citation (`AnswerOriginals`), shown collapsed like a tool call; saved in the history too |
 | `RUN_FINISHED` without an interrupt | The turn is complete and saved |
 | `RUN_ERROR` | The turn failed with a safe error code. Saved history stays |
 
 ## 8. Conversation workspace
 
-Conversation and file routes use owned PostgreSQL records. Saved history includes standard AG-UI text, tool and activity messages. A separate `craft.retrieval` activity records the answer message, run, model, instruction version and ordered tool/arguments/time path. Later runs retain earlier answer paths. Private transport fields are excluded from public message envelopes.
+Conversation and file routes use owned PostgreSQL records. Saved history includes standard AG-UI text, tool and activity messages. A separate `craft.retrieval` activity records the answer message, run, model, instruction version, reply language, number of originals shown and ordered tool/arguments/time path. Later runs retain earlier answer paths. Private transport fields are excluded from public message envelopes.
 
 1. Upload: `POST /api/conversations/:id/files` with the raw bytes and the name in `X-File-Name`. The file is `uploading`, then `processing` while it is read, then `ready` or `failed`; `statusDetail` says why.
 2. Listing, downloading and deleting are for the conversation's owner. Every download is recorded in the call log.
@@ -416,6 +417,6 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 2. Built route rows equal the app's method/path pairs in both directions. Tool rows equal the registry's tool names.
 3. Python forms match their TypeScript fields and required fields in the component contract checks.
 4. Every built JSON route names an example. Examples validate against compiled response schemas. File responses are checked by status and media type.
-5. Recorded and scripted-model chat events validate against `@ag-ui/core`; `craft.answer` also validates against `AnswerMeta`.
+5. Recorded and scripted-model chat events validate against `@ag-ui/core`; `craft.answer` also validates against `AnswerMeta` and `craft.originals` against `AnswerOriginals`.
 
 The two tables are checked by `test_contract_routes_match_app` and `test_contract_tools_match_registry` in `app/tests/test_contract.py`. The examples are checked by `test_contract_json_examples`. Any added or removed endpoint or tool requires a matching row in the same change.
