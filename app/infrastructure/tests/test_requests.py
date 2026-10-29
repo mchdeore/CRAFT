@@ -61,3 +61,24 @@ def test_log_line_is_json_without_content(app: FastAPI) -> None:
     assert set(http[0]) == {"at", "level", "logger", "event", "method", "path", "status",
                             "duration_ms", "request_id"}  # fmt: skip
     assert "SECRET" not in output and "hunter2" not in output
+
+
+def test_mounted_routes_log_their_mount_path(app: FastAPI) -> None:
+    stream = io.StringIO()
+    configure_logging("INFO", stream)
+    with TestClient(app) as client:
+        client.post("/mcp", json={})
+        client.post("/mcp/", json={}, headers={"Authorization": "Bearer forged-SECRET-TOKEN"})
+        client.get("/summarize")
+        client.get("/summarize/handlers.py?token=SECRET-QUERY")
+        client.get("/summarize-not-a-mount")
+    output = stream.getvalue()
+    http = [json.loads(line) for line in output.splitlines() if '"event":"http"' in line]
+    assert [(line["path"], line["status"]) for line in http] == [
+        ("/mcp", 401),
+        ("/mcp", 401),
+        ("/summarize", 200),
+        ("/summarize", 404),  # the mount, never the file asked for
+        ("/unmatched", 404),
+    ]
+    assert "SECRET" not in output and "handlers.py" not in output
