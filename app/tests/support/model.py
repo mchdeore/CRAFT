@@ -47,6 +47,18 @@ def embedding(text: str) -> list[float]:
     return [v / norm for v in vector] if norm else vector
 
 
+def answer(found, instructions: str) -> str:
+    """The evidence verbatim; a French run paraphrases it and cites only its source link."""
+    if found is None:
+        return "No readable evidence was returned."
+    if "Reply language for this run: French." in instructions:
+        from app.agent.runtime import source_link
+
+        title = found.get("title", "source")
+        return f"Selon la source, voir [{title}]({source_link(found['handle'])})."
+    return found["text"]
+
+
 def evidence(value):
     if isinstance(value, str):
         try:
@@ -224,6 +236,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
         super().__init__()
         self.role = role
         self.model = MODEL
+        self.instructions = ""  # the latest request's system instructions
 
     async def close(self):
         pass
@@ -283,9 +296,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
                 (row for content in tool_results if (row := evidence(content.result)) is not None),
                 None,
             )
-            contents = [
-                Content.from_text(found["text"] if found else "No readable evidence was returned.")
-            ]
+            contents = [Content.from_text(answer(found, self.instructions))]
         else:
             contents = [
                 Content.from_function_call(
@@ -301,6 +312,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
         )
 
     def _inner_get_response(self, *, messages, options, stream=False, **kwargs) -> Any:
+        self.instructions = options.get("instructions") or ""
         if stream:
 
             async def updates():
