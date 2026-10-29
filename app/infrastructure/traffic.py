@@ -5,7 +5,7 @@ tokens or content: only the operation name, the caller's IDs and byte counts."""
 
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 import anyio
@@ -56,6 +56,17 @@ class Traffic(msgspec.Struct, frozen=True, kw_only=True):
     duration_ms: int
 
 
+class Counted(Protocol):
+    """The caller fields a row keeps, read from scope["state"]["caller"]; access.Caller fits."""
+
+    @property
+    def origin(self) -> str: ...
+    @property
+    def user_id(self) -> UUID | None: ...
+    @property
+    def workspace_token_id(self) -> UUID | None: ...
+
+
 def record(sessions: sessionmaker[Session], row: Traffic) -> None:
     """Where every count goes: one traffic_log row in its own short transaction."""
     with unit_of_work(sessions) as session:
@@ -100,16 +111,16 @@ class TrafficMiddleware:
         try:
             await self.app(scope, counted_receive, counted_send)
         finally:
-            caller = state.get("caller")
+            caller: Counted | None = state.get("caller")
             row = Traffic(
                 at=at,
                 request_id=request_id,
                 operation=state.get("operation", "unmatched"),
                 method=scope["method"],
                 status=status,
-                origin=getattr(caller, "origin", None),
-                user_id=getattr(caller, "user_id", None),
-                workspace_token_id=getattr(caller, "workspace_token_id", None),
+                origin=caller.origin if caller else None,
+                user_id=caller.user_id if caller else None,
+                workspace_token_id=caller.workspace_token_id if caller else None,
                 bytes_in=bytes_in,
                 bytes_out=bytes_out,
                 duration_ms=round((perf_counter() - started) * 1000),
