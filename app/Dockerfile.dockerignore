@@ -3,6 +3,7 @@
 !pyproject.toml
 !uv.lock
 !.python-version
+!LICENSE
 **/__pycache__
 **/tests
 **/conftest.py
