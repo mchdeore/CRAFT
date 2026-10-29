@@ -20,7 +20,7 @@ from sqlalchemy import select
 from app import create_app
 from app.agent import service
 from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
-from app.agent.tests.test_chat_stream import collect, request, row
+from app.agent.tests.test_chat_stream import collect, request, row, wait_for
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import NotFound
@@ -304,10 +304,18 @@ def test_mcp_log_links_run_tool_call_operation(chat, capsys):
     assert events[-1]["type"] == "RUN_FINISHED"
     identifier = next(e["toolCallId"] for e in events if e["type"] == "TOOL_CALL_START")
     logs = m.metadata.tables["call_log"]
-    with chat["owner"].connect() as connection:
-        records = (
-            connection.execute(select(logs).where(logs.c.run_id == data.run_id)).mappings().all()
-        )
+
+    def logged():
+        with chat["owner"].connect() as connection:
+            return (
+                connection.execute(select(logs).where(logs.c.run_id == data.run_id))
+                .mappings()
+                .all()
+            )
+
+    # The worker logs its own operation after it has written RUN_FINISHED.
+    wait_for(lambda: any(r["name"] == "agent.agent_run" for r in logged()))
+    records = logged()
     root = next(r for r in records if r["name"] == "agent.run_agent")
     worker = next(r for r in records if r["name"] == "agent.agent_run")
     assert worker["parent_call_id"] == root["call_id"]

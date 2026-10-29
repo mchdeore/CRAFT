@@ -561,6 +561,20 @@ def test_selected_skill_http_disconnect_keeps_running_and_records_history(contex
         body = run_body(context, reference)
         cookie = http.cookies.get("__Host-craft_session")
         assert cookie is not None
+        runs = metadata.tables["agent_runs"]
+
+        def status():
+            with context["owner"].connect() as db:
+                return db.execute(
+                    select(runs.c.status).where(runs.c.id == UUID(body["runId"]))
+                ).scalar_one_or_none()
+
+        def finished():
+            # The run keeps going on the agent worker after the browser leaves.
+            deadline = time.monotonic() + 10
+            while status() != "finished" and time.monotonic() < deadline:
+                time.sleep(0.05)
+            return status()
 
         async def execute():
             started = asyncio.Event()
@@ -604,27 +618,12 @@ def test_selected_skill_http_disconnect_keeps_running_and_records_history(contex
             }
             await asyncio.wait_for(app(scope, receive, send), 10)
             assert started.is_set()
-            # The live server shares this pool; its /mcp requests check connections out briefly.
-            for _ in range(100):
-                if app.state.engine.pool.checkedout() == 0:
-                    break
-                await asyncio.sleep(0.02)
+            # Until the run ends, the worker's MCP calls borrow this app's pool, so what the
+            # disconnect left checked out is counted after it, still inside this loop.
+            assert await asyncio.to_thread(finished) == "finished"
             assert app.state.engine.pool.checkedout() == 0
 
         asyncio.run(execute())
-        runs = metadata.tables["agent_runs"]
-
-        def status():
-            with context["owner"].connect() as db:
-                return db.execute(
-                    select(runs.c.status).where(runs.c.id == UUID(body["runId"]))
-                ).scalar_one_or_none()
-
-        # The run keeps going on the agent worker after the browser leaves.
-        deadline = time.monotonic() + 10
-        while status() != "finished" and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert status() == "finished"
         assert pins(context) == [reference]
         history = http.get("/api/conversations/" + body["threadId"]).json()["messages"]
         assert any(
