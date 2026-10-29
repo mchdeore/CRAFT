@@ -9,21 +9,25 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session
 
 from app import create_app
 from app.agent import handlers, model, storage
+from app.agent.service import RUN_LOCK
 from app.agent.tests.test_approval_resume import (
     WriteClient,
     clear_run_approvals,
     events,
     runtime_client,
 )
+from app.agent.tests.test_chat_stream import wait_for
 from app.approvals import service as approval_service
 from app.approvals.tests.test_decisions import context as context
 from app.approvals.tests.test_decisions import login
 from app.infrastructure.access import SIGNED_IN
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import NotFound
+from app.jobs.handlers import active_job
 
 FIELDS = {
     "status",
@@ -185,6 +189,12 @@ def read_recovery(http, context):
     assert set(data) == FIELDS
     assert isinstance(data["canResume"], bool)
     return data
+
+
+def run_locked(context, run):
+    """The run still has a queued or running job, which makes a new start or resume a 409."""
+    with Session(context["owner"]) as session:
+        return active_job(session, RUN_LOCK + str(run)) is not None
 
 
 def repeated_read(http, context, monkeypatch):
@@ -547,6 +557,8 @@ def test_native_recovered_decision_still_requires_explicit_authoritative_resume(
         }
         wrong = resume | {"resume": {"approvalId": str(uuid4())}}
         assert http.post("/api/agent/runs", json=wrong).status_code in {404, 409}
+        # The refusal reaches the browser before the worker finishes that job and frees the lock.
+        wait_for(lambda: not run_locked(context, resume["runId"]))
         assert repeated_read(http, context, monkeypatch)["canResume"] is True
         assert events(http.post("/api/agent/runs", json=resume))[-1]["type"] == "RUN_FINISHED"
         data = repeated_read(http, context, monkeypatch)

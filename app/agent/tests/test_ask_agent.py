@@ -6,6 +6,7 @@ from uuid import uuid4
 from agent_framework import ChatResponse, Content, Message
 from sqlalchemy import select
 
+from app.agent.tests.test_chat_stream import wait_for
 from app.infrastructure.database import metadata as m
 from app.infrastructure.mcp.client import client
 from app.infrastructure.operations.registry import registry
@@ -27,10 +28,18 @@ def test_ask_agent_answer_is_cited(chat):
             == "current"
         )
     logs = m.metadata.tables["call_log"]
-    with chat["owner"].connect() as connection:
-        rows = (
-            connection.execute(select(logs).where(logs.c.run_id == result.run_id)).mappings().all()
-        )
+
+    def logged():
+        with chat["owner"].connect() as connection:
+            return (
+                connection.execute(select(logs).where(logs.c.run_id == result.run_id))
+                .mappings()
+                .all()
+            )
+
+    # The worker logs its own operation after it has written RUN_FINISHED.
+    wait_for(lambda: any(row["name"] == "agent.agent_run" for row in logged()))
+    rows = logged()
     # The ask is logged with its run; the worker's run and its tool calls nest under it.
     root = next(row for row in rows if row["name"] == "agent.ask_agent")
     worker = next(row for row in rows if row["name"] == "agent.agent_run")
