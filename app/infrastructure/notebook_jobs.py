@@ -8,34 +8,38 @@ passes through the worker. Deleting the Job stops a run at once.
 
 The worker's service account may only create, read and delete Jobs, and an admission policy
 (``deploy/craft/templates/notebook-runs.yaml``) holds those Jobs to this shape.
+
+``JobRunner`` is the cluster's ``NotebookRunner`` (``notebook_runs.py``); nothing here depends
+on the Docker sandbox.
 """
 
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 
-from app.infrastructure.notebook_sandbox import TOTAL_SECONDS, SandboxError
+from app.infrastructure.notebook_runs import STEP_SECONDS, TOTAL_SECONDS, RunError
 
 logger = logging.getLogger("craft.workspace")
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 LABEL = "craft-notebook-run"
 POLL_SECONDS = 1.0
-STEP_SECONDS = 120  # prepare and collect, beside the run's own 15 minutes
 USER = 1000
 
 
 @dataclass
 class Cluster:
+    """Where the Kubernetes API is and how to authenticate to it."""
+
     base_url: str
     namespace: str
-    headers: dict[str, str]
+    headers: dict[str, str] = field(repr=False)  # the service account token
     verify: Any = True
     transport: httpx.AsyncBaseTransport | None = None  # tests
 
@@ -69,6 +73,7 @@ def in_cluster() -> Cluster | None:
 def manifest(
     name: str, image: str, user_id: UUID, folder: str, notebook: str, output: str
 ) -> dict[str, Any]:
+    """The Job for one run: prepare, run (offline, folder read-only) and collect."""
     run_folder = f".craft-runs/{name}"
     env = [
         {"name": "RUN", "value": name},
@@ -160,36 +165,44 @@ def manifest(
     }
 
 
-async def run(
-    cluster: Cluster, image: str, user_id: UUID, folder: str, notebook: str, output: str
-) -> None:
-    """Run the notebook and wait; a cancelled wait deletes the Job, which stops the run."""
-    name = f"notebook-run-{uuid4().hex[:12]}"
-    body = manifest(name, image, user_id, folder, notebook, output)
-    async with cluster.http() as http:
-        created = await http.post(cluster.jobs(), json=body)
-        created.raise_for_status()
-        try:
-            while True:
-                found = await http.get(cluster.jobs(name))
-                found.raise_for_status()
-                conditions = {
-                    c["type"]: c
-                    for c in found.json().get("status", {}).get("conditions") or []
-                    if c.get("status") == "True"
-                }
-                if "Complete" in conditions:
-                    return
-                if "Failed" in conditions:
-                    if conditions["Failed"].get("reason") == "DeadlineExceeded":
-                        raise SandboxError("run_timeout")
-                    raise SandboxError("run_failed")
-                await asyncio.sleep(POLL_SECONDS)
-        finally:
-            await asyncio.shield(_delete(http, cluster, name))
+@dataclass
+class JobRunner:
+    """One owner's notebook runs, as Jobs in ``cluster`` from the workspace ``image``."""
+
+    cluster: Cluster
+    image: str
+    owner: UUID
+
+    async def run(self, folder: str, notebook: str, output: str) -> None:
+        """Create the Job and wait; a cancelled wait deletes the Job, which stops the run."""
+        name = f"notebook-run-{uuid4().hex[:12]}"
+        body = manifest(name, self.image, self.owner, folder, notebook, output)
+        async with self.cluster.http() as http:
+            try:
+                created = await http.post(self.cluster.jobs(), json=body)
+                created.raise_for_status()
+                while True:
+                    found = await http.get(self.cluster.jobs(name))
+                    found.raise_for_status()
+                    conditions = {
+                        c["type"]: c
+                        for c in found.json().get("status", {}).get("conditions") or []
+                        if c.get("status") == "True"
+                    }
+                    if "Complete" in conditions:
+                        return
+                    if "Failed" in conditions:
+                        if conditions["Failed"].get("reason") == "DeadlineExceeded":
+                            raise RunError("run_timeout")
+                        raise RunError("run_failed")
+                    await asyncio.sleep(POLL_SECONDS)
+            finally:
+                # Also after a cancelled or lost create: deleting by name stops whatever exists.
+                await asyncio.shield(_delete(http, self.cluster, name))
 
 
 async def _delete(http: httpx.AsyncClient, cluster: Cluster, name: str) -> None:
+    """Delete the Job and its pod; already gone is fine, and a failure is only logged."""
     try:
         gone = await http.delete(cluster.jobs(name), params={"propagationPolicy": "Background"})
         if gone.status_code != 404:

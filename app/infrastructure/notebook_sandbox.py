@@ -1,19 +1,29 @@
-"""Run one notebook unattended in a fresh container: no network, read-only root, bounded.
+"""Run one notebook unattended in a fresh Docker container: no network, read-only root, bounded.
 
-The worker copies the notebook's folder in, runs it with nbclient as a non-root user,
-and copies the executed notebook and its outputs/ folder back out. Killing the
-container stops a run at once; the owner's workspace and kernel are never touched.
+Compose's ``NotebookRunner`` (``notebook_runs.py``) until K-remove-docker deletes this module.
+The worker copies the notebook's folder in through the owner's Jupyter server, runs it with
+nbclient as a non-root user, and copies the executed notebook and its ``outputs/`` folder back
+beside it without overwriting. Killing the container stops a run at once; the owner's kernel is
+never touched.
 """
 
+import asyncio
 import io
+import logging
 import tarfile
 import threading
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any
+from uuid import uuid4
+
+from app.infrastructure import workspaces
+from app.infrastructure.notebook_runs import CELL_SECONDS, TOTAL_SECONDS, RunError
+
+logger = logging.getLogger("craft.workspace")
 
 FOLDER_LIMIT = 50 * 1024 * 1024
-CELL_SECONDS = 120
-TOTAL_SECONDS = 15 * 60
 HOME = "/home/workspace"
 WORK = f"{HOME}/run"
 
@@ -35,12 +45,75 @@ sys.exit(status)
 """
 
 
-class SandboxError(RuntimeError):
-    """Only fixed codes cross this boundary."""
+@dataclass
+class SandboxRunner:
+    """One owner's notebook runs, through their running Jupyter server ``target``."""
+
+    target: workspaces.JupyterTarget
+    image: str
+
+    async def run(self, folder: str, notebook: str, output: str) -> None:
+        """Copy the folder in, run, and write new results beside the notebook.
+
+        A result whose name CRAFT can't write (a hidden file such as ``outputs/.cache/x``) is
+        skipped and counted in the log; every other result is still written.
+        """
+        try:
+            files = await workspaces.read_folder(self.target, folder, FOLDER_LIMIT)
+        except ValueError:  # read_folder's one refusal: the folder is over FOLDER_LIMIT
+            raise RunError("folder_too_large") from None
+        sandbox = Sandbox(self.image)
+        try:
+            code, made = await asyncio.to_thread(sandbox.run, files, notebook, output)
+        finally:
+            # A cancelled job lands here first: removing the container stops the run at once.
+            sandbox.kill()
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        before = {_join(folder, key) for key in files}
+        skipped = 0
+        for relative, content in sorted(made.items()):
+            if relative.split("/", 1)[0] == "outputs" and files.get(relative) == content:
+                continue  # an output the notebook did not change
+            # Names come out of the container, so each is checked like a request path.
+            destination = _owned(_free(_join(folder, relative), before, stamp))
+            # Never overwrite: an existing file keeps its content and the run's copy is renamed.
+            if destination and await workspaces.exists(self.target, destination):
+                renamed = _free(destination, {destination}, f"{stamp}-{uuid4().hex[:6]}")
+                destination = _owned(renamed)
+            if destination is None:
+                skipped += 1
+                continue
+            await workspaces.write_bytes(self.target, destination, content)
+        if skipped:
+            logger.info("notebook run skipped results", extra={"fields": {"skipped": skipped}})
+        if code not in (0, 3):  # 3: a cell raised; the executed copy shows the error
+            raise RunError("run_failed")
+
+
+def _join(folder: str, name: str) -> str:
+    return f"{folder}/{name}".lstrip("/")
+
+
+def _owned(name: str) -> str | None:
+    """``name`` if CRAFT may write it in the owner's workspace; None for a hidden or bad path."""
+    try:
+        return workspaces.owned_name(name)
+    except ValueError:
+        return None
+
+
+def _free(name: str, taken: set[str], stamp: str) -> str:
+    """The name itself, or name.run-<stamp>.ext beside it when that file already exists."""
+    if name not in taken:
+        return name
+    path = PurePosixPath(name)
+    return str(path.with_name(f"{path.stem}.run-{stamp}{path.suffix}"))
 
 
 @dataclass
 class Sandbox:
+    """One container for one run; ``kill`` may be called from another thread."""
+
     image: str
     client: Any = None
     container: Any = None
@@ -56,8 +129,6 @@ class Sandbox:
 
     def run(self, files: dict[str, bytes], notebook: str, output: str) -> tuple[int, dict]:
         """Execute ``notebook`` (relative to ``files``); returns its exit code and new files."""
-        if sum(len(content) for content in files.values()) > FOLDER_LIMIT:
-            raise SandboxError("folder_too_large")
         pinned = self.api().images.get(self.image).id  # the run uses this exact image
         # The run folder is its own memory-backed volume, owned by the runner and bounded:
         # Docker cannot copy files into a plain tmpfs of a container with a read-only root.
@@ -90,9 +161,9 @@ class Sandbox:
         try:
             self.container.start()
             if not self.container.put_archive(WORK, _tar(files)):
-                raise SandboxError("copy_failed")
+                raise RunError("copy_failed")
             if self.killed.is_set():
-                raise SandboxError("cancelled")
+                raise RunError("cancelled")
             code, _ = self.container.exec_run(
                 [
                     "timeout",
@@ -108,9 +179,9 @@ class Sandbox:
                 workdir=f"{WORK}/{notebook.rpartition('/')[0]}".rstrip("/"),
             )
             if self.killed.is_set():
-                raise SandboxError("cancelled")
+                raise RunError("cancelled")
             if code == 124:
-                raise SandboxError("run_timeout")
+                raise RunError("run_timeout")
             folder = notebook.rpartition("/")[0]
             prefix = f"{folder}/" if folder else ""
             made = {}

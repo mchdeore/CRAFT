@@ -20,7 +20,8 @@ import asyncio, sys, time, uuid
 from app.infrastructure import notebook_jobs as jobs
 
 async def main(user, cancel_after):
-    run = jobs.run(jobs.in_cluster(), IMAGE, uuid.UUID(user), "work", "nb.ipynb", "nb.run.ipynb")
+    runner = jobs.JobRunner(jobs.in_cluster(), IMAGE, uuid.UUID(user))
+    run = runner.run("work", "nb.ipynb", "nb.run.ipynb")
     if not cancel_after:
         return await run
     task = asyncio.ensure_future(run)
