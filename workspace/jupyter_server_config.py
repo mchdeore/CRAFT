@@ -54,8 +54,8 @@ c_terminal_env = {"CRAFT_GUARD": "1"}
 # Jupyter's config loader injects this callable into the execution globals.
 c = globals()["get_config"]()
 c.ServerApp.root_dir = str(root)
-# Office previews: the PDF renderer behind JupyterLab's Preview tab.
-c.ServerApp.jpserver_extensions = {"craft_preview": True}
+# Office previews (the PDF renderer behind the Preview tab) and the activity log.
+c.ServerApp.jpserver_extensions = {"craft_preview": True, "craft_events": True}
 c.ServerApp.ip = "0.0.0.0"
 c.ServerApp.port = 8888
 c.ServerApp.port_retries = 0
