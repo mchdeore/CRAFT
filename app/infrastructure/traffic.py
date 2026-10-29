@@ -59,7 +59,8 @@ class Traffic(msgspec.Struct, frozen=True, kw_only=True):
 def record(sessions: sessionmaker[Session], row: Traffic) -> None:
     """Where every count goes: one traffic_log row in its own short transaction."""
     with unit_of_work(sessions) as session:
-        session.execute(traffic_log.insert().values(**msgspec.structs.asdict(row)))
+        # inline(): no RETURNING for the new id, which craft_app (insert only) may not read.
+        session.execute(traffic_log.insert().inline().values(**msgspec.structs.asdict(row)))
 
 
 class TrafficMiddleware:

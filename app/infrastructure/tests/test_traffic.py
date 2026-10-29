@@ -177,7 +177,8 @@ def rows_for(owner_engine, response) -> list[dict]:
 
 def test_operations_record_their_name_and_caller(signed_in, owner_engine) -> None:
     secret = "SECRET-" + uuid4().hex
-    me = signed_in.browser.get("/api/me?probe=" + secret)
+    me = signed_in.browser.get("/api/me")
+    refused = signed_in.browser.get("/api/me?probe=" + secret)  # accounts.me takes no input
     token = signed_in.browser.post(
         "/api/me/workspace-tokens", json={"label": "notebook", "hours": 1}
     ).json()
@@ -192,7 +193,11 @@ def test_operations_record_their_name_and_caller(signed_in, owner_engine) -> Non
     assert row["operation"] == "accounts.me" and row["method"] == "GET"
     assert (row["origin"], row["user_id"], row["status"]) == ("http", signed_in.id, 200)
     assert row["bytes_out"] == len(me.content) and row["bytes_in"] == 0
-    assert secret not in str(row) and token["token"] not in str(row)
+
+    [row] = rows_for(owner_engine, refused)
+    assert (row["operation"], row["user_id"], row["status"]) == ("accounts.me", signed_in.id, 400)
+    assert row["bytes_out"] == len(refused.content)
+    assert secret not in str(row)
 
     [row] = rows_for(owner_engine, workspace)
     assert (row["origin"], row["user_id"]) == ("workspace", signed_in.id)
