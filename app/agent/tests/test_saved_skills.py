@@ -604,6 +604,11 @@ def test_selected_skill_http_disconnect_keeps_running_and_records_history(contex
             }
             await asyncio.wait_for(app(scope, receive, send), 10)
             assert started.is_set()
+            # The live server shares this pool; its /mcp requests check connections out briefly.
+            for _ in range(100):
+                if app.state.engine.pool.checkedout() == 0:
+                    break
+                await asyncio.sleep(0.02)
             assert app.state.engine.pool.checkedout() == 0
 
         asyncio.run(execute())

@@ -48,6 +48,7 @@ def register_tables() -> None:
         "app.jobs.storage",
         "app.identity.storage",
         "app.notifications.storage",
+        "app.infrastructure.traffic",
     ):
         import_module(module)
 
