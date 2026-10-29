@@ -20,7 +20,16 @@ from app.health.handlers import QueueCounts, QueueHealth
 from app.infrastructure.paths import ROOT
 from app.infrastructure.shapes import ApiErrorBody
 from app.jobs.handlers import Job, JobPage, JobPageRequest, JobProgress
-from app.library.handlers import CatalogDocument, DocumentCatalog, DocumentList
+from app.library.handlers import (
+    CatalogDocument,
+    DocumentCatalog,
+    DocumentList,
+    Graph,
+    GraphEdge,
+    GraphGroup,
+    GraphNode,
+    RelationsRequest,
+)
 from app.notifications.handlers import Notification, NotificationPageRequest
 from app.skills.handlers import (
     SaveSkill,
@@ -103,6 +112,11 @@ def test_python_shapes_match_compiled_typescript() -> None:
         DocumentList,
         CatalogDocument,
         DocumentCatalog,
+        RelationsRequest,
+        GraphNode,
+        GraphEdge,
+        GraphGroup,
+        Graph,
         Job,
         JobPage,
         JobPageRequest,

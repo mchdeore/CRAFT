@@ -9,7 +9,8 @@ import msgspec
 from app.infrastructure.config.env import read_env
 
 PREFIX = "CRAFT_"
-OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account"}  # setup and Compose only
+# Setup and Compose only; scripts/seed reads CRAFT_SEED.
+OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account", "seed"}
 IDENTITY = {"id_db_password", "id_signing_key", "id_public_url"}  # craft-id's own settings
 # Settings of the deleted indexer, RQ queue and dev page; older .env files may still set them.
 RETIRED = {

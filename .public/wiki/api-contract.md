@@ -104,6 +104,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/library/documents/:item` | —; query `{ version?: number }` | `LibraryDocument` | signed in; live resource access | `get_document` |
 | `GET /api/library/documents/:item/chunks` | —; query `{ version: number; fromBlock: number; toBlock: number }` | `ChunkPage` | signed in; live resource access | `read_chunks` |
 | `POST /api/library/explore` | `ExploreInput` | `ChunkPage` | signed in; live resource access | `explore` |
+| `GET /api/library/relations` | —; query `RelationsRequest` | `Graph` | signed in; indexed mission grants | `relations` |
 | `GET /api/library/documents/:item/preview` | —; query `{ version: number; locator?: string }` | `Blob` | signed in; live resource access | — |
 | `GET /api/library/documents/:item/download` | —; query `{ version: number; locator?: string }` | `Blob` | signed in; live resource access | — |
 | `POST /api/library/documents/:item/revisions` | `Blob`; query `{ version: number }` | `Revision` | signed in; live resource access | — |
@@ -201,6 +202,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | `list_documents` | `GET /api/library/documents` | `DocumentList` | `NONE` |
 | `make_chart` | `POST /api/tools/chart` | `ChartInput` | `NONE` |
 | `prepare_values` | `POST /api/cube/candidates` | `PrepareValues` | `NONE` |
+| `relations` | `GET /api/library/relations` | `RelationsRequest` | `NONE` |
 | `submit_values` | `POST /api/cube/values` | `SubmitValues` | `DATA` |
 | `read_chunks` | `GET /api/library/documents/:item/chunks` | `ChunkRange` | `NONE` |
 | `read_note` | `GET /api/notes/:id` | `NoteRef` | `NONE` |
@@ -358,6 +360,7 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/library/documents/:item` | `LibraryDocument` | `app/contract/examples/library-document.json` |
 | `GET /api/library/documents/:item/chunks` | `ChunkPage` | `app/contract/examples/chunks.json` |
 | `POST /api/library/explore` | `ChunkPage` | `app/contract/examples/explore.json` |
+| `GET /api/library/relations` | `Graph` | `app/contract/examples/relations.json` |
 | `POST /api/auth/logout` | `SignedOut` | `app/contract/examples/signed-out.json` |
 | `POST /api/session` | `Me` | `app/contract/examples/session.json` |
 | `GET /api/me` | `Me` | `app/contract/examples/me.json` |

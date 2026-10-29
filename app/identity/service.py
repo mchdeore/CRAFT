@@ -14,6 +14,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert
 
 from app.identity import storage
 from app.infrastructure.access import now
@@ -206,15 +207,19 @@ def add_account(sessions, username: str, name: str, email: str | None, password:
 
 
 def set_password(sessions, username: str, password: str) -> bool:
+    """Set or replace the password; an account seeded without one gets its first here."""
     digest = PASSWORDS.hash(password)
     with unit_of_work(sessions) as session:
         account = storage.account(session, username.lower())
         if account is None:
             return False
         session.execute(
-            storage.id_credentials.update()
-            .where(storage.id_credentials.c.account_id == account["id"])
-            .values(password_hash=digest, updated_at=now())
+            insert(storage.id_credentials)
+            .values(account_id=account["id"], password_hash=digest)
+            .on_conflict_do_update(
+                index_elements=[storage.id_credentials.c.account_id],
+                set_={"password_hash": digest, "updated_at": now()},
+            )
         )
     return True
 
