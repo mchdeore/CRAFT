@@ -151,3 +151,18 @@ def test_a_run_credential_outlives_the_longest_run(owner_engine, person):
             select(runs.c.token_expires_at).where(runs.c.id == run)
         ).scalar_one()
     assert expires > datetime.now(UTC) + timedelta(seconds=900)
+
+
+def test_a_lost_worker_ends_its_run_through_a_logged_operation(owner_engine, person):
+    from app.agent.jobs import AgentRunJob, interrupted
+
+    run = add_run(owner_engine, person, person.threads[0], "running", "task")
+    interrupted(person.caller.sessions, AgentRunJob(run=run, segment=1))
+    call_log = metadata.tables["call_log"]
+    with owner_engine.connect() as connection:
+        status = connection.execute(select(runs.c.status).where(runs.c.id == run)).scalar_one()
+        logged = connection.execute(
+            select(call_log.c.outcome).where(call_log.c.name == "agent.interrupt_run")
+        ).scalars()
+        assert status == "failed" and "ok" in set(logged)
+    assert notified(owner_engine, person) == {("run_done", str(run))}
