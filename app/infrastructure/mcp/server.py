@@ -8,12 +8,13 @@ from typing import Any
 
 import msgspec
 from mcp.server.lowlevel import Server
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import CallToolResult, ListToolsRequest, ListToolsResult, TextContent, Tool
 from starlette.concurrency import run_in_threadpool
 
 from app.infrastructure.access import Caller
 from app.infrastructure.errors import ApiError, NotFound
 from app.infrastructure.operations.context import CallContext, current_call
+from app.infrastructure.operations.pipeline import token_allowed
 from app.infrastructure.operations.registry import Operation, tool_named, tool_operations
 from app.infrastructure.operations.schemas import input_schema as input_schema
 
@@ -36,16 +37,23 @@ def build_server(registry: Mapping[str, Operation], caller) -> Server:
         return await caller()
 
     @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        await context()
-        return [
-            Tool(
-                name=o.tool_name,
-                description=inspect.getdoc(o.function) or "",
-                inputSchema=input_schema(o),
-            )
-            for o in tool_operations(registry)
-        ]
+    async def list_tools(request: ListToolsRequest) -> ListToolsResult:
+        trusted, _ = await context()
+        # A personal token lists only what it may call; the pipeline refuses the rest. A result
+        # (not a list) adds to the SDK's tool cache, which every caller shares, instead of
+        # replacing it, so a short list never sends a run token's next call to list again.
+        token = trusted.workspace_token_id is not None
+        return ListToolsResult(
+            tools=[
+                Tool(
+                    name=o.tool_name,
+                    description=inspect.getdoc(o.function) or "",
+                    inputSchema=input_schema(o),
+                )
+                for o in tool_operations(registry)
+                if not token or token_allowed(o, trusted.origin)
+            ]
+        )
 
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
@@ -146,11 +154,11 @@ class HttpTransport:
             entry = await auth.authenticate(request)
         except ApiError as error:
             response = error_response(error)
-            response.headers["WWW-Authenticate"] = "Bearer"
+            if error.status == 401:
+                response.headers["WWW-Authenticate"] = "Bearer"
             await response(scope, receive, send)
             return
-        base, _, principal = entry
-        request.state.caller = replace(base, user_id=principal.user)
+        request.state.caller = entry.caller
         token = auth.credential.set(entry)
         try:
             if self.manager is None:

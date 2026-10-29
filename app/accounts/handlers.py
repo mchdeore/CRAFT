@@ -1,4 +1,5 @@
-"""Account administration entry points for local mission grants."""
+"""Account entry points: sign-in, the signed-in account, administration, mission grants, and
+personal tokens (`workspace` for /api, `mcp` for /mcp)."""
 
 from typing import Annotated, Literal
 from uuid import UUID
@@ -211,9 +212,14 @@ def disable(caller: Caller, request: UserRef) -> None:
     service.manage(caller, request, "disable")
 
 
+TokenKind = Literal["workspace", "mcp"]
+
+
 class NewWorkspaceToken(Shape):
     label: Annotated[str, msgspec.Meta(min_length=1, max_length=80)]
-    hours: Annotated[int, msgspec.Meta(ge=1, le=168)] = 12
+    # Defaults to 12 hours for a workspace token and 168 for an MCP token; at most 168 and 720.
+    hours: Annotated[int, msgspec.Meta(ge=1, le=720)] | None = None
+    kind: TokenKind = "workspace"
 
 
 class WorkspaceTokenRef(Shape):
@@ -222,6 +228,7 @@ class WorkspaceTokenRef(Shape):
 
 class WorkspaceToken(Shape):
     id: UUID
+    kind: TokenKind
     label: str
     created_at: str
     expires_at: str
@@ -233,21 +240,50 @@ class IssuedWorkspaceToken(WorkspaceToken):
     token: str
 
 
+def resolve_token(
+    caller: Caller, digest: bytes, kind: TokenKind, username: str | None = None
+) -> Caller:
+    """The caller a personal token signs in as: `workspace` at /api, `mcp` at /mcp.
+
+    Takes the SHA-256 digest of the token, never the token. Returns the caller unchanged when
+    no live token of this kind matches, or with `username`, when it is another account's."""
+    return service.resolve_token(caller, digest, kind, username)
+
+
+@operation(SIGNED_IN, post="/me/tokens")
+def create_token(caller: Caller, request: NewWorkspaceToken) -> IssuedWorkspaceToken:
+    """Issue a read-only token: `workspace` for owned Python at /api, `mcp` for an outside MCP
+    client at /mcp. The token is shown once."""
+    return IssuedWorkspaceToken(**service.create_workspace_token(caller, request))
+
+
+@operation(SIGNED_IN, get="/me/tokens")
+def list_tokens(caller: Caller) -> list[WorkspaceToken]:
+    """List the account's tokens of both kinds without their secrets."""
+    return [WorkspaceToken(**row) for row in service.list_workspace_tokens(caller)]
+
+
+@operation(SIGNED_IN, delete="/me/tokens/{id}")
+def revoke_token(caller: Caller, request: WorkspaceTokenRef) -> None:
+    """Revoke one of the account's tokens."""
+    service.revoke_workspace_token(caller, request.id)
+
+
 @operation(SIGNED_IN, post="/me/workspace-tokens")
 def create_workspace_token(caller: Caller, request: NewWorkspaceToken) -> IssuedWorkspaceToken:
-    """Issue a read-only token for owned Python; the token is shown once."""
+    """The earlier name of POST /api/me/tokens."""
     return IssuedWorkspaceToken(**service.create_workspace_token(caller, request))
 
 
 @operation(SIGNED_IN, get="/me/workspace-tokens")
 def list_workspace_tokens(caller: Caller) -> list[WorkspaceToken]:
-    """List the account's workspace tokens without their secrets."""
+    """The earlier name of GET /api/me/tokens."""
     return [WorkspaceToken(**row) for row in service.list_workspace_tokens(caller)]
 
 
 @operation(SIGNED_IN, delete="/me/workspace-tokens/{id}")
 def revoke_workspace_token(caller: Caller, request: WorkspaceTokenRef) -> None:
-    """Revoke one of the account's workspace tokens."""
+    """The earlier name of DELETE /api/me/tokens/{id}."""
     service.revoke_workspace_token(caller, request.id)
 
 

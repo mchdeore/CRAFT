@@ -9,8 +9,11 @@ export interface Me { id: Id; username: string; displayName: string; roles: Role
 export interface MeChange { language: Language }
 /** Browser sign-in goes to GET /api/auth/login?returnTo=…; failures come back to /?signIn=failed or /?signIn=no-access. */
 export interface SignedOut { logoutUrl: string | null }
-export interface NewWorkspaceToken { label: string; hours?: number }
-export interface WorkspaceToken { id: Id; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
+/** `workspace` signs in at /api from owned Python; `mcp` signs in at /mcp from an outside MCP client. */
+export type TokenKind = "workspace" | "mcp";
+/** `hours`: 1 to 168 for a workspace token (default 12), 1 to 720 for an MCP token (default 168). `kind` defaults to `workspace`. */
+export interface NewWorkspaceToken { label: string; hours?: number | null; kind?: TokenKind }
+export interface WorkspaceToken { id: Id; kind: TokenKind; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
 /** `notebook`: the notebook this code works on; approving it grants that notebook for the conversation. */
 export interface Workspace { state: "stopped" | "starting" | "ready"; url: string | null }

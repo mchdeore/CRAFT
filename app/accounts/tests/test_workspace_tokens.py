@@ -188,3 +188,127 @@ def test_read_tool_may_use_internal_operations(account):
     token = issue(account)["token"]
     nested = account.python.get("/api/workspace-nested-probe", headers=bearer(token))
     assert nested.status_code == 200 and nested.json() == {"owner": str(account.id)}
+
+
+def hours(row):
+    from datetime import datetime
+
+    span = datetime.fromisoformat(row["expiresAt"]) - datetime.fromisoformat(row["createdAt"])
+    return span / timedelta(hours=1)
+
+
+def test_kinds_have_their_own_default_and_longest_lifetime(account):
+    def create(**body):
+        return account.browser.post("/api/me/tokens", json={"label": "client", **body})
+
+    workspace = create()
+    assert workspace.status_code == 200
+    assert workspace.json()["kind"] == "workspace" and hours(workspace.json()) == 12
+    mcp = create(kind="mcp")
+    assert mcp.status_code == 200 and mcp.json()["kind"] == "mcp" and hours(mcp.json()) == 168
+    assert hours(create(kind="mcp", hours=720).json()) == 720
+    assert hours(create(hours=168).json()) == 168
+    for body in [
+        {"hours": 169},
+        {"kind": "mcp", "hours": 721},
+        {"kind": "mcp", "hours": 0},
+        {"kind": "other"},
+    ]:
+        refused = create(**body)
+        assert refused.status_code == 400 and refused.json()["code"] == "invalid_input", body
+    assert create(hours=169).json()["fields"] == [{"path": "$.hours", "message": "At most 168."}]
+
+
+def test_the_table_refuses_a_longer_lifetime_than_its_kind_allows(account, owner_engine):
+    from sqlalchemy.exc import IntegrityError
+
+    at = access.now()
+    for kind, allowed in [("workspace", 168), ("mcp", 720)]:
+        with owner_engine.begin() as connection:
+            connection.execute(
+                storage.workspace_tokens.insert().values(
+                    user_id=account.id,
+                    token_sha256=uuid4().bytes * 2,
+                    kind=kind,
+                    label="direct",
+                    created_at=at,
+                    expires_at=at + timedelta(hours=allowed),
+                )
+            )
+        with pytest.raises(IntegrityError), owner_engine.begin() as connection:
+            connection.execute(
+                storage.workspace_tokens.insert().values(
+                    user_id=account.id,
+                    token_sha256=uuid4().bytes * 2,
+                    kind=kind,
+                    label="direct",
+                    created_at=at,
+                    expires_at=at + timedelta(hours=allowed, seconds=1),
+                )
+            )
+    with pytest.raises(IntegrityError), owner_engine.begin() as connection:
+        connection.execute(
+            storage.workspace_tokens.insert().values(
+                user_id=account.id,
+                token_sha256=uuid4().bytes * 2,
+                kind="other",
+                label="direct",
+                expires_at=at,
+            )
+        )
+
+
+def test_both_kinds_are_listed_and_revoked_under_either_name(account):
+    workspace = issue(account)
+    mcp = account.browser.post("/api/me/tokens", json={"label": "client", "kind": "mcp"}).json()
+    listed = account.browser.get("/api/me/tokens").json()
+    assert [(row["id"], row["kind"]) for row in listed] == [
+        (mcp["id"], "mcp"),
+        (workspace["id"], "workspace"),
+    ]
+    assert account.browser.get("/api/me/workspace-tokens").json() == listed
+    assert all("token" not in row for row in listed)
+    assert account.browser.delete(f"/api/me/workspace-tokens/{mcp['id']}").status_code == 204
+    assert account.browser.delete(f"/api/me/tokens/{workspace['id']}").status_code == 204
+    assert all(row["revokedAt"] for row in account.browser.get("/api/me/tokens").json())
+    assert account.browser.delete(f"/api/me/tokens/{uuid4()}").status_code == 404
+
+
+def test_an_mcp_token_never_signs_in_at_the_api(account, owner_engine):
+    mcp = account.browser.post("/api/me/tokens", json={"label": "client", "kind": "mcp"}).json()
+    for method, path in [
+        ("GET", "/api/me"),
+        ("GET", "/api/cube/parameters"),
+        ("GET", "/api/me/tokens"),
+        ("GET", "/api/me/workspace-tokens"),
+        ("GET", "/api/workspace-nested-probe"),
+    ]:
+        response = account.python.request(method, path, headers=bearer(mcp["token"]))
+        assert response.status_code == 401, path
+    with owner_engine.connect() as connection:
+        used = connection.execute(
+            select(storage.workspace_tokens.c.last_used_at).where(
+                storage.workspace_tokens.c.id == mcp["id"]
+            )
+        ).scalar_one()
+        logged = connection.execute(
+            select(call_log.c.id).where(call_log.c.workspace_token_id == mcp["id"])
+        ).all()
+    assert used is None and logged == []
+
+
+def test_tokens_cannot_issue_tokens_of_either_kind(account):
+    workspace = issue(account)["token"]
+    for kind in ["workspace", "mcp"]:
+        response = account.python.post(
+            "/api/me/tokens", json={"label": "x", "kind": kind}, headers=bearer(workspace)
+        )
+        assert response.status_code == 403
+
+
+def test_a_workspace_token_cannot_ask_the_agent(account):
+    token = issue(account)["token"]
+    asked = account.python.post(
+        "/api/agent/ask", json={"question": "Peak power"}, headers=bearer(token)
+    )
+    assert asked.status_code == 403 and asked.json()["code"] == "forbidden"

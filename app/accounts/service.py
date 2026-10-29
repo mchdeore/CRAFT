@@ -1,10 +1,12 @@
-"""Short transactions for local account administration."""
+"""Short transactions for account administration, sign-in, and personal tokens (issue, list,
+revoke, and resolve a token's digest to its account)."""
 
 import base64
 import hashlib
 import logging
 import secrets
 from collections import defaultdict, deque
+from dataclasses import replace
 from datetime import timedelta
 from functools import lru_cache
 from threading import Lock
@@ -29,6 +31,7 @@ from app.infrastructure.errors import (
 from app.infrastructure.grants import insert_grant, remove_grant
 from app.infrastructure.operations.context import current_call, session_cookie, signin_cookie
 from app.infrastructure.provider.simulated import SILOS
+from app.infrastructure.shapes import FieldError
 
 logger = logging.getLogger("craft.accounts")
 
@@ -414,17 +417,41 @@ def manage(caller: Caller, request, action: str) -> None:
 
 
 WORKSPACE_TOKEN_ORIGINS = frozenset({"http", "python"})
+# Default and longest lifetime in hours by kind; the table checks the longest too.
+TOKEN_HOURS = {"workspace": (12, 168), "mcp": (168, 720)}
 
 
 def _token_row(row) -> dict:
     return {
         "id": row["id"],
+        "kind": row["kind"],
         "label": row["label"],
         "created_at": row["created_at"].isoformat(),
         "expires_at": row["expires_at"].isoformat(),
         "last_used_at": row["last_used_at"].isoformat() if row["last_used_at"] else None,
         "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
     }
+
+
+def resolve_token(caller: Caller, digest: bytes, kind: str, username: str | None = None) -> Caller:
+    """The caller a personal token of this kind signs in as, with the account's current roles;
+    the caller unchanged when no live token matches. Its calls are logged with the kind as
+    their origin and the token's ID, never its value."""
+    if caller.sessions is None:
+        return caller
+    at = access.now()
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        row = storage.live_token(session, digest, kind, at, username)
+        if row is None:
+            return caller
+        roles = frozenset(storage.roles_for(session, row["user_id"]))
+    every = timedelta(seconds=60)
+    if row["last_used_at"] is None or at - row["last_used_at"] >= every:
+        with unit_of_work(caller.sessions) as session:
+            storage.touch_token(session, row["id"], at, every)
+    return replace(
+        caller, user_id=row["user_id"], roles=roles, origin=kind, workspace_token_id=row["id"]
+    )
 
 
 def _token_owner(caller: Caller):
@@ -440,6 +467,10 @@ def _token_owner(caller: Caller):
 
 def create_workspace_token(caller: Caller, request) -> dict:
     sessions = _token_owner(caller)
+    default, longest = TOKEN_HOURS[request.kind]
+    hours = default if request.hours is None else request.hours
+    if hours > longest:
+        raise InvalidInput(fields=[FieldError(path="$.hours", message=f"At most {longest}.")])
     at = access.now()
     raw = secrets.token_bytes(32)
     with unit_of_work(sessions) as session:
@@ -449,9 +480,10 @@ def create_workspace_token(caller: Caller, request) -> dict:
                 .values(
                     user_id=caller.user_id,
                     token_sha256=hashlib.sha256(raw).digest(),
+                    kind=request.kind,
                     label=request.label,
                     created_at=at,
-                    expires_at=at + timedelta(hours=request.hours),
+                    expires_at=at + timedelta(hours=hours),
                 )
                 .returning(storage.workspace_tokens)
             )

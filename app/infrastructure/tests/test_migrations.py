@@ -1,6 +1,7 @@
 """Migration verification rolls back DDL in craft_test, preserving other fixtures."""
 
 from collections.abc import Iterator
+from datetime import timedelta
 
 import pytest
 from alembic import command
@@ -253,3 +254,51 @@ def test_existing_passwords_move_to_craft_id_and_users_stay_linked(
         text("select idp_object_id from users where id = :u"), {"u": user}
     ).scalar_one()
     assert linked == user
+
+
+def test_token_kinds_upgrade_as_workspace_and_downgrade_revokes_mcp_tokens(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0030")
+    user = connection.execute(
+        text("insert into users (username, display_name) values ('kinds', 'Kinds') returning id")
+    ).scalar_one()
+    insert = (
+        "insert into workspace_tokens (user_id, token_sha256, label, expires_at{kind}) "
+        "values (:u, :digest, 'generated', now() + interval '{hours} hours'{value}) returning id"
+    )
+    earlier = connection.execute(
+        text(insert.format(kind="", hours=168, value="")), {"u": user, "digest": b"e" * 32}
+    ).scalar_one()
+    command.upgrade(config, "0031")
+    assert (
+        connection.execute(
+            text("select kind from workspace_tokens where id = :id"), {"id": earlier}
+        ).scalar_one()
+        == "workspace"
+    )
+    mcp = connection.execute(
+        text(insert.format(kind=", kind", hours=720, value=", 'mcp'")),
+        {"u": user, "digest": b"m" * 32},
+    ).scalar_one()
+    with pytest.raises(IntegrityError), connection.begin_nested():
+        connection.execute(
+            text(insert.format(kind=", kind", hours=169, value=", 'workspace'")),
+            {"u": user, "digest": b"w" * 32},
+        )
+    command.downgrade(config, "0030")
+    revoked = {
+        row[0]: tuple(row[1:])
+        for row in connection.execute(
+            text(
+                "select id, revoked_at is not null, expires_at - created_at "
+                "from workspace_tokens where user_id = :u"
+            ),
+            {"u": user},
+        )
+    }
+    # An MCP token must not come back as a workspace token that reaches /api.
+    assert revoked == {earlier: (False, timedelta(hours=168)), mcp: (True, timedelta(hours=168))}
+    command.upgrade(config, "head")
+    assert_models(connection)
