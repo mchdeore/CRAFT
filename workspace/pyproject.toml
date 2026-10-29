@@ -3,6 +3,8 @@ name = "craft-user-workspace"
 version = "0.1.0"
 description = "Private Jupyter workspace with an injectable CRAFT MCP client"
 requires-python = "==3.12.*"
+# The terms are in the repository's LICENSE; license-files can't reach outside this folder.
+license = "LicenseRef-Proprietary"
 # Everything `import craft` uses; `[all]` adds JupyterLab and the Hub's server for the image.
 dependencies = [
   "mcp==1.30.0",
