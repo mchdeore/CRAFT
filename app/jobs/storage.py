@@ -12,8 +12,11 @@ from sqlalchemy import (
     Integer,
     Table,
     Text,
+    func,
+    select,
     text,
 )
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database.metadata import metadata
@@ -44,6 +47,18 @@ queue_samples = Table(
     ),
 )
 Index("ix_queue_samples_queue_sampled_at", queue_samples.c.queue, queue_samples.c.sampled_at)
+
+# How far a running job got, as the job reports it. note is a fixed phrase from code.
+job_progress = Table(
+    "job_progress",
+    metadata,
+    Column("job_id", BigInteger, primary_key=True),
+    Column("done", Integer, nullable=False),
+    Column("total", Integer, nullable=False),
+    Column("note", Text),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("done >= 0 AND total >= 0", name="counts"),
+)
 
 COLUMNS = (
     "job_id, kind, queue, state, attempts, requested_by,"
@@ -76,6 +91,39 @@ def running_count(session: Session, kind: str, requested_by: str) -> int:
         ),
         {"kind": kind, "user": requested_by},
     ).scalar_one()
+
+
+def save_progress(session: Session, job_id: int, done: int, total: int, note: str | None) -> None:
+    """Insert or replace the job's one progress row."""
+    statement = insert(job_progress).values(job_id=job_id, done=done, total=total, note=note)
+    session.execute(
+        statement.on_conflict_do_update(
+            index_elements=[job_progress.c.job_id],
+            set_={"done": done, "total": total, "note": note, "updated_at": func.now()},
+        )
+    )
+
+
+def progress(session: Session, job_id: int):
+    """The job's progress (done, total, note), or None if it reported none."""
+    return (
+        session.execute(
+            select(job_progress.c.done, job_progress.c.total, job_progress.c.note).where(
+                job_progress.c.job_id == job_id
+            )
+        )
+        .mappings()
+        .first()
+    )
+
+
+def prune_progress(session: Session, days: int) -> None:
+    """Delete progress rows not updated for `days` days."""
+    session.execute(
+        job_progress.delete().where(
+            job_progress.c.updated_at < func.now() - func.make_interval(0, 0, 0, days)
+        )
+    )
 
 
 def defer(session: Session, queue: str, kind: str, args: dict, lock: str | None) -> int:

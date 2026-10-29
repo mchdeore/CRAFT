@@ -59,7 +59,7 @@ services:
     environment:
       <<: *app_environment
       CRAFT_WORKER_QUEUES: agent
-      CRAFT_WORKER_CONCURRENCY_AGENT: "50"
+      CRAFT_WORKER_CONCURRENCY_AGENT: "20"
     volumes: *provider_mount
     stop_grace_period: 900s                             # a chat turn's ceiling
     healthcheck: &worker_health
@@ -78,7 +78,7 @@ services:
     environment:
       <<: *app_environment
       CRAFT_WORKER_QUEUES: interactive
-      CRAFT_WORKER_CONCURRENCY_INTERACTIVE: "50"
+      CRAFT_WORKER_CONCURRENCY_INTERACTIVE: "10"
     volumes: *provider_mount
     stop_grace_period: 120s
     healthcheck: *worker_health
@@ -93,7 +93,7 @@ services:
     environment:
       <<: *app_environment
       CRAFT_WORKER_QUEUES: bulk
-      CRAFT_WORKER_CONCURRENCY_BULK: "50"
+      CRAFT_WORKER_CONCURRENCY_BULK: "2"
     volumes: *provider_mount
     stop_grace_period: 120s
     healthcheck: *worker_health

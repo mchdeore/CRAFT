@@ -352,6 +352,66 @@ def test_chat_stream_tool_and_time_budgets(chat, monkeypatch):
     assert recorded["token_sha256"] is None
 
 
+def test_task_mode_runs_longer_once_per_person_and_notifies(chat, monkeypatch):
+    notifications = m.metadata.tables["notifications"]
+
+    def notified():
+        with chat["owner"].connect() as connection:
+            return set(
+                connection.execute(
+                    select(notifications.c.kind, notifications.c.ref_id).where(
+                        notifications.c.user_id == chat["caller"].user_id
+                    )
+                ).tuples()
+            )
+
+    # Past the chat limit, a task-mode run still has its own 60 tool calls.
+    monkeypatch.setattr(runtime, "TOOL_LIMIT", 0)
+    task = msgspec.structs.replace(request(chat), mode="task")
+    events = collect(chat["caller"], task)
+    recorded = row(chat, task.run_id)
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert (recorded["status"], recorded["mode"]) == ("finished", "task")
+    plain = request(chat)
+    collect(chat["caller"], plain)
+    assert row(chat, plain.run_id)["end_reason"] == "tool_limit"
+    assert notified() == {("run_done", str(task.run_id))}
+
+    # A second task-mode run waits until the person's running one ends.
+    runs, conversations = m.metadata.tables["agent_runs"], m.metadata.tables["conversations"]
+    with chat["owner"].begin() as connection:
+        other = connection.execute(
+            conversations.insert()
+            .values(owner_id=chat["caller"].user_id, title="Simulated task")
+            .returning(conversations.c.id)
+        ).scalar_one()
+        running = uuid4()
+        connection.execute(
+            runs.insert().values(
+                id=running,
+                conversation_id=other,
+                started_by=chat["caller"].user_id,
+                status="running",
+                model="scripted",
+                instructions_version="simulated",
+                mode="task",
+            )
+        )
+        connection.execute(
+            m.metadata.tables["agent_run_inputs"]
+            .insert()
+            .values(run_id=running, segment=1, owner_id=chat["caller"].user_id, input={})
+        )
+    try:
+        with pytest.raises(RateLimited):
+            collect(chat["caller"], msgspec.structs.replace(request(chat), mode="task"))
+        collect(chat["caller"], request(chat))
+    finally:
+        with chat["owner"].begin() as connection:
+            connection.execute(runs.delete().where(runs.c.conversation_id == other))
+            connection.execute(conversations.delete().where(conversations.c.id == other))
+
+
 def test_chat_stream_output_budget(chat, monkeypatch):
     from agent_framework import ChatResponse, Message
 

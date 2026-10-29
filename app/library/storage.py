@@ -418,7 +418,7 @@ def revision(session: Session, item: str, number: int, *, content: bool = False)
     return dict(row) if row else None
 
 
-# The read-only view from migration 0028; not a registered table, so Alembic leaves it alone.
+# The read-only view from migration 0030; not a registered table, so Alembic leaves it alone.
 document_relations = table(
     "document_relations",
     column("relation"),

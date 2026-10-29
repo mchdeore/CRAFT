@@ -39,9 +39,12 @@ agent_runs = Table(
     Column("tool_calls", Integer),
     Column("active_seconds", Float),
     Column("end_reason", Text),
+    # A task-mode run has the longer limits and notifies its owner when it ends or waits.
+    Column("mode", Text, nullable=False, server_default=text("'chat'")),
     CheckConstraint(
         "status in ('running','paused','finished','failed','cancelled')", name="status"
     ),
+    CheckConstraint("mode IN ('chat', 'task')", name="mode"),
     CheckConstraint(
         "end_reason IS NULL OR end_reason IN ("
         "'finished', 'paused', 'time_limit', 'tool_limit', 'failed', 'cancelled')",
@@ -179,13 +182,15 @@ def last_event(session: Session, run):
     ).scalar_one()
 
 
-def interrupt(session: Session, run) -> None:
-    """A dead worker's run ends failed; it is never re-run by itself."""
-    session.execute(
+def interrupt(session: Session, run):
+    """A dead worker's run ends failed; it is never re-run by itself. Returns the run's owner
+    and mode, or None when it was not running."""
+    return session.execute(
         agent_runs.update()
         .where(agent_runs.c.id == run, agent_runs.c.status == "running")
         .values(status="failed", ended_at=func.now(), token_sha256=None, token_expires_at=None)
-    )
+        .returning(agent_runs.c.started_by, agent_runs.c.mode)
+    ).first()
 
 
 def prune_events(session: Session, hours: int) -> None:
@@ -201,11 +206,37 @@ def prune_events(session: Session, hours: int) -> None:
     session.execute(agent_run_inputs.delete().where(agent_run_inputs.c.run_id.in_(stale)))
 
 
-def start(session: Session, user, conversation, identifier, model, version):
+def _lock_account(session: Session, user) -> None:
     session.execute(
         text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": "run-account:" + str(user)},
     )
+
+
+# Longer than any run segment can take (runtime.RUN_SECONDS plus its wait for a worker).
+SEGMENT_SECONDS = 900 + 300
+
+
+def _refuse_second_task(session: Session, user) -> None:
+    """One running task-mode run per person, so a few people can't fill the agent worker.
+    A run counts only while its newest segment is recent: a row left "running" by a lost
+    database connection must not lock its owner out of task mode."""
+    recent = select(agent_run_inputs.c.run_id).where(
+        agent_run_inputs.c.created_at
+        > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, SEGMENT_SECONDS)
+    )
+    running = select(agent_runs.c.id).where(
+        agent_runs.c.started_by == user,
+        agent_runs.c.mode == "task",
+        agent_runs.c.status == "running",
+        agent_runs.c.id.in_(recent),
+    )
+    if session.execute(running.limit(1)).first() is not None:
+        raise RateLimited()
+
+
+def start(session: Session, user, conversation, identifier, model, version, mode="chat"):
+    _lock_account(session, user)
     conversations = metadata.tables["conversations"]
     if (
         session.execute(
@@ -240,6 +271,8 @@ def start(session: Session, user, conversation, identifier, model, version):
     ).scalar_one()
     if count >= 3:
         raise RateLimited()
+    if mode == "task":
+        _refuse_second_task(session, user)
     session.execute(
         agent_runs.insert().values(
             id=identifier,
@@ -248,6 +281,7 @@ def start(session: Session, user, conversation, identifier, model, version):
             status="running",
             model=model,
             instructions_version=version,
+            mode=mode,
         )
     )
     return session.execute(
@@ -282,12 +316,22 @@ def paused_state(session: Session, user, identifier, conversation):
     return state
 
 
-def resume(session: Session, user, identifier):
+def resume(session: Session, user, identifier) -> str:
+    """Run a paused run again; returns its mode."""
+    _lock_account(session, user)
+    mode = session.execute(
+        select(agent_runs.c.mode).where(
+            agent_runs.c.id == identifier, agent_runs.c.started_by == user
+        )
+    ).scalar_one()
+    if mode == "task":
+        _refuse_second_task(session, user)
     session.execute(
         agent_runs.update()
         .where(agent_runs.c.id == identifier, agent_runs.c.started_by == user)
         .values(status="running", ended_at=None)
     )
+    return mode
 
 
 def finish(
@@ -302,9 +346,10 @@ def finish(
     active_seconds=None,
     end_reason=None,
 ):
-    """End a run and record counters only (no prompts, answers or tool arguments)."""
+    """End a run and record counters only (no prompts, answers or tool arguments).
+    Returns the run's mode, or None when it was no longer running."""
     row = session.execute(
-        select(agent_runs.c.id)
+        select(agent_runs.c.mode)
         .where(
             agent_runs.c.id == identifier,
             agent_runs.c.started_by == user,
@@ -313,7 +358,7 @@ def finish(
         .with_for_update()
     ).first()
     if row is None:
-        return
+        return None
     statement = insert(agent_sessions).values(conversation_id=conversation, state=state)
     session.execute(
         statement.on_conflict_do_update(
@@ -333,6 +378,7 @@ def finish(
     if active_seconds is not None:
         values["active_seconds"] = active_seconds
     session.execute(agent_runs.update().where(agent_runs.c.id == identifier).values(**values))
+    return row.mode
 
 
 def issue_token(session, user, identifier, digest, expires, context):

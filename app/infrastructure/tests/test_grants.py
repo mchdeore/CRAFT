@@ -11,7 +11,8 @@ ACCOUNT_GRANTS = {
     "users": {"SELECT", "INSERT", "UPDATE"},
     "local_credentials": {"SELECT", "INSERT", "UPDATE"},
     "user_roles": {"SELECT", "INSERT", "DELETE"},
-    "auth_sessions": {"SELECT", "INSERT", "UPDATE"},
+    # DELETE: the daily maintenance.prune removes sessions past their absolute expiry.
+    "auth_sessions": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     "call_log": {"SELECT", "INSERT"},
 }
 

@@ -98,6 +98,8 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/jobs/:jobId` | — | `Job` | signed in; own job (administrator: any) | — |
 | `POST /api/jobs/:jobId/retry` | — | `Job` | signed in; own job (administrator: any) | — |
 | `POST /api/jobs/:jobId/cancel` | — | `Job` | signed in; own job (administrator: any) | — |
+| `GET /api/notifications` | —; query `NotificationPageRequest` | `Notification[]` | signed in; own notifications | — |
+| `POST /api/notifications/:id/read` | — | `Notification` | signed in; own notification | — |
 | `POST /api/library/search` | `LibrarySearch` | `LibraryHits` | signed in; live resource access | `search` |
 | `GET /api/library/documents/:item` | —; query `{ version?: number }` | `LibraryDocument` | signed in; live resource access | `get_document` |
 | `GET /api/library/documents/:item/chunks` | —; query `{ version: number; fromBlock: number; toBlock: number }` | `ChunkPage` | signed in; live resource access | `read_chunks` |
@@ -352,6 +354,8 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/jobs/:jobId` | `Job` | `app/contract/examples/job.json` |
 | `POST /api/jobs/:jobId/retry` | `Job` | `app/contract/examples/job.json` |
 | `POST /api/jobs/:jobId/cancel` | `Job` | `app/contract/examples/job.json` |
+| `GET /api/notifications` | `Notification[]` | `app/contract/examples/notifications.json` |
+| `POST /api/notifications/:id/read` | `Notification` | `app/contract/examples/notification.json` |
 | `POST /api/library/search` | `LibraryHits` | `app/contract/examples/library-search.json` |
 | `GET /api/library/documents/:item` | `LibraryDocument` | `app/contract/examples/library-document.json` |
 | `GET /api/library/documents/:item/chunks` | `ChunkPage` | `app/contract/examples/chunks.json` |

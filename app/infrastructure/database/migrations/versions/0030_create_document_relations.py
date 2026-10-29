@@ -7,8 +7,8 @@ No data is added; similar documents (stored vectors) are computed on read, not l
 
 from alembic import op
 
-revision: str = "0028"
-down_revision: str | None = "0027"
+revision: str = "0030"
+down_revision: str | None = "0029"
 branch_labels = None
 depends_on = None
 

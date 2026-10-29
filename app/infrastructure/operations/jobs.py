@@ -8,8 +8,8 @@ as a child of the call that queued it, with the same request ID.
 import asyncio
 import inspect
 from contextvars import ContextVar
-from time import perf_counter
-from typing import Any
+from time import monotonic, perf_counter
+from typing import Any, Protocol
 from uuid import UUID
 
 import msgspec
@@ -26,13 +26,69 @@ class Queued(Shape):
     job_id: str
 
 
-current_job: ContextVar[Any] = ContextVar("current_job", default=None)
+# A scheduled job's arguments: no input, the system as the caller, no parent call.
+SCHEDULED = {
+    "input": None,
+    "caller": {"user": None, "roles": [], "auth_session": None, "origin": "python"},
+    "parent": None,
+}
+
+
+class RunningJob(Protocol):
+    """What a job operation sees of its run on the worker (app.infrastructure.queue.JobRun)."""
+
+    @property
+    def sessions(self) -> Any: ...
+    @property
+    def settings(self) -> Any: ...
+    @property
+    def id(self) -> int: ...
+    @property
+    def attempt(self) -> int: ...
+    @property
+    def progress_at(self) -> list[float]:
+        """When report_progress last wrote, as a one-item list the run updates in place."""
+        ...
+
+    def should_abort(self) -> bool:
+        """Whether the job was asked to stop (blocking jobs check between steps)."""
+        ...
+
+
+current_job: ContextVar[RunningJob | None] = ContextVar("current_job", default=None)
 
 
 def should_abort() -> bool:
     """Blocking jobs check this between steps; async jobs are cancelled instead."""
     job = current_job.get()
     return job is not None and job.should_abort()
+
+
+PROGRESS_SECONDS = 1.0
+
+
+def report_progress(done: int, total: int, note: str | None = None) -> None:
+    """From inside a job: `done` of `total` steps. Written at most once a second, and always
+    on the last step. note is a short fixed phrase from code, never content. It writes to the
+    database, so an async job calls it through asyncio.to_thread."""
+    job = current_job.get()
+    if job is None:
+        raise RuntimeError("Progress is reported from inside a job")
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError("An async job reports progress through asyncio.to_thread")
+    if not 0 <= done <= total or (note is not None and len(note) > 80):
+        raise ValueError("Invalid progress")
+    now = monotonic()
+    if done < total and now - job.progress_at[0] < PROGRESS_SECONDS:
+        return
+    job.progress_at[0] = now
+    from app.jobs.handlers import save_progress
+
+    save_progress(job.sessions, job.id, done, total, note)
 
 
 def enqueue(session: Any, caller: Caller, operation: Any, request: Any = None) -> int:
@@ -73,7 +129,9 @@ def _input(declared: Operation, value: Any) -> Any:
     return decode(declared, None if value is None else msgspec.json.encode(value))
 
 
-def _start(job: Any, caller: dict, parent: dict | None) -> tuple[Any, CallContext, Any, Caller]:
+def _start(
+    job: RunningJob, caller: dict, parent: dict | None
+) -> tuple[Any, CallContext, Any, Caller]:
     rebuilt = Caller(
         user_id=UUID(caller["user"]) if caller["user"] else None,
         roles=frozenset(caller["roles"]),
@@ -100,7 +158,7 @@ def runner(declared: Operation) -> Any:
 
     if inspect.iscoroutinefunction(fn):
 
-        async def run_async(job: Any, input: Any, caller: dict, parent: dict | None) -> None:
+        async def run_async(job: RunningJob, input: Any, caller: dict, parent: dict | None) -> None:
             outer, ctx, token, rebuilt = _start(job, caller, parent)
             running = current_job.set(job)
             error = None
@@ -122,7 +180,7 @@ def runner(declared: Operation) -> Any:
 
         return run_async
 
-    def run_sync(job: Any, input: Any, caller: dict, parent: dict | None) -> None:
+    def run_sync(job: RunningJob, input: Any, caller: dict, parent: dict | None) -> None:
         outer, ctx, token, rebuilt = _start(job, caller, parent)
         running = current_job.set(job)
         error = None
@@ -162,4 +220,7 @@ def register(declared: Operation) -> None:
             if interrupted
             else None
         ),
+        every=job.every,
+        every_args=SCHEDULED,
+        notify=job.notify,
     )

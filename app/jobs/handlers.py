@@ -24,6 +24,12 @@ class JobPageRequest(Shape):
     limit: Annotated[int, msgspec.Meta(ge=1, le=100)] = 25
 
 
+class JobProgress(Shape):
+    done: int
+    total: int
+    note: str | None
+
+
 class Job(Shape):
     job_id: str
     kind: str
@@ -35,6 +41,8 @@ class Job(Shape):
     started_at: str | None
     finished_at: str | None
     error: str | None
+    # Only on GET /jobs/{jobId}, once the job has reported progress.
+    progress: JobProgress | None = None
 
 
 class JobPage(Shape):
@@ -51,8 +59,10 @@ def list_jobs(caller: Caller, request: JobPageRequest) -> JobPage:
 
 @operation(SIGNED_IN, get="/jobs/{jobId}")
 def read_job(caller: Caller, request: JobRef) -> Job:
-    """Read one background job's state, attempts and last error class."""
-    return Job(**service.read(caller, int(request.job_id)))
+    """Read one background job's state, attempts, last error class and progress."""
+    data = service.read(caller, int(request.job_id))
+    progress = data.pop("progress")
+    return Job(**data, progress=JobProgress(**progress) if progress else None)
 
 
 @operation(SIGNED_IN, post="/jobs/{jobId}/retry")
@@ -89,6 +99,16 @@ def cancel_job_by_id(session, job_id: int) -> bool:
 def cancel_queued_job(session, job_id: int) -> bool:
     """Cancel a job the calling feature authorized, only while it is still queued."""
     return service.cancel_queued(session, job_id)
+
+
+def save_progress(sessions, job_id: int, done: int, total: int, note: str | None) -> None:
+    """Record a running job's progress (see operations.jobs.report_progress)."""
+    service.save_progress(sessions, job_id, done, total, note)
+
+
+def prune_progress(session, days: int) -> None:
+    """Delete progress not updated for this many days."""
+    service.prune_progress(session, days)
 
 
 def queue_counts(sessions) -> dict:

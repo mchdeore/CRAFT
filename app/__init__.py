@@ -24,9 +24,11 @@ from app.infrastructure.logging import configure_logging, instrument_sql
 from app.infrastructure.operations.pipeline import register_http
 from app.infrastructure.paths import ROOT
 from app.infrastructure.requests import RequestIdMiddleware
+from app.infrastructure.traffic import TrafficMiddleware
 from app.jobs import handlers as job_handlers
 from app.library import handlers as library_handlers
 from app.notes import handlers as note_handlers
+from app.notifications import handlers as notification_handlers
 from app.skills import handlers as skill_handlers
 from app.summarize import handlers as summarize_handlers
 from app.tools import handlers as tool_handlers
@@ -35,6 +37,7 @@ from app.workspace import handlers as workspace_handlers
 
 class SummaryPage(StaticFiles):
     async def get_response(self, path: str, scope: Scope):
+        scope.setdefault("state", {})["operation"] = "summarize.page"
         if path != ".":
             raise HTTPException(status_code=404)
         response = await super().get_response("page.html", scope)
@@ -97,6 +100,7 @@ def create_app(settings: Settings) -> FastAPI:
         agent_jobs,
         conversation_handlers,
         note_handlers,
+        notification_handlers,
         skill_handlers,
         tool_handlers,
         workspace_handlers,
@@ -133,4 +137,5 @@ def create_app(settings: Settings) -> FastAPI:
             expose_headers=["Content-Disposition", "X-Request-ID"],
         )
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(TrafficMiddleware, sessions=app.state.sessions)
     return app

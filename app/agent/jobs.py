@@ -9,7 +9,7 @@ import msgspec
 
 from app.agent import service
 from app.agent.handlers import RunAgentInput
-from app.infrastructure.access import SIGNED_IN, Caller
+from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations import Job, operation
 from app.infrastructure.operations.context import current_call
@@ -25,8 +25,16 @@ class AgentRunJob(Shape):
     read_only: bool = False
 
 
+@operation(PUBLIC)
+def interrupt_run(caller: Caller, request: AgentRunJob) -> None:
+    """End a run whose worker was lost: failed, with its stream's last event; a Python-only
+    entry. A task-mode run also tells its owner."""
+    service.interrupt(caller.sessions, request.run, request.segment)
+
+
 def interrupted(sessions, request: AgentRunJob) -> None:
-    service.interrupt(sessions, request.run, request.segment)
+    """The agent_run job's hook when its worker died: the run ends through interrupt_run."""
+    interrupt_run(Caller(sessions=sessions), request)
 
 
 @operation(

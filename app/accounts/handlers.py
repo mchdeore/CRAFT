@@ -249,3 +249,8 @@ def list_workspace_tokens(caller: Caller) -> list[WorkspaceToken]:
 def revoke_workspace_token(caller: Caller, request: WorkspaceTokenRef) -> None:
     """Revoke one of the account's workspace tokens."""
     service.revoke_workspace_token(caller, request.id)
+
+
+def prune_expired(session) -> None:
+    """Delete expired sign-in sessions and workspace tokens in the caller's transaction."""
+    service.prune_expired(session)
