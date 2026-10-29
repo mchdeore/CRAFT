@@ -1,4 +1,8 @@
-"""Start, stop and status through a generated Hub API that checks CRAFT's one service token."""
+"""The Hub client against a generated Hub API that checks CRAFT's one service token.
+
+Covers start, stop and status, the agent's wait and kernel, and ``owner``: which person a Hub
+token belongs to, including tokens that must name no one and a Hub that fails.
+"""
 
 import asyncio
 from uuid import UUID, uuid4
@@ -29,6 +33,10 @@ class GeneratedHub:
         self.calls: list[tuple[str, str]] = []
         self.sessions: list[dict] = []
         self.files: set[str] = set()
+        # token -> (Hub user name, scopes), as JupyterHub's GET /hub/api/user answers for it
+        self.tokens: dict[str, tuple[str, list[str]]] = {}
+        self.whoami_headers: list[str] = []
+        self.whoami_status = 200
 
     def app(self) -> Starlette:
         async def guarded(request: Request):
@@ -114,8 +122,21 @@ class GeneratedHub:
                 return Response(status_code=421)
             return Response(status_code=405)
 
+        async def whoami(request: Request):
+            presented = request.headers.get("authorization", "")
+            self.whoami_headers.append(presented)
+            if self.whoami_status != 200:
+                return Response(status_code=self.whoami_status)
+            if presented == "token " + TOKEN:
+                return JSONResponse({"kind": "service", "name": "craft"})
+            name, scopes = self.tokens.get(presented.removeprefix("token "), (None, []))
+            if name is None:
+                return Response(status_code=403)
+            return JSONResponse({"kind": "user", "name": name, "scopes": scopes})
+
         return Starlette(
             routes=[
+                Route("/hub/api/user", whoami, methods=["GET"]),
                 Route("/user/{name}/proxy/4040/mcp", control, methods=["GET"]),
                 Route("/hub/api/users/{name}", user, methods=["GET", "POST"]),
                 Route("/hub/api/users/{name}/server", server, methods=["POST", "DELETE"]),
@@ -207,9 +228,9 @@ def test_the_agent_waits_for_ready_and_opens_one_analysis_kernel(generated):
     person = caller()
     selected = hub.from_settings(person.settings)
     assert selected is not None
-    assert asyncio.run(hub.wait_ready(selected, owner(person), seconds=5, every=0))
-    assert asyncio.run(hub.kernel(selected, owner(person))) == KERNEL
-    assert asyncio.run(hub.kernel(selected, owner(person))) == KERNEL
+    assert asyncio.run(selected.wait_ready(owner(person), seconds=5, every=0))
+    assert asyncio.run(selected.kernel(owner(person))) == KERNEL
+    assert asyncio.run(selected.kernel(owner(person))) == KERNEL
     assert len(generated.sessions) == 1 and generated.files == {hub.NOTEBOOK}
 
 
@@ -217,11 +238,11 @@ def test_waiting_is_bounded(generated, monkeypatch):
     async def starting(*_):
         return "starting"
 
-    monkeypatch.setattr(hub, "state", starting)
+    monkeypatch.setattr(hub.Hub, "state", starting)
     person = caller()
     selected = hub.from_settings(person.settings)
     assert selected is not None
-    assert not asyncio.run(hub.wait_ready(selected, owner(person), seconds=0.05, every=0.01))
+    assert not asyncio.run(selected.wait_ready(owner(person), seconds=0.05, every=0.01))
 
 
 def test_actions_refuse_a_workspace_that_is_not_ready(generated):
@@ -253,3 +274,54 @@ def test_hub_settings_are_strict_and_name_no_value(values):
     with pytest.raises(SystemExit) as stopped:
         Settings.from_env({"CRAFT_APP_DB_PASSWORD": "generated-never-sent", **values})
     assert TOKEN not in str(stopped.value) and "bad setting: hub_" in str(stopped.value)
+
+
+def server_token(person: UUID) -> tuple[str, list[str]]:
+    """What the Hub answers for a person's server token (JUPYTERHUB_API_TOKEN)."""
+    return str(person), [f"access:servers!server={person}/", f"users:activity!user={person}"]
+
+
+def test_a_server_token_names_its_user_and_is_sent_only_as_itself(generated):
+    found: hub.JupyterHub | None = hub.from_settings(caller().settings)
+    assert found is not None
+    person = uuid4()
+    generated.tokens["generated0server0token0one"] = server_token(person)
+    assert asyncio.run(found.owner("generated0server0token0one")) == person
+    # Asked with the presented token alone: CRAFT's service token never vouches for it.
+    assert generated.whoami_headers == ["token generated0server0token0one"]
+
+
+def test_tokens_that_must_name_no_one(generated):
+    found = hub.from_settings(caller().settings)
+    assert found is not None
+    person = uuid4()
+    generated.tokens.update(
+        {
+            # A name that isn't a CRAFT user ID.
+            "generated0not0a0craft0user": ("someone", ["access:servers!server=someone/"]),
+            # A token the person made for something else: it can't reach their server.
+            "generated0narrow0token0000": (str(person), [f"read:users:name!user={person}"]),
+            # Another person's server scope under this person's name.
+            "generated0wrong0server0000": (str(person), [f"access:servers!server={uuid4()}/"]),
+        }
+    )
+    for token in generated.tokens:
+        assert asyncio.run(found.owner(token)) is None, token
+    assert asyncio.run(found.owner(TOKEN)) is None  # CRAFT's own service token
+    assert asyncio.run(found.owner("generated0unknown0token00")) is None
+
+
+def test_a_failing_hub_raises_without_the_token(generated):
+    found = hub.from_settings(caller().settings)
+    assert found is not None
+    generated.whoami_status = 502
+    with pytest.raises(httpx.HTTPStatusError) as failed:
+        asyncio.run(found.owner("generated0server0token0one"))
+    assert "generated0server0token0one" not in str(failed.value)
+
+
+def test_an_unreachable_hub_raises_without_the_token():
+    unreachable = hub.Hub("http://127.0.0.1:1", "http://127.0.0.1:1", TOKEN)
+    with pytest.raises(httpx.TransportError) as failed:
+        asyncio.run(unreachable.owner("generated0server0token0one"))
+    assert "generated0server0token0one" not in str(failed.value) + repr(unreachable)

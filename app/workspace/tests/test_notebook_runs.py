@@ -212,8 +212,8 @@ def test_on_the_cluster_the_service_runs_a_job_for_the_caller(context, workspace
         return "stopped"
 
     # A Job reads the person's volume itself, so their JupyterLab server may be stopped.
-    monkeypatch.setattr(hub, "state", stopped)
-    monkeypatch.setattr(hub, "kernel", None)  # never reached on the cluster
+    monkeypatch.setattr(hub.Hub, "state", stopped)
+    monkeypatch.setattr(hub.Hub, "kernel", None)  # never reached on the cluster
     cluster = notebook_jobs.Cluster("https://k8s", "craft", {})
     monkeypatch.setattr(notebook_jobs, "in_cluster", lambda: cluster)
     monkeypatch.setattr(notebook_jobs.JobRunner, "run", run)

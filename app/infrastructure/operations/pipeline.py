@@ -159,10 +159,13 @@ def checked_access(operation: Operation, caller: Caller) -> Caller:
         from app.infrastructure.errors import Forbidden
 
         raise Forbidden()
+    # A browser never attaches a Bearer or Hub token by itself (unlike cached Basic credentials),
+    # and can't send one cross-site without CORS allowing it, so those requests skip the check.
     if (
         caller.origin == "http"
         and http is not None
         and http.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and not http.headers.get("authorization", "").startswith(("Bearer ", "token "))
     ):
         if caller.settings is None or http.headers.get("origin") not in {
             o.strip() for o in caller.settings.allowed_origins.split(",")

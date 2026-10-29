@@ -14,7 +14,7 @@ from app.infrastructure.errors import Conflict, InvalidInput, NotFound
 from app.infrastructure.notebook_runs import NotebookRunner
 
 
-def _hub(caller) -> hub.Hub:
+def _hub(caller) -> hub.JupyterHub:
     found = hub.from_settings(caller.settings)
     if found is None or caller.user_id is None:
         raise NotFound()
@@ -23,7 +23,7 @@ def _hub(caller) -> hub.Hub:
 
 async def read_workspace(caller) -> dict[str, Any]:
     found = _hub(caller)
-    state = await hub.state(found, caller.user_id)
+    state = await found.state(caller.user_id)
     return {"state": state, "url": None if state == "stopped" else found.lab(caller.user_id)}
 
 
@@ -41,26 +41,26 @@ async def start_workspace(caller) -> dict[str, Any]:
     from starlette.concurrency import run_in_threadpool
 
     found = _hub(caller)
-    if await hub.state(found, caller.user_id) == "stopped":
-        await hub.start(found, caller.user_id)
+    if await found.state(caller.user_id) == "stopped":
+        await found.start(caller.user_id)
     linked = await run_in_threadpool(_identity, caller)
     if linked is not None:
         # Lets the person sign in to the Hub with craft-id under this name.
-        await hub.link(found, caller.user_id, *linked)
+        await found.link(caller.user_id, *linked)
     return await read_workspace(caller)
 
 
 async def stop_workspace(caller) -> dict[str, Any]:
-    await hub.stop(_hub(caller), caller.user_id)
+    await _hub(caller).stop(caller.user_id)
     return await read_workspace(caller)
 
 
 async def _target(caller, *, kernel: bool = False) -> workspaces.JupyterTarget:
     """The caller's own running server; a stopped one is a conflict, never started here."""
     found = _hub(caller)
-    if await hub.state(found, caller.user_id) != "ready":
+    if await found.state(caller.user_id) != "ready":
         raise Conflict()
-    selected = await hub.kernel(found, caller.user_id) if kernel else ""
+    selected = await found.kernel(caller.user_id) if kernel else ""
     return workspaces.JupyterTarget(found.server(caller.user_id), found.token, selected)
 
 

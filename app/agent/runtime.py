@@ -91,13 +91,13 @@ async def _workspace_for_caller(caller):
             "\nWorkspace tools are unavailable for this owner. Do not claim workspace access.",
             None,
         )
-    state = await hub.state(found, caller.user_id)
+    state = await found.state(caller.user_id)
     started = state != "ready"
     if state == "stopped":
         from app.workspace.handlers import start_workspace
 
         await start_workspace(caller)  # the operation, so the call log has the agent's start
-    if not await hub.wait_ready(found, caller.user_id, WORKSPACE_READY_SECONDS):
+    if not await found.wait_ready(caller.user_id, WORKSPACE_READY_SECONDS):
         return (
             None,
             "\nThe owner's workspace did not start in time; workspace tools are unavailable for "
@@ -107,7 +107,7 @@ async def _workspace_for_caller(caller):
     jupyter = JupyterTarget(
         found.server(caller.user_id),
         found.token,
-        await hub.kernel(found, caller.user_id),
+        await found.kernel(caller.user_id),
         _bridge_host(),
     )
     endpoint = WorkspaceEndpoint(

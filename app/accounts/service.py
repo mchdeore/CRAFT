@@ -471,17 +471,75 @@ def create_workspace_token(caller: Caller, request) -> dict:
     hours = default if request.hours is None else request.hours
     if hours > longest:
         raise InvalidInput(fields=[FieldError(path="$.hours", message=f"At most {longest}.")])
+    issued = _issue_workspace_token(sessions, caller.user_id, request.kind, request.label, hours)
+    if issued is None:
+        raise NotSignedIn()
+    return issued
+
+
+# A workspace started through JupyterHub swaps its own server's Hub token for one of these.
+HUB_TOKEN_LABEL = "jupyterhub"
+HUB_TOKEN_HOURS = 12
+
+
+async def workspace_token_from_hub(caller: Caller) -> dict:
+    """Issue a workspace token to the person whose server holds the presented Hub token.
+
+    The token comes in ``Authorization: token <Hub token>`` and is checked by the Hub itself
+    (``JupyterHub.owner``); it is never stored or logged. Any refusal is ``NotSignedIn``.
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    from app.infrastructure import hub
+    from app.infrastructure.operations.context import transport_request
+
+    request = transport_request.get()
+    header = request.headers.get("authorization", "") if request is not None else ""
+    presented = header.removeprefix("token ") if header.startswith("token ") else ""
+    found = hub.from_settings(caller.settings)
+    if found is None or caller.sessions is None or not hub.TOKEN.fullmatch(presented):
+        raise NotSignedIn()
+    user_id = await found.owner(presented)
+    if user_id is None:
+        raise NotSignedIn()
+    # The call log names the account the token is issued to.
+    context = current_call.get()
+    if context is not None:
+        context.caller = replace(context.caller, user_id=user_id)
+    issued = await run_in_threadpool(
+        _issue_workspace_token,
+        caller.sessions,
+        user_id,
+        "workspace",
+        HUB_TOKEN_LABEL,
+        HUB_TOKEN_HOURS,
+    )
+    if issued is None:
+        raise NotSignedIn()
+    return issued
+
+
+def _issue_workspace_token(sessions, user_id, kind: str, label: str, hours: int) -> dict | None:
+    """A new personal token of ``kind`` for an enabled account, shown once; None when the
+    account can't sign in."""
     at = access.now()
     raw = secrets.token_bytes(32)
     with unit_of_work(sessions) as session:
+        enabled = session.execute(
+            select(storage.users.c.id).where(
+                storage.users.c.id == user_id, storage.users.c.disabled_at.is_(None)
+            )
+        ).first()
+        if enabled is None:
+            return None
         row = (
             session.execute(
                 storage.workspace_tokens.insert()
                 .values(
-                    user_id=caller.user_id,
+                    user_id=user_id,
                     token_sha256=hashlib.sha256(raw).digest(),
-                    kind=request.kind,
-                    label=request.label,
+                    kind=kind,
+                    label=label,
                     created_at=at,
                     expires_at=at + timedelta(hours=hours),
                 )

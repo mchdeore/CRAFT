@@ -48,9 +48,9 @@ def generated_hub(monkeypatch, *, ready=True):
         reached.append(("start", caller.user_id))
 
     monkeypatch.setattr(workspace_handlers, "start_workspace", start_workspace)
-    monkeypatch.setattr(runtime.hub, "state", state)
-    monkeypatch.setattr(runtime.hub, "wait_ready", wait_ready)
-    monkeypatch.setattr(runtime.hub, "kernel", kernel)
+    monkeypatch.setattr(runtime.hub.Hub, "state", state)
+    monkeypatch.setattr(runtime.hub.Hub, "wait_ready", wait_ready)
+    monkeypatch.setattr(runtime.hub.Hub, "kernel", kernel)
     return reached
 
 

@@ -312,3 +312,180 @@ def test_a_workspace_token_cannot_ask_the_agent(account):
         "/api/agent/ask", json={"question": "Peak power"}, headers=bearer(token)
     )
     assert asked.status_code == 403 and asked.json()["code"] == "forbidden"
+
+
+# The swap: a workspace JupyterHub started trades its server's Hub token for a workspace token.
+SERVER_TOKEN = "generated0hub0server0token0a"
+NEW_SERVER_TOKEN = "generated0hub0server0token0b"
+
+
+class FakeHub:
+    """Stands in for JupyterHub's answer to "whose server holds this token?"."""
+
+    def __init__(self, owners, down=False):
+        self.owners, self.down, self.asked = owners, down, []
+
+    async def owner(self, token):
+        self.asked.append(token)
+        if self.down:
+            import httpx
+
+            raise httpx.ConnectError("hub unreachable")
+        return self.owners.get(token)
+
+
+@pytest.fixture
+def hub_says(monkeypatch):
+    from app.infrastructure import hub
+
+    def install(owners, **options):
+        fake = FakeHub(owners, **options)
+        monkeypatch.setattr(hub, "from_settings", lambda _: fake)
+        return fake
+
+    return install
+
+
+def swap(account, token, scheme="token "):
+    # No Origin header: a kernel isn't a browser.
+    headers = {"Authorization": scheme + token}
+    return account.python.post("/api/workspace-tokens/hub", headers=headers)
+
+
+def test_a_server_token_swaps_for_a_read_only_twelve_hour_token(account, hub_says, owner_engine):
+    from datetime import datetime
+
+    hub_says({SERVER_TOKEN: account.id})
+    swapped = swap(account, SERVER_TOKEN)
+    assert swapped.status_code == 200, swapped.text
+    issued = swapped.json()
+    assert issued["label"] == service.HUB_TOKEN_LABEL
+    lasts = datetime.fromisoformat(issued["expiresAt"]) - datetime.fromisoformat(
+        issued["createdAt"]
+    )
+    assert lasts == timedelta(hours=service.HUB_TOKEN_HOURS)
+    me = account.python.get("/api/me", headers=bearer(issued["token"]))
+    assert me.status_code == 200 and me.json()["id"] == str(account.id)
+    refused = [
+        account.python.get("/api/conversations", headers=bearer(issued["token"])),
+        account.python.post(
+            "/api/me/workspace-tokens", json={"label": "x"}, headers=bearer(issued["token"])
+        ),
+        account.python.put(
+            "/api/notes", json={"title": "x", "body": "y"}, headers=bearer(issued["token"])
+        ),
+    ]
+    assert [response.status_code for response in refused] == [403, 403, 403]
+    with owner_engine.connect() as connection:
+        logged = connection.execute(
+            select(call_log.c.user_id, call_log.c.outcome).where(
+                call_log.c.name == "accounts.workspace_token_from_hub",
+                call_log.c.user_id == account.id,
+            )
+        ).all()
+    assert [tuple(row) for row in logged] == [(account.id, "ok")]  # the audit names the account
+
+
+def test_the_swap_refuses_any_token_the_hub_does_not_vouch_for(account, hub_says, owner_engine):
+    stranger = uuid4()  # a Hub user with no CRAFT account
+    fake = hub_says({SERVER_TOKEN: account.id, "generated0stranger0token00": stranger})
+    statuses = [
+        swap(account, "generated0unknown0token000").status_code,
+        swap(account, "generated0stranger0token00").status_code,
+        swap(account, "short").status_code,
+        swap(account, SERVER_TOKEN + " extra").status_code,
+        swap(account, SERVER_TOKEN, scheme="Bearer ").status_code,
+        swap(account, SERVER_TOKEN, scheme="Token ").status_code,
+    ]
+    # Another scheme isn't a token at all, so the missing Origin refuses it first.
+    assert statuses == [401] * 5 + [403]
+    # Malformed tokens and other schemes are refused before anything is sent to the Hub.
+    assert fake.asked == ["generated0unknown0token000", "generated0stranger0token00"]
+    with owner_engine.connect() as connection:
+        made = connection.execute(
+            select(storage.workspace_tokens.c.id).where(
+                storage.workspace_tokens.c.user_id == stranger
+            )
+        ).all()
+    assert made == []
+
+
+def test_a_disabled_account_or_a_deployment_without_a_hub_gets_no_token(
+    account, hub_says, owner_engine, monkeypatch
+):
+    from app.infrastructure import hub
+
+    hub_says({SERVER_TOKEN: account.id})
+    with owner_engine.begin() as connection:
+        connection.execute(
+            update(storage.users)
+            .where(storage.users.c.id == account.id)
+            .values(disabled_at=access.now())
+        )
+    assert swap(account, SERVER_TOKEN).status_code == 401
+    monkeypatch.setattr(hub, "from_settings", lambda _: None)
+    assert swap(account, SERVER_TOKEN).status_code == 401
+
+
+def test_a_hub_that_is_down_is_an_internal_error(account, hub_says):
+    hub_says({}, down=True)
+    failed = swap(account, SERVER_TOKEN)
+    assert failed.status_code == 500 and failed.json()["code"] == "internal_error"
+    assert SERVER_TOKEN not in failed.text
+
+
+def test_after_a_restart_only_the_new_server_token_swaps(account, hub_says, owner_engine):
+    hub_says({SERVER_TOKEN: account.id})
+    first = swap(account, SERVER_TOKEN).json()
+    # The Hub revokes a server's token when the server stops; the new server has its own.
+    hub_says({NEW_SERVER_TOKEN: account.id})
+    assert swap(account, SERVER_TOKEN).status_code == 401
+    second = swap(account, NEW_SERVER_TOKEN).json()
+    assert second["token"] != first["token"]
+    # Each issued token still ends like any workspace token: revoked, or expired.
+    assert account.browser.delete(f"/api/me/workspace-tokens/{first['id']}").status_code == 204
+    assert account.python.get("/api/me", headers=bearer(first["token"])).status_code == 401
+    with owner_engine.begin() as connection:
+        connection.execute(
+            update(storage.workspace_tokens)
+            .where(storage.workspace_tokens.c.id == second["id"])
+            .values(expires_at=access.now() - timedelta(seconds=1))
+        )
+    assert account.python.get("/api/me", headers=bearer(second["token"])).status_code == 401
+
+
+def test_a_token_header_never_lets_a_foreign_page_write(account):
+    # A browser can't add these headers cross-site, and a cookie with one is anonymous anyway.
+    foreign = {"Origin": "https://elsewhere.example"}
+    for header in ({}, {"Authorization": "token " + SERVER_TOKEN}, bearer(SERVER_TOKEN)):
+        made = account.browser.post(
+            "/api/me/workspace-tokens", json={"label": "x"}, headers={**foreign, **header}
+        )
+        assert made.status_code in {401, 403}, header
+    # Cached Basic credentials are added by browsers, so they never skip the Origin check.
+    basic = {"Authorization": "Basic Z2VuZXJhdGVkOmdlbmVyYXRlZA=="}
+    assert account.python.post("/api/workspace-tokens/hub", headers=basic).status_code == 403
+    assert account.python.post("/api/workspace-tokens/hub").status_code == 403
+
+
+def test_no_token_reaches_a_log_an_error_body_or_the_call_log(
+    account, hub_says, owner_engine, caplog
+):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    hub_says({SERVER_TOKEN: account.id})
+    responses = [swap(account, SERVER_TOKEN), swap(account, NEW_SERVER_TOKEN)]
+    issued = responses[0].json()["token"]
+    responses.append(account.python.get("/api/me", headers=bearer(issued)))
+    hub_says({}, down=True)
+    responses.append(swap(account, SERVER_TOKEN))
+    secrets_ = [SERVER_TOKEN, NEW_SERVER_TOKEN, issued]
+    logged = "\n".join(repr(record.__dict__) for record in caplog.records)
+    bodies = "\n".join(response.text for response in responses[1:])
+    with owner_engine.connect() as connection:
+        rows = repr(
+            connection.execute(select(call_log).where(call_log.c.user_id == account.id)).all()
+        )
+    for secret in secrets_:
+        assert secret not in logged and secret not in bodies and secret not in rows
