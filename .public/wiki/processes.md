@@ -24,15 +24,15 @@ Backend refusal, failed startup, unsupported limits and incomplete cleanup retur
 
 ## Background jobs
 
-Background jobs live in PostgreSQL, run by [Procrastinate](https://procrastinate.readthedocs.io/) ([`app/infrastructure/queue.py`](https://github.com/mchdeore/CRAFT/blob/main/app/infrastructure/queue.py)). There is no separate queue service. Three queues each have their own worker, so a long job never holds up a person who is waiting:
+Background jobs live in PostgreSQL, run by [Procrastinate](https://procrastinate.readthedocs.io/) ([`app/infrastructure/queue.py`](https://github.com/mchdeore/CRAFT/blob/main/app/infrastructure/queue.py)). There is no separate queue service. Three queues keep a long job from holding up a person who is waiting:
 
-| Worker | Queue | Jobs at once | Automatic retries | Stop grace |
-|---|---|---|---|---|
-| `worker-agent` | `agent`: chat turns | 20 | None; a crash marks the run interrupted | 900 s |
-| `worker-interactive` | `interactive`: someone is waiting | 4 | 5 s, 30 s, 2 min | 120 s |
-| `worker-bulk` | `bulk`: long batch work | 1 | 1 min, 5 min, 30 min | 120 s |
+| Queue | Jobs | Automatic retries | Stop grace |
+|---|---|---|---|
+| `agent` | Chat turns | None; a crash marks the run interrupted | 900 s |
+| `interactive` | Someone is waiting, including notebook runs | 5 s, 30 s, 2 min | 120 s |
+| `bulk` | Long batch work | 1 min, 5 min, 30 min | 120 s |
 
-All three run the same image and command, `craft worker`. `CRAFT_WORKER_QUEUES` and `CRAFT_WORKER_CONCURRENCY` choose the queues and the number of jobs at once; on a laptop one worker can take all three queues. Each worker is one process; more capacity means more containers. Inside, async jobs run on one event loop and blocking jobs in threads.
+Every worker runs the same image and command, `craft worker`. `CRAFT_WORKER_QUEUES` chooses its queues and `CRAFT_WORKER_CONCURRENCY_AGENT`, `_INTERACTIVE` and `_BULK` the jobs at once per queue: 50 by default, at most 1000, until measured load says otherwise. Compose and the local cluster run one worker per queue, `worker-agent`, `worker-interactive` and `worker-bulk`. The chart's own defaults run two: one for `agent` and `bulk` inside the API's pod, and one for `interactive`, because that worker holds the account that creates notebook-run Jobs. Each worker is one process; more capacity means more workers. Inside, async jobs run on one event loop and blocking jobs in threads.
 
 - **Claiming:** a worker claims a job with `FOR UPDATE SKIP LOCKED`, so two workers never take the same job. `LISTEN`/`NOTIFY` wakes a worker as soon as a job arrives.
 - **Retries:** only transient failures are retried: timeouts, 408, 429, 5xx and connection errors. A `Retry-After` wins over the queue's wait. Kinds that change things or cost model money (chat turns, notebook runs) are never retried.
@@ -48,8 +48,8 @@ Signed-in users see and manage their own jobs; administrators see all of them:
 - `GET /api/jobs/{jobId}` reads one job: kind, queue, status, attempts and the last error class
 - `POST /api/jobs/{jobId}/retry` runs a failed, canceled or stopped job again as a new job
 - `POST /api/jobs/{jobId}/cancel` cancels a queued job or asks a running one to stop (`stopping`, then `stopped`)
-- `GET /health/queue` counts jobs per queue and state, with the oldest queued job's age and the dead (failed) count
+- `GET /health/queue` counts jobs per queue and state, with the oldest queued job's age, the dead (failed) count, and the last hour's wait and run percentiles and saturation
 
-There is no admin panel. The `job_overview` view gives one row per job for a database client; every state change is also a row in `procrastinate_events`. `craft worker --check` is the container health check: it passes while the worker has written a heartbeat in the last minute.
+There is no admin panel. The `job_overview` view gives one row per job for a database client; every state change is also a row in `procrastinate_events`. The `job_metrics` view holds each job's wait and run time, workers sample queue depth into `queue_samples` every 30 s, and `craft queues report --since 24h` prints wait and run percentiles and saturation per queue. `craft worker --check` is the container health check: it passes while the worker has written a heartbeat in the last minute.
 
 Related interfaces: [components](components.md), [runtime](runtime.md), [workspace](workspace.md) and [code layout](development.md).

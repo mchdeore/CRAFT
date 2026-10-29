@@ -178,7 +178,7 @@ Arrows name actual FK columns. `vectors` owner references, `facet_texts` source 
 
 | Component | Current authority | Planned relationship |
 |---|---|---|
-| Personal workspace | Trusted private user-to-service configuration | Stable `workspaces.owner_user_id → users.id`, unique owner and storage reference |
+| Personal workspace | A JupyterHub user named by the CRAFT user ID, with one volume, `claim-<user ID>` | Stable `workspaces.owner_user_id → users.id`, unique owner and storage reference |
 | Scripts, notebooks, Markdown skills and outputs | Owner's Jupyter Contents API and durable `USER_ROOT` volume | Remain workspace contents; optional identity/revision catalog when required |
 | Container, kernel and native bridge binding | Configured service and in-process runtime state | Workspace-owned runtime/lease when concurrent controllers require it |
 | Executable tools | Code operation registry | Reuse registry; store only necessary user/workspace grants or connector metadata |
