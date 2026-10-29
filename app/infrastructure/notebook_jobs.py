@@ -16,21 +16,20 @@ on the Docker sandbox.
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 
-from app.infrastructure.notebook_runs import TOTAL_SECONDS, RunError
+from app.infrastructure.notebook_runs import STEP_SECONDS, TOTAL_SECONDS, RunError
 
 logger = logging.getLogger("craft.workspace")
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 LABEL = "craft-notebook-run"
 POLL_SECONDS = 1.0
-STEP_SECONDS = 120  # prepare and collect, each, beside the run's own limit
 USER = 1000
 
 
@@ -40,7 +39,7 @@ class Cluster:
 
     base_url: str
     namespace: str
-    headers: dict[str, str]
+    headers: dict[str, str] = field(repr=False)  # the service account token
     verify: Any = True
     transport: httpx.AsyncBaseTransport | None = None  # tests
 
@@ -179,9 +178,9 @@ class JobRunner:
         name = f"notebook-run-{uuid4().hex[:12]}"
         body = manifest(name, self.image, self.owner, folder, notebook, output)
         async with self.cluster.http() as http:
-            created = await http.post(self.cluster.jobs(), json=body)
-            created.raise_for_status()
             try:
+                created = await http.post(self.cluster.jobs(), json=body)
+                created.raise_for_status()
                 while True:
                     found = await http.get(self.cluster.jobs(name))
                     found.raise_for_status()
@@ -198,6 +197,7 @@ class JobRunner:
                         raise RunError("run_failed")
                     await asyncio.sleep(POLL_SECONDS)
             finally:
+                # Also after a cancelled or lost create: deleting by name stops whatever exists.
                 await asyncio.shield(_delete(http, self.cluster, name))
 
 

@@ -139,12 +139,47 @@ def test_a_sandbox_run_that_fails_keeps_its_results_and_reports_a_fixed_code(mon
     asyncio.run(_sandbox_runner(monkeypatch, {}, code=3).run("", "nb.ipynb", "o.ipynb"))
 
 
-def test_a_sandbox_result_named_outside_the_folder_is_refused(monkeypatch):
+def test_a_sandbox_result_craft_cannot_write_is_skipped_and_the_rest_written(monkeypatch, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
     written = {}
-    runner = _sandbox_runner(monkeypatch, written, made={"../../escape.txt": b"x"})
-    with pytest.raises(RunError, match="^copy_failed$"):
+    made = {
+        "../../escape.txt": b"x",  # leaves the folder
+        "outputs/.cache/state": b"c",  # hidden: CRAFT never writes these
+        "outputs/table.csv": b"t",
+        "o.ipynb": b"{}",
+    }
+    runner = _sandbox_runner(monkeypatch, written, made=made)
+    asyncio.run(runner.run("work", "nb.ipynb", "o.ipynb"))
+    assert written == {"work/outputs/table.csv": b"t", "work/o.ipynb": b"{}"}
+    (line,) = [r for r in caplog.records if r.getMessage() == "notebook run skipped results"]
+    assert line.__dict__["fields"] == {"skipped": 2}  # a count, never the names
+
+
+def test_a_folder_over_the_limit_fails_before_anything_runs(monkeypatch):
+    written = {}
+    runner = _sandbox_runner(monkeypatch, written)
+
+    async def too_large(target, folder, limit):
+        raise ValueError("The notebook folder is too large")
+
+    monkeypatch.setattr(workspaces, "read_folder", too_large)
+    monkeypatch.setattr(notebook_sandbox, "Sandbox", None)  # never reached
+    with pytest.raises(RunError, match="^folder_too_large$"):
         asyncio.run(runner.run("work", "nb.ipynb", "o.ipynb"))
     assert written == {}
+
+
+def test_the_queued_job_outlasts_every_backend_limit():
+    from app.infrastructure.notebook_runs import JOB_SECONDS, TOTAL_SECONDS
+    from app.workspace.jobs import notebook_run
+
+    job = notebook_jobs.manifest("notebook-run-1", "image", uuid4(), "", "nb.ipynb", "o")
+    # The Job's deadline and the sandbox's run limit fire first, so a slow run is a run_timeout.
+    assert TOTAL_SECONDS < job["spec"]["activeDeadlineSeconds"] < JOB_SECONDS
+    queued = notebook_run.__dict__["__operation__"].job
+    assert queued is not None and queued.timeout == JOB_SECONDS
 
 
 def test_cancelling_a_sandbox_run_kills_its_container(monkeypatch):
@@ -166,12 +201,19 @@ def test_cancelling_a_sandbox_run_kills_its_container(monkeypatch):
 
 
 def test_on_the_cluster_the_service_runs_a_job_for_the_caller(context, workspace, monkeypatch):
-    _, files = workspace
+    from app.infrastructure import hub
+
     started = []
 
     async def run(self, folder, notebook, output):
         started.append((self.owner, self.image, folder, notebook, output))
 
+    async def stopped(found, user_id):
+        return "stopped"
+
+    # A Job reads the person's volume itself, so their JupyterLab server may be stopped.
+    monkeypatch.setattr(hub, "state", stopped)
+    monkeypatch.setattr(hub, "kernel", None)  # never reached on the cluster
     cluster = notebook_jobs.Cluster("https://k8s", "craft", {})
     monkeypatch.setattr(notebook_jobs, "in_cluster", lambda: cluster)
     monkeypatch.setattr(notebook_jobs.JobRunner, "run", run)
@@ -350,7 +392,9 @@ def test_a_cancelled_run_deletes_its_job_and_a_failed_cleanup_is_logged(monkeypa
     assert fields["name"].startswith("notebook-run-") and fields["error_type"] == "HTTPStatusError"
 
 
-def test_a_refused_job_raises_and_no_log_holds_the_account_token(monkeypatch, caplog):
+def test_a_refused_or_lost_create_still_deletes_by_name_and_no_log_holds_the_token(
+    monkeypatch, caplog
+):
     import logging
 
     import httpx
@@ -365,9 +409,27 @@ def test_a_refused_job_raises_and_no_log_holds_the_account_token(monkeypatch, ca
     headers = {"Authorization": "Bearer generated-service-account-token"}
     transport = httpx.MockTransport(handle)
     cluster = notebook_jobs.Cluster("https://k8s", "craft", headers, transport=transport)
+    assert "generated-service-account-token" not in repr(cluster)
     caplog.set_level(logging.DEBUG)
     with pytest.raises(httpx.HTTPStatusError) as raised:
         asyncio.run(notebook_jobs.JobRunner(cluster, "image", uuid4()).run("", "nb.ipynb", "o"))
-    assert requests == [("POST", "/apis/batch/v1/namespaces/craft/jobs")]  # nothing to delete
-    assert "generated-service-account-token" not in caplog.text
+    # Deleting by name after any create covers one the API stored before its answer was lost.
+    assert [method for method, _ in requests] == ["POST", "DELETE"]
+    assert requests[1][1].startswith("/apis/batch/v1/namespaces/craft/jobs/notebook-run-")
+    (cleanup,) = [r for r in caplog.records if r.getMessage() == "notebook run cleanup failed"]
+    assert cleanup.__dict__["fields"]["error_type"] == "HTTPStatusError"
+    # caplog.text leaves out each record's fields, so the whole record is searched.
+    assert not [r for r in caplog.records if "generated-service-account-token" in str(r.__dict__)]
     assert "generated-service-account-token" not in str(raised.value)
+
+    def lost(request):
+        requests.append((request.method, request.url.path))
+        if request.method == "POST":
+            raise httpx.ReadTimeout("no answer", request=request)
+        return httpx.Response(200, json={})
+
+    requests.clear()
+    cluster.transport = httpx.MockTransport(lost)
+    with pytest.raises(httpx.ReadTimeout):
+        asyncio.run(notebook_jobs.JobRunner(cluster, "image", uuid4()).run("", "nb.ipynb", "o"))
+    assert [method for method, _ in requests] == ["POST", "DELETE"]

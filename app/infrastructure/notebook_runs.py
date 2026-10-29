@@ -16,6 +16,10 @@ from typing import Protocol
 
 TOTAL_SECONDS = 15 * 60  # one run, start to finish
 CELL_SECONDS = 120  # one cell
+STEP_SECONDS = 120  # each step a backend adds around a run, such as moving results back
+# The queued job's own limit (app/workspace/jobs.py) is longer than a run and its steps, so a
+# backend's limit fires first and reports run_timeout.
+JOB_SECONDS = TOTAL_SECONDS + 2 * STEP_SECONDS + 60
 
 
 class RunError(RuntimeError):

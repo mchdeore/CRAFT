@@ -9,6 +9,7 @@ never touched.
 
 import asyncio
 import io
+import logging
 import tarfile
 import threading
 from dataclasses import dataclass, field
@@ -19,6 +20,8 @@ from uuid import uuid4
 
 from app.infrastructure import workspaces
 from app.infrastructure.notebook_runs import CELL_SECONDS, TOTAL_SECONDS, RunError
+
+logger = logging.getLogger("craft.workspace")
 
 FOLDER_LIMIT = 50 * 1024 * 1024
 HOME = "/home/workspace"
@@ -50,8 +53,15 @@ class SandboxRunner:
     image: str
 
     async def run(self, folder: str, notebook: str, output: str) -> None:
-        """Copy the folder in, run, and write new results beside the notebook."""
-        files = await workspaces.read_folder(self.target, folder, FOLDER_LIMIT)
+        """Copy the folder in, run, and write new results beside the notebook.
+
+        A result whose name CRAFT can't write (a hidden file such as ``outputs/.cache/x``) is
+        skipped and counted in the log; every other result is still written.
+        """
+        try:
+            files = await workspaces.read_folder(self.target, folder, FOLDER_LIMIT)
+        except ValueError:  # read_folder's one refusal: the folder is over FOLDER_LIMIT
+            raise RunError("folder_too_large") from None
         sandbox = Sandbox(self.image)
         try:
             code, made = await asyncio.to_thread(sandbox.run, files, notebook, output)
@@ -60,23 +70,36 @@ class SandboxRunner:
             sandbox.kill()
         stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         before = {_join(folder, key) for key in files}
+        skipped = 0
         for relative, content in sorted(made.items()):
             if relative.split("/", 1)[0] == "outputs" and files.get(relative) == content:
                 continue  # an output the notebook did not change
-            try:  # names come out of the container: checked like any request path
-                destination = workspaces.owned_name(_free(_join(folder, relative), before, stamp))
-            except ValueError:
-                raise RunError("copy_failed") from None
+            # Names come out of the container, so each is checked like a request path.
+            destination = _owned(_free(_join(folder, relative), before, stamp))
             # Never overwrite: an existing file keeps its content and the run's copy is renamed.
-            if await workspaces.exists(self.target, destination):
-                destination = _free(destination, {destination}, stamp + "-" + uuid4().hex[:6])
+            if destination and await workspaces.exists(self.target, destination):
+                renamed = _free(destination, {destination}, f"{stamp}-{uuid4().hex[:6]}")
+                destination = _owned(renamed)
+            if destination is None:
+                skipped += 1
+                continue
             await workspaces.write_bytes(self.target, destination, content)
+        if skipped:
+            logger.info("notebook run skipped results", extra={"fields": {"skipped": skipped}})
         if code not in (0, 3):  # 3: a cell raised; the executed copy shows the error
             raise RunError("run_failed")
 
 
 def _join(folder: str, name: str) -> str:
     return f"{folder}/{name}".lstrip("/")
+
+
+def _owned(name: str) -> str | None:
+    """``name`` if CRAFT may write it in the owner's workspace; None for a hidden or bad path."""
+    try:
+        return workspaces.owned_name(name)
+    except ValueError:
+        return None
 
 
 def _free(name: str, taken: set[str], stamp: str) -> str:
@@ -106,8 +129,6 @@ class Sandbox:
 
     def run(self, files: dict[str, bytes], notebook: str, output: str) -> tuple[int, dict]:
         """Execute ``notebook`` (relative to ``files``); returns its exit code and new files."""
-        if sum(len(content) for content in files.values()) > FOLDER_LIMIT:
-            raise RunError("folder_too_large")
         pinned = self.api().images.get(self.image).id  # the run uses this exact image
         # The run folder is its own memory-backed volume, owned by the runner and bounded:
         # Docker cannot copy files into a plain tmpfs of a container with a read-only root.
