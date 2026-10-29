@@ -1,6 +1,7 @@
 """One traffic row per request with body byte counts; never paths, queries, tokens or content."""
 
 import io
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -202,6 +203,14 @@ def rows_for(owner_engine, response) -> list[dict]:
         ]
 
 
+def settled_rows_for(owner_engine, response, seconds: float = 5.0) -> list[dict]:
+    """A live server writes the row after the response is sent, so the client can read first."""
+    deadline = time.monotonic() + seconds
+    while not (rows := rows_for(owner_engine, response)) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return rows
+
+
 def test_operations_record_their_name_and_caller(signed_in, owner_engine) -> None:
     secret = "SECRET-" + uuid4().hex
     me = signed_in.browser.get("/api/me")
@@ -313,7 +322,7 @@ def test_each_mcp_request_is_one_row_joined_to_its_calls(run_token) -> None:
     assert [response.status_code for response in responses] == [200, 200, 200]
     owner, trusted = run_token["owner"], run_token["trusted"]
     for response in responses:
-        [row] = rows_for(owner, response)
+        [row] = settled_rows_for(owner, response)
         assert (row["operation"], row["origin"], row["user_id"], row["status"]) == (
             "mcp",
             "mcp",
