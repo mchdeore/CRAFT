@@ -27,6 +27,7 @@ from app.infrastructure.requests import RequestIdMiddleware
 from app.jobs import handlers as job_handlers
 from app.library import handlers as library_handlers
 from app.notes import handlers as note_handlers
+from app.notifications import handlers as notification_handlers
 from app.skills import handlers as skill_handlers
 from app.summarize import handlers as summarize_handlers
 from app.tools import handlers as tool_handlers
@@ -97,6 +98,7 @@ def create_app(settings: Settings) -> FastAPI:
         agent_jobs,
         conversation_handlers,
         note_handlers,
+        notification_handlers,
         skill_handlers,
         tool_handlers,
         workspace_handlers,

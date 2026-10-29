@@ -7,7 +7,7 @@ from procrastinate.exceptions import JobAborted
 
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.operations import Job, operation
-from app.infrastructure.operations.jobs import current_job, should_abort
+from app.infrastructure.operations.jobs import current_job, report_progress, should_abort
 from app.infrastructure.queue import PermanentError, TransientError
 from app.infrastructure.shapes import Shape
 
@@ -55,3 +55,17 @@ def blocking(caller: Caller, request: Sleep) -> None:
 @operation("accounts.manage", job=Job(queue="interactive"))
 def managed(caller: Caller) -> None:
     """Only a manager's job may run."""
+
+
+class Count(Shape):
+    total: int
+    fail: bool = False
+
+
+@operation(SIGNED_IN, job=Job(queue="interactive", retry=False, notify=True))
+def counted(caller: Caller, request: Count) -> None:
+    """Report progress on every step, then finish, or fail when asked to."""
+    for done in range(1, request.total + 1):
+        report_progress(done, request.total, "Counting")
+    if request.fail:
+        raise PermanentError()

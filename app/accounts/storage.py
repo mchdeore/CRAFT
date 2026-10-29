@@ -211,3 +211,9 @@ def revoke_sessions(session, user, at, reason: str, only=None) -> None:
     if only is not None:
         statement = statement.where(auth_sessions.c.id == only)
     session.execute(statement.values(revoked_at=at, revoked_reason=reason))
+
+
+def prune_expired(session, at) -> None:
+    """Sign-in sessions past their absolute expiry and expired workspace tokens."""
+    session.execute(auth_sessions.delete().where(auth_sessions.c.expires_at < at))
+    session.execute(workspace_tokens.delete().where(workspace_tokens.c.expires_at < at))

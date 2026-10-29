@@ -6,6 +6,9 @@ from app.agent import storage
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import Conflict, NotFound
 
+# A run credential outlives any run (runtime.RUN_SECONDS); the run revokes it when it ends.
+TOKEN_SECONDS = 900 + 60
+
 
 def scope(caller):
     if caller.user_id is None or caller.sessions is None or caller.settings is None:
@@ -45,6 +48,7 @@ def start(caller, request, version):
                 request.run_id,
                 caller.settings.model_main,
                 version,
+                request.mode,
             )
     except IntegrityError as error:
         if getattr(error.orig, "sqlstate", None) == "23505":
@@ -53,6 +57,7 @@ def start(caller, request, version):
 
 
 def resume(caller, request):
+    """The paused run's state, the answer to its approval, and its mode."""
     from uuid import UUID
 
     from app.approvals.handlers import ApprovalRef, read_approval
@@ -78,19 +83,16 @@ def resume(caller, request):
             or not pending[0].get("interrupt")
         ):
             raise Conflict()
-        storage.resume(session, caller.user_id, request.run_id)
-    return state, {
-        "interrupts": [
-            {"id": pending[0]["interrupt"], "value": {"approved": approval.status == "approved"}}
-        ]
-    }
+        mode = storage.resume(session, caller.user_id, request.run_id)
+    answer = {"approved": approval.status == "approved"}
+    return state, {"interrupts": [{"id": pending[0]["interrupt"], "value": answer}]}, mode
 
 
 def finish(
     caller, request, status, state, *, tool_calls=None, active_seconds=None, end_reason=None
 ):
     with unit_of_work(scope(caller)) as session:
-        storage.finish(
+        mode = storage.finish(
             session,
             caller.user_id,
             request.run_id,
@@ -101,6 +103,15 @@ def finish(
             active_seconds=active_seconds,
             end_reason=end_reason,
         )
+        if mode == "task" and status != "cancelled":
+            _notify(session, caller.user_id, request.run_id, status)
+
+
+def _notify(session, user, run, status) -> None:
+    """A task-mode run tells its owner, who is likely away, that it ended or waits."""
+    from app.notifications.handlers import notify
+
+    notify(session, user, "run_waiting" if status == "paused" else "run_done", "run", str(run))
 
 
 def issue_token(caller, identifier):
@@ -125,7 +136,7 @@ def issue_token(caller, identifier):
             caller.user_id,
             identifier,
             hashlib.sha256(raw).digest(),
-            datetime.now(UTC) + timedelta(seconds=120),
+            datetime.now(UTC) + timedelta(seconds=TOKEN_SECONDS),
             context,
         )
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
@@ -248,7 +259,9 @@ def append_event(sessions, run, segment, event) -> None:
 
 def interrupt(sessions, run, segment) -> None:
     with unit_of_work(sessions) as session:
-        storage.interrupt(session, run)
+        ended = storage.interrupt(session, run)
+        if ended is not None and ended.mode == "task":
+            _notify(session, ended.started_by, run, "failed")
         storage.append_event(session, run, segment, INTERRUPTED)
 
 

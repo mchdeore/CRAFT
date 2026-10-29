@@ -9,7 +9,7 @@ export interface Routes {
   "GET /api/tools": { response: T.ToolInfo[] };
   "GET /api/tools/capabilities": { response: T.CapabilityCatalog };
   "GET /api/library/documents": { query: T.DocumentList; response: T.DocumentCatalog };
-  "POST /api/agent/runs": { body: RunAgentInput & { skill?: T.SkillVersionRef | null }; stream: AGUIEvent };
+  "POST /api/agent/runs": { body: RunAgentInput & { skill?: T.SkillVersionRef | null; mode?: T.RunMode }; stream: AGUIEvent };
   "GET /api/agent/runs/:run/events": { query: { after?: number }; stream: AGUIEvent };
   "POST /api/agent/runs/:run/cancel": { response: void };
   "POST /api/cube/candidates": { body: T.PrepareValues; response: T.Candidates };
@@ -23,6 +23,8 @@ export interface Routes {
   "GET /api/jobs/:jobId": { response: T.Job };
   "POST /api/jobs/:jobId/retry": { response: T.Job };
   "POST /api/jobs/:jobId/cancel": { response: T.Job };
+  "GET /api/notifications": { query: T.NotificationPageRequest; response: T.Notification[] };
+  "POST /api/notifications/:id/read": { response: T.Notification };
   "POST /api/library/search": { body: T.LibrarySearch; response: T.LibraryHits };
   "GET /api/library/documents/:item": { query: { version?: number }; response: T.LibraryDocument };
   "GET /api/library/documents/:item/chunks": { query: { version: number; fromBlock: number; toBlock: number }; response: T.ChunkPage };

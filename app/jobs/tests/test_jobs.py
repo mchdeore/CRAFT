@@ -1,5 +1,6 @@
 """The PostgreSQL job queue with test-only job operations: no model calls."""
 
+import asyncio
 import os
 import signal
 import subprocess
@@ -9,13 +10,16 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from procrastinate.periodic import PeriodicDeferrer
+from sqlalchemy import select, text
 
 from app.infrastructure import queue
-from app.infrastructure.access import Caller
+from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.database.engine import make_engine, make_sessions
+from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import Forbidden
-from app.infrastructure.operations.jobs import enqueue
+from app.infrastructure.operations import Job, operation
+from app.infrastructure.operations.jobs import current_job, enqueue
 from app.infrastructure.paths import ROOT
 from app.tests.support import jobs as test_jobs
 from app.tests.support.cube import cube_source as cube_source
@@ -197,3 +201,118 @@ def test_a_killed_workers_job_is_retried_and_finishes(settings, jobs, monkeypatc
     with queue.worker_thread(settings, ["interactive"]):
         done = jobs.wait(job, {"finished", "failed"}, seconds=30)
     assert (done.state, done.attempts, done.error) == ("finished", 2, "WorkerLost")
+
+
+TICKS: list[int] = []
+TICK = {"seconds": 0.0}
+
+
+@operation(PUBLIC, job=Job(queue="bulk", every="* * * * *"))
+async def tick(caller: Caller) -> None:
+    """A scheduled job that records each run."""
+    TICKS.append(current_job.get().id)
+    await asyncio.sleep(TICK["seconds"])
+
+
+@pytest.fixture
+def person(owner_engine):
+    users = metadata.tables["users"]
+    with owner_engine.begin() as connection:
+        user = connection.execute(
+            users.insert()
+            .values(username="jobs_" + uuid4().hex, display_name="Synthetic job account")
+            .returning(users.c.id)
+        ).scalar_one()
+    yield user
+    notifications = metadata.tables["notifications"]
+    with owner_engine.begin() as connection:
+        connection.execute(notifications.delete().where(notifications.c.user_id == user))
+        connection.execute(users.delete().where(users.c.id == user))
+
+
+def test_a_scheduled_job_is_public_with_no_input():
+    def signed_in(caller: Caller) -> None:
+        """Not a scheduled job."""
+
+    with pytest.raises(ValueError):
+        operation(SIGNED_IN, job=Job(queue="bulk", every="* * * * *"))(signed_in)
+    with pytest.raises(ValueError):
+        operation(PUBLIC, job=Job(queue="bulk", every="often"))(signed_in)
+
+
+def test_two_workers_queue_a_scheduled_job_once_per_tick(settings, jobs, owner_engine):
+    name = tick.__operation__.name
+    apps = [queue.make_app(settings, jobs.sessions) for _ in range(2)]
+    # A tick no earlier run of this test has used.
+    at = 10**10 + uuid4().int % 10**9
+
+    async def each_worker_defers(timestamp):
+        for app in apps:
+            async with app.open_async():
+                periodic = app.periodic_registry.periodic_tasks[(name, "")]
+                await PeriodicDeferrer(app.periodic_registry).defer_jobs([(periodic, timestamp)])
+
+    def waiting():
+        with owner_engine.connect() as connection:
+            return list(
+                connection.execute(
+                    text(
+                        "select id from procrastinate_jobs"
+                        " where task_name = :name and status = 'todo'"
+                    ),
+                    {"name": name},
+                ).scalars()
+            )
+
+    asyncio.run(each_worker_defers(at))
+    queued = waiting()
+    assert len(queued) == 1
+    # The next tick finds that job still waiting and queues no second one.
+    asyncio.run(each_worker_defers(at + 60))
+    assert waiting() == queued
+    jobs.cancel(queued[0])
+
+
+def test_a_tick_is_skipped_while_the_previous_run_goes(settings, jobs, monkeypatch):
+    from app.infrastructure.operations.jobs import SCHEDULED
+    from app.jobs import storage
+
+    monkeypatch.setitem(TICK, "seconds", 1.0)
+    TICKS.clear()
+
+    def queue_tick():
+        with jobs.sessions.begin() as session:
+            args = SCHEDULED | {"timestamp": 0}
+            return storage.defer(session, "bulk", tick.__operation__.name, args, None)
+
+    with queue.worker_thread(settings, ["bulk"], concurrency=2):
+        first = queue_tick()
+        jobs.wait(first, {"started"})
+        second = queue_tick()
+        jobs.wait(second, {"finished"})
+        assert jobs.row(first).state == "started"
+        jobs.wait(first, {"finished"})
+    assert TICKS == [first]
+
+
+def test_a_job_reports_progress_and_notifies_its_requester(settings, jobs, person):
+    from app.jobs.handlers import JobProgress, JobRef, read_job
+
+    with queue.worker_thread(settings, ["interactive"]):
+        done = jobs.defer(test_jobs.counted, requested_by=person, total=5)
+        failed = jobs.defer(test_jobs.counted, requested_by=person, total=2, fail=True)
+        jobs.wait(done, {"finished"})
+        jobs.wait(failed, {"failed"})
+    caller = Caller(user_id=person, roles=frozenset({"member"}), sessions=jobs.sessions)
+    progress = read_job(caller, JobRef(job_id=str(done))).progress
+    assert progress == JobProgress(done=5, total=5, note="Counting")
+    notifications = metadata.tables["notifications"]
+    with jobs.sessions.begin() as session:
+        written = set(
+            session.execute(
+                select(
+                    notifications.c.kind, notifications.c.ref_kind, notifications.c.ref_id
+                ).where(notifications.c.user_id == person)
+            ).tuples()
+        )
+    assert written == {("job_done", "job", str(done)), ("job_failed", "job", str(failed))}

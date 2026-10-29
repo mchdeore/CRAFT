@@ -46,8 +46,17 @@ export interface CatalogDocument { item: string; title: string; version: number;
 export interface DocumentCatalog { documents: CatalogDocument[]; truncated: boolean }
 export type JobState = "queued" | "scheduled" | "started" | "stopping" | "finished" | "failed" | "canceled" | "stopped";
 export interface JobPageRequest { status?: JobState | null; offset?: number; limit?: number }
-export interface Job { jobId: string; kind: string; queue: string; status: JobState; attempts: number; requestedBy: string | null; enqueuedAt: string | null; startedAt: string | null; finishedAt: string | null; error: string | null }
+/** How far a running job got; `note` is a short fixed phrase. */
+export interface JobProgress { done: number; total: number; note: string | null }
+/** `progress` comes only from GET /api/jobs/:jobId, once the job has reported any. */
+export interface Job { jobId: string; kind: string; queue: string; status: JobState; attempts: number; requestedBy: string | null; enqueuedAt: string | null; startedAt: string | null; finishedAt: string | null; error: string | null; progress?: JobProgress | null }
 export interface JobPage { jobs: Job[]; nextOffset: number | null }
+/** `task`: up to 60 tool calls and 15 minutes, one running at a time per person; it notifies when it ends or waits for approval. */
+export type RunMode = "chat" | "task";
+export type NotificationKind = "job_done" | "job_failed" | "run_done" | "run_waiting";
+export interface NotificationPageRequest { unread?: boolean; limit?: number }
+/** `refKind` and `refId` name a job (GET /api/jobs/:jobId) or a run. Clients poll; there is no push. */
+export interface Notification { id: Id; kind: NotificationKind; refKind: "job" | "run"; refId: string; createdAt: string; readAt: string | null }
 export interface QueueCounts {
   queue: string;
   queued: number;

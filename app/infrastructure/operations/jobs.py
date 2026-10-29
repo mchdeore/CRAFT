@@ -8,7 +8,7 @@ as a child of the call that queued it, with the same request ID.
 import asyncio
 import inspect
 from contextvars import ContextVar
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +26,13 @@ class Queued(Shape):
     job_id: str
 
 
+# A scheduled job's arguments: no input, the system as the caller, no parent call.
+SCHEDULED = {
+    "input": None,
+    "caller": {"user": None, "roles": [], "auth_session": None, "origin": "python"},
+    "parent": None,
+}
+
 current_job: ContextVar[Any] = ContextVar("current_job", default=None)
 
 
@@ -33,6 +40,26 @@ def should_abort() -> bool:
     """Blocking jobs check this between steps; async jobs are cancelled instead."""
     job = current_job.get()
     return job is not None and job.should_abort()
+
+
+PROGRESS_SECONDS = 1.0
+
+
+def report_progress(done: int, total: int, note: str | None = None) -> None:
+    """From inside a job: `done` of `total` steps. Written at most once a second, and always
+    on the last step. note is a short fixed phrase from code, never content."""
+    job = current_job.get()
+    if job is None:
+        raise RuntimeError("Progress is reported from inside a job")
+    if not 0 <= done <= total or (note is not None and len(note) > 80):
+        raise ValueError("Invalid progress")
+    now = monotonic()
+    if done < total and now - job.progress_at[0] < PROGRESS_SECONDS:
+        return
+    job.progress_at[0] = now
+    from app.jobs.handlers import save_progress
+
+    save_progress(job.sessions, job.id, done, total, note)
 
 
 def enqueue(session: Any, caller: Caller, operation: Any, request: Any = None) -> int:
@@ -162,4 +189,7 @@ def register(declared: Operation) -> None:
             if interrupted
             else None
         ),
+        every=job.every,
+        every_args=SCHEDULED,
+        notify=job.notify,
     )

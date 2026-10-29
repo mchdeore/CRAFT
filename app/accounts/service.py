@@ -490,3 +490,7 @@ def revoke_workspace_token(caller: Caller, token_id) -> None:
         ).first()
     if found is None:
         raise NotFound()
+
+
+def prune_expired(session) -> None:
+    storage.prune_expired(session, access.now())
