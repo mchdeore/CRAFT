@@ -377,7 +377,6 @@ Every operation below is declared with `@operation` ([Backend conventions](devel
 | `library.explore` | `POST /api/library/explore` | `explore` | `NONE` |
 | `library.check_citation` | `POST /api/library/citations/check` | `check_citation` | `NONE` |
 | `library.compare_versions` | `GET /api/library/documents/:item/compare` | `compare_versions` | `NONE` |
-| `library.relations` | `GET /api/library/relations` | `relations` | `NONE` |
 | `library.preview` | `GET /api/library/documents/:item/preview` | | `NONE` |
 | `library.download` | `GET /api/library/documents/:item/download` | | `NONE` |
 | `cube.list_parameters` | `GET /api/cube/parameters` | `list_parameters` | `NONE` |
@@ -395,66 +394,11 @@ The API contract defines the request and response forms. Logs record handles, sc
 
 ## Seed data
 
-`scripts/seed` loads the frozen set into an empty database and provider folder, then applies newer migrations. It makes no model call. The set is private and not in the repository: a database dump, the provider files, the name of the embedding model its vectors came from and a manifest. `CRAFT_MODEL_EMBEDDING` must match that model.
+`scripts/seed` loads the frozen set into an empty database and provider folder, then applies newer migrations. It makes no model call. The set is private and not in the repository: a database dump, the provider files and the name of the embedding model its vectors came from. `CRAFT_MODEL_EMBEDDING` must match that model.
 
-The manifest lists each file's SHA-256, the migration the dump was taken at, the embedding model and width, the expected row count of every dataset table and the tag sets. `scripts/seed` checks the files before restoring and the counts and tags after. `scripts/seed verify` compares an already seeded database with the manifest and changes nothing.
-
-The set holds data only: no call log, no sessions or workspace tokens, and no passwords. Its three accounts, `analyst`, `restricted` and `admin`, keep their roles and mission grants so the data can be seen at each access level. Give one a password with `craft id users reset-password <username>` before signing in.
-
-The frozen set has 12 simulated missions in four families of three, 129 source items (3 of them deleted) in every allowed format across silos and stages, the cube records, header synonyms and seeded values, and a ground-truth file. It includes version pairs, renamed copies, moved and deleted documents, mixed units, English and French headers, unknown values and values whose sources are withdrawn. Every mission, document and value is labelled simulated. No name, value or document number comes from a real source.
+The frozen set has 12 simulated missions in four families of three, 125 source items in every allowed format across silos and stages, the cube records, header synonyms and seeded values, and a ground-truth file. It includes version pairs, renamed copies, moved and deleted documents, mixed units, English and French headers, unknown values and values whose sources are withdrawn. Every mission, document and value is labelled simulated. No name, value or document number comes from a real source.
 
 The ground-truth file, `<provider root>/.provider/ground-truth.json`, lists what the generator planted: 48 questions with the citation handles that answer them, the mission families, the version changes and the aliases. [Retrieval](documents.md#retrieval)'s evaluation reads it.
-
-## cube-v1 at a glance
-
-`cube-v1` is the proof-of-concept datacube. The set restored today, `cube-v1.1`, holds the same dataset rows as the first freeze, taken at migration 0027 without credentials or the call log. Every dataset table hashed the same before and after.
-
-| Record | Rows |
-|---|---|
-| Missions | 12 |
-| Source items | 129 |
-| Document versions | 142 |
-| Chunks | 251 |
-| Version differences | 27 |
-| Facet texts | 50 |
-| Vectors | 443: 251 `chunk-v1`, 142 `doc-v1`, 50 `facet-v1` |
-| Cube values | 120 |
-| Elements | 36 |
-| Parameters | 6, with 15 unit conversions and 12 header synonyms |
-| Mission aliases | 12 |
-| Mission grants | 14 |
-
-| File | SHA-256 starts with |
-|---|---|
-| Database dump | `682fd6ff1e2e` |
-| Provider files | `38d32cc97ad6` |
-| Embedding model name | `6223b6bc9726` |
-
-### Tag registry
-
-Every tag is a key that already exists in a table or a check constraint. There is no separate tag table. Tags are never embedded.
-
-| Tag | Comes from | Allowed values | Rule |
-|---|---|---|---|
-| Mission | The provider path; `missions` | `msn-sim-01` to `msn-sim-12`; other names through `mission_aliases` | Keys are stable; other names map through aliases |
-| Silo | The provider path; `silos` | `requirements`, `quality`, `launch`, `engineering`, `reviews`, `budget` | A fixed set of six keys |
-| Stage | The provider path; `stages` | `st1-concept` to `st7-closure` ([Missions, silos and stages](datacube.md#missions-silos-and-stages)) | A stage key never changes meaning |
-| Facet | A check constraint on `facet_texts` | `purpose`, `design`, `operations`, `program`, `cost_and_risk` | New values need a migration |
-| Simulated | The provider; a column on items, missions and values | `true` in every record of the set | Every mission, document and value carries it |
-| Classification | The provider; a check constraint | `unclassified`, `protected-a`, `protected-b`; the set uses `unclassified` | Copied from the provider to each document |
-
-### Document relations
-
-The view `document_relations` names the relations the frozen rows already hold. It adds no data and calls no model.
-
-| Relation | From | To | Rows in the set |
-|---|---|---|---|
-| `version_of` | A document version | Its document | 142 |
-| `cited_by_value` | A document version | The cube value that cites it | 120 |
-| `facet_source` | A document | A facet text that names it as a source | 117 |
-| `same_mission` | A document | Its mission | 127 |
-
-`library.relations` returns one item's neighbourhood, or every document of a mission, as a graph of nodes and edges. Its shape is the `Graph` type in the [contract](https://github.com/mchdeore/CRAFT/blob/main/app/contract/types.ts). A document appears only if the caller may read it, a value only if their grants reach its mission and silo (an admin's too, as for every cube read), and a facet text only if every one of its sources is readable. Similar documents are not relations; [Similar missions](datacube.md#similar-missions) finds them by their vectors.
 
 ## Document summary and owned inspection
 

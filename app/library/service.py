@@ -851,6 +851,10 @@ def export_revision(caller: Caller, request) -> Response:
     )
 
 
+# The view's target kinds besides a version's own document; each becomes a node of that kind.
+KINDS = ("value", "facet", "mission")
+
+
 def relations(caller: Caller, request):
     """One item's neighbourhood, or a mission's documents, from the document_relations view.
 
@@ -922,6 +926,3 @@ def relations(caller: Caller, request):
         edges=list(edges.values()),
         groups=[],
     )
-
-
-KINDS = ("value", "facet", "mission")

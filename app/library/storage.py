@@ -472,6 +472,7 @@ def relation_values(session: Session, caller: Caller, identifiers):
 
 
 def relation_facets(session: Session, identifiers):
+    """Facet texts by ID, with their facet key and the items they name as sources."""
     query = select(m.facet_texts.c.id, m.facet_texts.c.facet, m.facet_texts.c.sources).where(
         m.facet_texts.c.id.in_([UUID(value) for value in identifiers])
     )

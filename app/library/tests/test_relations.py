@@ -5,10 +5,13 @@ from uuid import uuid4
 
 import msgspec
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import InvalidInput, NotFound, NotSignedIn
+from app.infrastructure.operations.storage import call_log
 from app.library.handlers import Graph, RelationsRequest, relations
 from app.tests.support import rows
 from app.tests.support.cube import cube_source as cube_source
@@ -94,3 +97,88 @@ def test_relations_need_a_signed_in_caller_and_an_item_or_mission(cube_source):
         relations(cube_source["caller"], RelationsRequest())
     with pytest.raises(msgspec.ValidationError):
         msgspec.convert({"item": "not-an-item"}, RelationsRequest)
+
+
+def test_an_unknown_item_is_not_found_and_an_unknown_mission_is_empty(cube_source):
+    caller = cube_source["caller"]
+    with pytest.raises(NotFound):
+        relations(caller, RelationsRequest(item="itm_ffffffffffff"))
+    assert relations(caller, RelationsRequest(mission="msn-none")) == Graph(
+        nodes=[], edges=[], groups=[]
+    )
+
+
+@pytest.fixture
+def silo_member(cube_source):
+    """A member whose only grant is one silo of the synthetic mission; the silo is set per test."""
+    users, roles = m.metadata.tables["users"], m.metadata.tables["user_roles"]
+    with cube_source["owner"].begin() as connection:
+        user = connection.execute(
+            users.insert()
+            .values(username="silo_" + uuid4().hex, display_name="Silo member")
+            .returning(users.c.id)
+        ).scalar_one()
+        connection.execute(roles.insert().values(user_id=user, role="member"))
+
+    def grant(silo: str):
+        with cube_source["owner"].begin() as connection:
+            connection.execute(m.mission_grants.delete().where(m.mission_grants.c.user_id == user))
+            connection.execute(
+                m.mission_grants.insert().values(
+                    user_id=user, mission_key=cube_source["mission"], silo=silo
+                )
+            )
+        return replace(cube_source["caller"], user_id=user)
+
+    yield grant
+    with cube_source["owner"].begin() as connection:
+        connection.execute(m.mission_grants.delete().where(m.mission_grants.c.user_id == user))
+        connection.execute(roles.delete().where(roles.c.user_id == user))
+        connection.execute(users.delete().where(users.c.id == user))
+
+
+def test_a_silo_grant_shows_only_that_silos_documents_and_values(cube_source, silo_member):
+    item, mission = cube_source["item"], cube_source["mission"]
+    engineering = cube_source["add"]()
+    budget = cube_source["add"]()
+    with cube_source["owner"].begin() as connection:
+        connection.execute(
+            m.cube_values.update().where(m.cube_values.c.id == budget).values(silo="budget")
+        )
+
+    outsider = silo_member("budget")
+    with pytest.raises(NotFound):
+        relations(outsider, RelationsRequest(item=item))
+    assert relations(outsider, RelationsRequest(mission=mission)).nodes == []
+
+    insider = silo_member("engineering")
+    graph = relations(insider, RelationsRequest(item=item))
+    values = {node.id for node in graph.nodes if node.kind == "value"}
+    assert values == {f"value:{engineering}"}
+    assert (f"{item}@1", "cited_by_value", f"value:{budget}") not in edges(graph)
+
+
+def test_the_route_checks_access_and_logs_the_call(cube_source):
+    item = cube_source["item"]
+    with TestClient(cube_source["app"], base_url="https://testserver") as http:
+        assert http.get("/api/library/relations", params={"item": item}).status_code == 401
+        assert cube_source["sign_in"](http).status_code == 200
+        response = http.get("/api/library/relations", params={"item": item})
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == {"nodes", "edges", "groups"}
+        assert {node["id"] for node in body["nodes"]} >= {item, f"{item}@1"}
+        assert http.get("/api/library/relations").status_code == 400
+        assert http.get("/api/library/relations", params={"item": "x"}).status_code == 400
+        missing = {"item": "itm_ffffffffffff"}
+        assert http.get("/api/library/relations", params=missing).status_code == 404
+    with cube_source["owner"].begin() as connection:
+        outcomes = connection.execute(
+            select(call_log.c.outcome, call_log.c.error_code)
+            .where(
+                call_log.c.name == "library.relations",
+                call_log.c.user_id == cube_source["caller"].user_id,
+            )
+            .order_by(call_log.c.id)
+        ).all()
+    assert [outcome for outcome, _ in outcomes] == ["ok", "error", "error", "error"]

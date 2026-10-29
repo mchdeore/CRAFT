@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Load the frozen dataset (the library index and the datacube as of 2026-10-21) into an empty
 # database and provider folder. No model calls: the data is restored, never rebuilt.
-#   scripts/seed                restore .local/seed/cube-v1.1 into the compose db, then apply newer migrations
-#   scripts/seed cluster        the same into the database on 127.0.0.1:$CRAFT_DATABASE_PORT, such as the
-#                               local cluster's through kubectl port-forward (deploy/README.md); needs psql
+#   scripts/seed                   restore .local/seed/cube-v1.1 into the compose db, then apply newer migrations
+#   scripts/seed cluster           the same into the database on 127.0.0.1:$CRAFT_DATABASE_PORT, such as the
+#                                  local cluster's through kubectl port-forward (deploy/README.md); needs psql
 #   scripts/seed verify [cluster]  compare an already seeded database with the set's manifest; changes nothing
-# The frozen set is private (never committed): craft_dev.dump, provider.tgz, embedding and manifest.json
-# (file SHA-256s, row counts per dataset table, tag sets; read with jq). CRAFT_SEED picks another set.
+# The frozen set is private (never committed): craft_dev.dump, provider.tgz, embedding and manifest.json.
+# The manifest holds each file's SHA-256, every dataset table's row count, the tables that must be
+# empty (call log, sessions, tokens, credentials) and the tag values; app/seed/frozen.py checks the
+# files before a restore and the database after. verify leaves out the tables that must start
+# empty, since the call log and credentials grow with use. CRAFT_SEED picks another set (one without a
+# manifest, such as cube-v1, restores unchecked). The set's accounts have no passwords: give one
+# with `craft id users reset-password <username>`.
 # To start over: docker compose down -v, remove the provider folder, run this again.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -25,8 +30,17 @@ main=$(git rev-parse --path-format=absolute --git-common-dir)/..
 SEED=${CRAFT_SEED:-$main/.local/seed/cube-v1.1}
 DATABASE=${CRAFT_DATABASE_NAME:-craft_dev}
 PROVIDER=${CRAFT_PROVIDER_ROOT:-.local/runtime/provider}
+# Python reaches the database the way migrations do: as craft_owner, on the published port.
+craft_python() { CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_NAME=$DATABASE uv run -q "$@"; }
+checked=false
+[ -f "$SEED/manifest.json" ] && checked=true
 
-MANIFEST=$SEED/manifest.json
+if [ "$action" = verify ]; then
+  $checked || { echo "No manifest.json in $SEED to verify against" >&2; exit 1; }
+  echo "Comparing $DATABASE with $SEED/manifest.json"
+  craft_python python -m app.seed.frozen verify "$SEED"
+  exit
+fi
 
 [ -f "$SEED/craft_dev.dump" ] && [ -f "$SEED/provider.tgz" ] \
   || { echo "Missing the frozen set: put craft_dev.dump and provider.tgz in $SEED" >&2; exit 1; }
@@ -34,68 +48,33 @@ if [ -f "$SEED/embedding" ] && [ "$(cat "$SEED/embedding")" != "${CRAFT_MODEL_EM
   echo "The frozen set's vectors come from $(cat "$SEED/embedding"); set CRAFT_MODEL_EMBEDDING to match" >&2
   exit 1
 fi
-[ -f "$MANIFEST" ] || echo "No manifest.json in $SEED: checksums and counts are not checked" >&2
+if $checked; then
+  craft_python python -m app.seed.frozen files "$SEED"
+else
+  echo "No manifest.json in $SEED: its files and rows are not checked" >&2
+fi
+if [ -n "$(ls -A "$PROVIDER" 2>/dev/null)" ]; then
+  echo "$PROVIDER is not empty; remove it first" >&2; exit 1
+fi
 
 if [ "$mode" = cluster ]; then
   export PGHOST=127.0.0.1 PGPORT=${CRAFT_DATABASE_PORT:-5432} PGPASSWORD=$CRAFT_DB_ADMIN_PASSWORD
   admin() { "$@"; }
 else
-  [ "$action" = verify ] || docker compose up -d --wait db >/dev/null
+  docker compose up -d --wait db >/dev/null
   admin() { docker compose exec -T db "$@"; }
 fi
 sql() { admin psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -Atc "$1"; }
-
-# Each manifest count and tag set against the database; prints them all, fails on any difference.
-check_rows() {
-  [ -f "$MANIFEST" ] || return 0
-  local differ=0 table expected actual family query
-  while IFS=$'\t' read -r table expected; do
-    actual=$(sql "select count(*) from public.\"$table\"")
-    if [ "$actual" = "$expected" ]; then printf '  %-18s %s\n' "$table" "$actual"
-    else printf '  %-18s %s, expected %s\n' "$table" "$actual" "$expected"; differ=1; fi
-  done < <(jq -r '.rows | to_entries[] | "\(.key)\t\(.value)"' "$MANIFEST")
-  for family in missions silos stages facets classification; do
-    case $family in
-      missions|silos|stages) query="select key from $family" ;;
-      facets) query="select distinct facet from facet_texts" ;;
-      classification) query="select distinct classification from provider_items" ;;
-    esac
-    actual=$(sql "select coalesce(string_agg(k, ',' order by k collate \"C\"), '') from ($query) t(k)")
-    expected=$(jq -r --arg f "$family" '.tags[$f] | sort | join(",")' "$MANIFEST")
-    if [ "$actual" = "$expected" ]; then printf '  %-18s %s values\n' "$family" "$(jq -r --arg f "$family" '.tags[$f] | length' "$MANIFEST")"
-    else printf '  %-18s differ: %s, expected %s\n' "$family" "$actual" "$expected"; differ=1; fi
-  done
-  return $differ
-}
-
-if [ "$action" = verify ]; then
-  [ -f "$MANIFEST" ] || exit 1
-  echo "Comparing $DATABASE with $MANIFEST"
-  check_rows || { echo "$DATABASE differs from the frozen set" >&2; exit 1; }
-  echo "Matches the frozen set"
-  exit 0
-fi
-
-if [ -f "$MANIFEST" ]; then
-  for file in $(jq -r '.files | keys[]' "$MANIFEST"); do
-    expected=$(jq -r --arg f "$file" '.files[$f]' "$MANIFEST")
-    [ "$(shasum -a 256 "$SEED/$file" | cut -d' ' -f1)" = "$expected" ] \
-      || { echo "$SEED/$file does not match its manifest checksum" >&2; exit 1; }
-  done
-fi
-if [ -n "$(ls -A "$PROVIDER" 2>/dev/null)" ]; then
-  echo "$PROVIDER is not empty; remove it first" >&2; exit 1
-fi
 tables=$(sql "select count(*) from pg_tables where schemaname = 'public'")
 [ "$tables" = 0 ] || { echo "$DATABASE already has tables; run docker compose down -v first" >&2; exit 1; }
 
 echo "Restoring the frozen database into $DATABASE"
 admin pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
-# The dump holds no grants for craft-id's login, which only some databases have; these are
-# migration 0022's, given here because the restored database is past that migration.
+# A dump taken past migration 0022 holds no grants for craft-id's login, which only some
+# databases have; give it 0022's grants here. An older dump gets them from 0022 itself.
 sql "DO \$\$ BEGIN
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'craft_id')
-     AND EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'id_accounts') THEN
+     AND to_regclass('public.id_accounts') IS NOT NULL THEN
     GRANT USAGE ON SCHEMA public TO craft_id;
     GRANT SELECT, INSERT, UPDATE ON id_accounts, id_credentials, id_clients TO craft_id;
     GRANT SELECT, INSERT, UPDATE, DELETE ON id_codes TO craft_id;
@@ -108,14 +87,9 @@ mkdir -p "$PROVIDER"
 cp -R "$unpacked/provider/." "$PROVIDER/"
 rm -rf "$unpacked"
 echo "Applying newer migrations"
-# CRAFT_SEED is this script's own; the strict settings would refuse it.
-env -u CRAFT_SEED CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_NAME=$DATABASE uv run -q alembic upgrade head
-if [ -f "$MANIFEST" ]; then
-  echo "Checking the restored rows against $MANIFEST"
-  check_rows || { echo "The restored database differs from the frozen set" >&2; exit 1; }
-  for table in $(jq -r '.empty[]' "$MANIFEST"); do
-    [ "$(sql "select count(*) from public.\"$table\"")" = 0 ] \
-      || { echo "$table should be empty in the frozen set" >&2; exit 1; }
-  done
+craft_python alembic upgrade head
+if $checked; then
+  echo "Checking the restored rows against $SEED/manifest.json"
+  craft_python python -m app.seed.frozen restored "$SEED"
 fi
 echo "Seeded"
