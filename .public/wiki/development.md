@@ -53,7 +53,7 @@ docker compose down
 
 ## Local cluster
 
-The full stack, workspaces included, runs on Colima's built-in k3s from one Helm chart (`deploy/craft/`) with JupyterHub's own chart beside it (`deploy/jupyterhub/`). Images are built with Colima's Docker engine and used directly, with no registry. Settings come from a `craft-env` Secret made from `.env`, and the frozen set is loaded through a port forward with `scripts/seed cluster`. The steps are in [deploy/README.md](https://github.com/mchdeore/CRAFT/blob/main/deploy/README.md). Compose keeps working beside it until it is removed.
+The full stack, workspaces included, runs on Colima's built-in k3s from one Helm chart (`deploy/craft/`) with JupyterHub's own chart beside it (`deploy/jupyterhub/`). Images are built with Colima's Docker engine and used directly, with no registry. Settings come from a `craft-env` Secret made from `.env`, and the frozen set is loaded through a port forward with `scripts/seed cluster`. The steps are in [deploy/README.md](https://github.com/mchdeore/CRAFT/blob/main/deploy/README.md). Compose keeps working beside it until it is removed. The cluster also dumps the database every night to the node's disk; `scripts/backup-check` restores the newest dump into a throwaway database to check it.
 
 ## Checks
 

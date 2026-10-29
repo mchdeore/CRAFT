@@ -20,6 +20,7 @@ What CRAFT does now, what is deferred until a trigger is met, and the longer-ter
 | Workspace | A personal JupyterLab beside chat that JupyterHub starts when the person or the agent needs it and stops after an hour idle, keeping their files; the `craft` package (`import craft` is the only import a notebook needs; `craft.check()` lists missing tools), analysis and graphing helpers, editable local copies, and workspace skills; an activity log of the person's own saves, kernel actions and cell runs, with user, path and timing and never content | JupyterHub on the local cluster, one volume per person, craft-id sign-in and workspace tokens |
 | Charts, notebooks and Office files | Charts the agent makes, notebooks co-edited with the agent, Word and PowerPoint output with a page preview, and unattended notebook runs: on the cluster a Kubernetes Job with no network, the notebook's folder read-only and results moved beside it without overwriting | Workspace image with LibreOffice and Poppler |
 | Background work | Jobs on PostgreSQL with one worker per queue (agent, interactive, bulk), retries for transient failures, crash recovery and job routes; a job is declared on its operation; wait and run times are measured (`craft queues report`) | Procrastinate; no separate queue service |
+| Database backup | Every night a CronJob on the local cluster dumps the whole database to a folder on the node's own disk and keeps the newest 14; `scripts/backup-check` restores the newest into a throwaway database and prints row counts. It covers a bad migration or a wrong delete, not a lost disk | The database's own image; outside any Kubernetes volume, so deleting the release keeps the dumps |
 | Dataset | A frozen library index and datacube, loaded by `scripts/seed` with no model calls | The private frozen set and the numbered migrations |
 | Local cluster | The API, the workers, craft-id and PostgreSQL run from one Helm chart on Colima's k3s, with JupyterHub from its own unmodified chart beside it; network policies limit what each pod reaches ([deploy/README.md](https://github.com/mchdeore/CRAFT/blob/main/deploy/README.md)) | The same charts the hosted VM will use |
 | Interface | No interface in this repository. The product interface is the separate `craft-frontend` repository | It compiles against `app/contract/` |
@@ -30,7 +31,6 @@ Each item is planned and has a trigger met or close. The maintainer chooses the 
 
 In progress:
 
-- **Database backup** (in review, [pull request 78](https://github.com/mchdeore/CRAFT/pull/78)): a nightly `pg_dump` CronJob writes to a folder on the node's own disk and keeps the newest 14 dumps; `scripts/backup-check` restores the newest into a throwaway database and prints row counts. It covers a bad migration or a wrong delete, not a lost disk.
 - **Background jobs, extended**: schedules, progress a person can see, a notification to the owner when a job or run ends, and longer agent tasks that run in the background.
 - **Traffic counting**: every request records bytes in and out, its operation and its caller, counted once for all routes.
 
@@ -71,7 +71,7 @@ Each row stays as it is until its trigger happens. Not planned: moving sign-in t
 | Load | A proof of concept for 5 people at once and 20 accounts; each queue takes up to 50 jobs at once and its wait and run times are measured | Sized to the measured load | Before sizing infrastructure |
 | Database hosting | Local container or a PostgreSQL pod in the cluster | Azure Database for PostgreSQL with pgvector, same migrations | A concrete reason to expand past the VM |
 | Database logins | Logins created by `initdb.sh` | Logins and grants from infrastructure code; managed identity | Deployment |
-| Database recovery | Simulated data, no backups; a nightly dump to the node's disk is in review | A copy off the disk, then managed backups, retention and recovery | Real data or people's work on the VM |
+| Database recovery | Simulated data; a nightly dump on the node's own disk, the newest 14 kept | A copy off the disk, then managed backups, retention and recovery | Real data or people's work on the VM |
 | Document permissions | Mission grants ([access](datacube.md#access)) | Source-system permissions | Real connectors |
 | Workspace execution | One controller per workspace, guarded in process; an approved external action records consumption, not its outcome | A runtime lease with fencing, and a record of each external call's outcome | More than one controller can run code in the same workspace |
 | Outside MCP servers | None: the agent uses only CRAFT's own tools | Connections each person owns, with a protected secret reference and rotation | People need tools from outside services |
