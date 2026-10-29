@@ -152,12 +152,21 @@ def _free(name: str, taken: set[str], stamp: str) -> str:
 
 
 async def notebook_job(caller, path: str, output: str) -> None:
+    from app.infrastructure import notebook_jobs
     from app.infrastructure.notebook_sandbox import FOLDER_LIMIT, Sandbox
 
     name = _name(path)
-    target = await _target(caller)
     notebook = PurePosixPath(name)
     folder = "" if str(notebook.parent) == "." else str(notebook.parent)
+    cluster = notebook_jobs.in_cluster()
+    if cluster is not None:
+        # A Job on the owner's volume moves results into place itself, never overwriting.
+        await notebook_jobs.run(
+            cluster, caller.settings.notebook_image, caller.user_id, folder, notebook.name, output
+        )
+        return
+    # The Docker sandbox, until K-remove-docker: the folder is copied in and results back.
+    target = await _target(caller)
     files = await workspaces.read_folder(target, folder, FOLDER_LIMIT)
     sandbox = Sandbox(caller.settings.notebook_image)
     try:

@@ -75,7 +75,9 @@ singleuser:
     homeMountPath: /workspace
     dynamic:
       storageClass: local-path
-      pvcNameTemplate: claim-{username}
+      # The raw Hub name, the CRAFT user ID: notebook-run Jobs mount claim-<user ID>. (The
+      # escaped {username} adds a hash, since a UUID may start with a digit.)
+      pvcNameTemplate: claim-{unescaped_username}
       volumeNameTemplate: volume-{username}
     extraVolumes:
       - name: craft-control
