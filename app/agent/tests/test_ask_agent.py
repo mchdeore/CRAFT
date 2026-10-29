@@ -1,4 +1,4 @@
-"""Outside asks share the cited runtime while nested asks remain unavailable."""
+"""Outside asks queue the cited runtime and read its answer later; nested asks stay unavailable."""
 
 import asyncio
 from uuid import uuid4
@@ -6,11 +6,11 @@ from uuid import uuid4
 from agent_framework import ChatResponse, Content, Message
 from sqlalchemy import select
 
-from app.agent.handlers import AskAgent, ask_agent
 from app.infrastructure.database import metadata as m
 from app.infrastructure.mcp.client import client
 from app.infrastructure.operations.registry import registry
 from app.library.handlers import CitationCheck, check_citation
+from app.tests.support.chat import ask
 from app.tests.support.chat import chat as chat
 from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
@@ -18,10 +18,8 @@ from app.tests.support.model import ScriptedChatClient
 from app.tests.support.notes import remove_notes as remove_notes
 
 
-def test_ask_agent_returns_cited_answer(chat):
-    result = asyncio.run(
-        ask_agent(chat["caller"], AskAgent(question="Peak power", conversation_id=chat["thread"]))
-    )
+def test_ask_agent_answer_is_cited(chat):
+    result = ask(chat["caller"], "Peak power", chat["thread"])
     assert result.answer and result.citations
     for citation in result.citations:
         assert (
@@ -33,13 +31,13 @@ def test_ask_agent_returns_cited_answer(chat):
         rows = (
             connection.execute(select(logs).where(logs.c.run_id == result.run_id)).mappings().all()
         )
+    # The ask is logged with its run; the worker's run and its tool calls nest under it.
     root = next(row for row in rows if row["name"] == "agent.ask_agent")
-    run = next(row for row in rows if row["name"] == "agent.run_agent")
     worker = next(row for row in rows if row["name"] == "agent.agent_run")
     tool = next(row for row in rows if row["name"] == "library.search")
+    assert root["conversation_id"] == chat["thread"]
     assert (
-        run["parent_call_id"] == root["call_id"]
-        and worker["parent_call_id"] == run["call_id"]
+        worker["parent_call_id"] == root["call_id"]
         and tool["parent_call_id"] == worker["call_id"]
         and tool["tool_call_id"]
     )
@@ -118,11 +116,7 @@ def test_read_only_query_cannot_write_notes(chat, monkeypatch):
         return original(self, messages)
 
     monkeypatch.setattr(ScriptedChatClient, "reply", scripted)
-    result = asyncio.run(
-        ask_agent(
-            chat["caller"], AskAgent(question="Make a working note", conversation_id=chat["thread"])
-        )
-    )
+    result = ask(chat["caller"], "Make a working note", chat["thread"])
     assert result.run_id
     with chat["owner"].connect() as connection:
         rows = connection.execute(select(m.notes.c.owner).where(m.notes.c.title == title)).all()

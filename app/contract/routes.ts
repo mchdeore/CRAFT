@@ -43,6 +43,10 @@ export interface Routes {
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me };
   "PATCH /api/me": { body: T.MeChange; response: T.Me };
+  "POST /api/me/tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
+  "GET /api/me/tokens": { response: T.WorkspaceToken[] };
+  "DELETE /api/me/tokens/:id": { response: void };
+  // The earlier names of the three /api/me/tokens routes.
   "POST /api/me/workspace-tokens": { body: T.NewWorkspaceToken; response: T.IssuedWorkspaceToken };
   "GET /api/me/workspace-tokens": { response: T.WorkspaceToken[] };
   "DELETE /api/me/workspace-tokens/:id": { response: void };
@@ -85,7 +89,8 @@ export interface Routes {
   "GET /api/skills": { query: T.SkillList; response: T.SkillCatalog };
   "GET /api/skills/:id": { response: T.Skill };
   "GET /api/skills/:id/versions": { query: { revision: number }; response: T.Skill };
-  "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentResult };
+  "POST /api/agent/ask": { body: T.AskAgent; response: T.AskAgentQueued };
+  "GET /api/agent/answers/:jobId": { response: T.Answer };
   "POST /api/tools/chart": { body: T.ChartInput; response: T.ChartResult };
   "POST /api/tools/calculation-check": { body: T.CalculationInput; response: T.CalculationResult };
 }

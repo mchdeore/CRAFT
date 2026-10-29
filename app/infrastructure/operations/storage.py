@@ -1,5 +1,6 @@
 """Append-only call metadata. This table never holds request or result content."""
 
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -13,6 +14,8 @@ from sqlalchemy import (
     Integer,
     Table,
     Text,
+    func,
+    select,
     text,
 )
 from sqlalchemy.orm import Session
@@ -49,6 +52,22 @@ Index("ix_call_log_at", call_log.c.at)
 Index("ix_call_log_user_id_at", call_log.c.user_id, call_log.c.at)
 Index("ix_call_log_run_id", call_log.c.run_id)
 Index("ix_call_log_request_id", call_log.c.request_id)
+# Counts a personal token's recent calls for the MCP rate limit.
+Index("ix_call_log_workspace_token_id_at", call_log.c.workspace_token_id, call_log.c.at)
+
+
+def token_calls(session: Session, workspace_token_id: Any, seconds: int) -> tuple[int, Any]:
+    """A personal token's top-level calls in the last `seconds`, and when the oldest leaves."""
+    window = timedelta(seconds=seconds)
+    return tuple(
+        session.execute(
+            select(func.count(), func.min(call_log.c.at) + window - func.now()).where(
+                call_log.c.workspace_token_id == workspace_token_id,
+                call_log.c.parent_call_id.is_(None),
+                call_log.c.at > func.now() - window,
+            )
+        ).one()
+    )
 
 
 def append_call(session: Session, fields: dict[str, Any]) -> None:

@@ -92,7 +92,15 @@ workspace_tokens = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("last_used_at", DateTime(timezone=True)),
     Column("revoked_at", DateTime(timezone=True)),
+    # `workspace` tokens reach /api, `mcp` tokens reach /mcp.
+    Column("kind", Text, nullable=False, server_default=text("'workspace'")),
     CheckConstraint("octet_length(token_sha256) = 32", name="token_sha256"),
+    CheckConstraint("kind in ('workspace','mcp')", name="kind"),
+    CheckConstraint(
+        "expires_at <= created_at + "
+        "CASE kind WHEN 'mcp' THEN interval '720 hours' ELSE interval '168 hours' END",
+        name="lifetime",
+    ),
 )
 
 
@@ -201,6 +209,41 @@ def roles_for(session, user):
 
     return list(
         session.execute(select(user_roles.c.role).where(user_roles.c.user_id == user)).scalars()
+    )
+
+
+def live_token(session, digest: bytes, kind: str, at, username: str | None = None):
+    """The token of this kind with this digest, unless revoked, expired or of a disabled account.
+
+    With `username` it must also be that account's."""
+    from sqlalchemy import select
+
+    statement = (
+        select(workspace_tokens.c.id, workspace_tokens.c.user_id, workspace_tokens.c.last_used_at)
+        .join(users, users.c.id == workspace_tokens.c.user_id)
+        .where(
+            workspace_tokens.c.token_sha256 == digest,
+            workspace_tokens.c.kind == kind,
+            workspace_tokens.c.revoked_at.is_(None),
+            workspace_tokens.c.expires_at > at,
+            users.c.disabled_at.is_(None),
+        )
+    )
+    if username is not None:
+        statement = statement.where(users.c.username == username)
+    return session.execute(statement).mappings().first()
+
+
+def touch_token(session, token, at, every) -> None:
+    """Record the token's use, at most once per `every`."""
+    session.execute(
+        workspace_tokens.update()
+        .where(
+            workspace_tokens.c.id == token,
+            workspace_tokens.c.last_used_at.is_(None)
+            | (workspace_tokens.c.last_used_at <= at - every),
+        )
+        .values(last_used_at=at)
     )
 
 

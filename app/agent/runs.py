@@ -149,7 +149,7 @@ async def follow(caller, run, segment, after, *, raise_errors) -> AsyncGenerator
 
 async def stream(caller, request, read_only: bool) -> AsyncGenerator[AGUIEvent]:
     """Queue the run (a start or a resume) and stream it from its first event."""
-    segment = await run_in_threadpool(service.queue_run, caller, request, read_only)
+    segment, _ = await run_in_threadpool(service.queue_run, caller, request, read_only)
     _note(caller, run=request.run_id)
     async for event in follow(caller, request.run_id, segment, 0, raise_errors=True):
         yield event

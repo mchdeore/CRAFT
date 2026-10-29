@@ -154,7 +154,8 @@ def checked_access(operation: Operation, caller: Caller) -> Caller:
     require(caller, operation.access)
     # The token gates the route it calls; that operation's own nested reads are not routes.
     top_level = call is None or call.parent_call_id is None
-    if caller.origin == "workspace" and top_level and not workspace_allowed(operation):
+    personal = caller.origin == "workspace" or caller.workspace_token_id is not None
+    if personal and top_level and not token_allowed(operation, caller.origin):
         from app.infrastructure.errors import Forbidden
 
         raise Forbidden()
@@ -172,9 +173,10 @@ def checked_access(operation: Operation, caller: Caller) -> Caller:
     return caller
 
 
-def workspace_allowed(operation: Operation) -> bool:
-    """Workspace tokens reach the agent's read-tool catalog and the account check only."""
-    return operation.name == "accounts.me" or (
+def token_allowed(operation: Operation, origin: str) -> bool:
+    """Personal tokens reach the agent's read-tool catalog; a workspace token also the account
+    check, an MCP token also ask_agent."""
+    return operation.name == ("accounts.me" if origin == "workspace" else "agent.ask_agent") or (
         operation.tool and operation.effects == "NONE" and operation.tool_name != "ask_agent"
     )
 

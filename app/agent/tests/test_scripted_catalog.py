@@ -1,6 +1,5 @@
 """Catalog questions invoke actual tools and report checked, safe catalog data."""
 
-import asyncio
 import hashlib
 import json
 
@@ -9,9 +8,9 @@ import pytest
 from agent_framework import Content, Message
 from sqlalchemy import select
 
-from app.agent.handlers import AskAgent, ask_agent
 from app.infrastructure.database import metadata as m
 from app.infrastructure.operations.registry import registry, tool_operations
+from app.tests.support.chat import ask
 from app.tests.support.chat import chat as chat
 from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
@@ -75,9 +74,7 @@ def test_scripted_formats_actual_capabilities_and_explains_empty_saved_skills(ch
     ],
 )
 def test_scripted_catalog_runs_authenticated_mcp_and_persists_answer(chat, question, expected):
-    result = asyncio.run(
-        ask_agent(chat["caller"], AskAgent(question=question, conversation_id=chat["thread"]))
-    )
+    result = ask(chat["caller"], question, chat["thread"])
     logs = m.metadata.tables["call_log"]
     messages = m.metadata.tables["messages"]
     with chat["owner"].connect() as connection:

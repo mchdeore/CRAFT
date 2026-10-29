@@ -59,7 +59,8 @@ def anonymous_http(request: Any) -> Caller:
 
 
 def resolve_http(request: Any) -> Caller:
-    """Resolve only a server session digest; reload current account roles every request."""
+    """Resolve a session cookie's server digest, or a `workspace` token through accounts;
+    reload current account roles every request."""
     import base64
     import hashlib
     from datetime import timedelta
@@ -74,7 +75,12 @@ def resolve_http(request: Any) -> Caller:
     bearer = request.headers.get("authorization")
     if bearer is not None:
         # A workspace token never combines with a browser session.
-        return caller if token else resolve_workspace_token(caller, bearer)
+        hashed = None if token else bearer_digest(bearer)
+        if hashed is None:
+            return caller
+        from app.accounts.handlers import resolve_token
+
+        return resolve_token(caller, hashed, "workspace")
     if not token or caller.sessions is None or caller.settings is None:
         return caller
     try:
@@ -130,66 +136,19 @@ def resolve_http(request: Any) -> Caller:
     return replace(caller, user_id=row["user_id"], roles=assigned, auth_session_id=row["id"])
 
 
-def resolve_workspace_token(caller: Caller, header: str) -> Caller:
-    """Resolve a bearer workspace token to its account; reload roles every request."""
+def bearer_digest(header: str | None) -> bytes | None:
+    """The SHA-256 digest of a well-formed `Bearer <token>` header: 32 random bytes as unpadded
+    base64url. None for anything else. Only the digest leaves here."""
     import base64
     import hashlib
-    from dataclasses import replace
-    from datetime import timedelta
 
-    from sqlalchemy import select, update
-
-    from app.infrastructure.database.metadata import metadata
-    from app.infrastructure.database.unit_of_work import unit_of_work
-
-    if not header.startswith("Bearer ") or caller.sessions is None:
-        return caller
+    if not isinstance(header, str) or not header.startswith("Bearer "):
+        return None
     value = header[7:]
     try:
         raw = base64.b64decode(value + "=" * ((-len(value)) % 4), altchars=b"-_", validate=True)
     except (ValueError, TypeError):
-        return caller
+        return None
     if len(raw) != 32 or base64.urlsafe_b64encode(raw).rstrip(b"=").decode() != value:
-        return caller
-    at = now()
-    users = metadata.tables["users"]
-    tokens = metadata.tables["workspace_tokens"]
-    roles = metadata.tables["user_roles"]
-    with unit_of_work(caller.sessions, read_only=True) as session:
-        row = (
-            session.execute(
-                select(tokens.c.id, tokens.c.user_id, tokens.c.last_used_at)
-                .join(users, users.c.id == tokens.c.user_id)
-                .where(
-                    tokens.c.token_sha256 == hashlib.sha256(raw).digest(),
-                    tokens.c.revoked_at.is_(None),
-                    tokens.c.expires_at > at,
-                    users.c.disabled_at.is_(None),
-                )
-            )
-            .mappings()
-            .first()
-        )
-        if row is None:
-            return caller
-        assigned = frozenset(
-            session.execute(select(roles.c.role).where(roles.c.user_id == row["user_id"])).scalars()
-        )
-    if row["last_used_at"] is None or (at - row["last_used_at"]).total_seconds() >= 60:
-        with unit_of_work(caller.sessions) as session:
-            session.execute(
-                update(tokens)
-                .where(
-                    tokens.c.id == row["id"],
-                    (tokens.c.last_used_at.is_(None))
-                    | (tokens.c.last_used_at <= at - timedelta(seconds=60)),
-                )
-                .values(last_used_at=at)
-            )
-    return replace(
-        caller,
-        user_id=row["user_id"],
-        roles=assigned,
-        origin="workspace",
-        workspace_token_id=row["id"],
-    )
+        return None
+    return hashlib.sha256(raw).digest()

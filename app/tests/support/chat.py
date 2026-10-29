@@ -9,6 +9,24 @@ from sqlalchemy import select, text
 from app.infrastructure.database import metadata as m
 
 
+def ask(caller, question, conversation=None, seconds=60):
+    """Ask through ask_agent, then poll get_answer until the worker's cited answer is ready."""
+    import asyncio
+    import time
+
+    from app.agent.handlers import AskAgent, ask_agent, get_answer
+    from app.jobs.handlers import JobRef
+
+    queued = asyncio.run(
+        ask_agent(caller, AskAgent(question=question, conversation_id=conversation))
+    )
+    deadline = time.monotonic() + seconds
+    while (answer := get_answer(caller, JobRef(job_id=queued.job_id))).status == "pending":
+        assert time.monotonic() < deadline, "no answer in time"
+        time.sleep(0.05)
+    return answer.result
+
+
 class AgentWorker:
     """Chat turns run on an in-process agent worker with this test's settings."""
 

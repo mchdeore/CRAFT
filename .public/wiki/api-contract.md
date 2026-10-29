@@ -118,6 +118,9 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `DELETE /api/session` | — | `void` | signed in; live resource access | — |
 | `GET /api/me` | — | `Me` | signed in; live resource access | — |
 | `PATCH /api/me` | `MeChange` | `Me` | signed-in browser session or command line; the caller's own row only | — |
+| `POST /api/me/tokens` | `NewWorkspaceToken` | `IssuedWorkspaceToken` | signed-in browser session or command line | — |
+| `GET /api/me/tokens` | — | `WorkspaceToken[]` | signed-in browser session or command line | — |
+| `DELETE /api/me/tokens/:id` | — | `void` | signed-in browser session or command line | — |
 | `POST /api/me/workspace-tokens` | `NewWorkspaceToken` | `IssuedWorkspaceToken` | signed-in browser session or command line | — |
 | `GET /api/me/workspace-tokens` | — | `WorkspaceToken[]` | signed-in browser session or command line | — |
 | `DELETE /api/me/workspace-tokens/:id` | — | `void` | signed-in browser session or command line | — |
@@ -158,7 +161,8 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/skills` | query `SkillList` | `SkillCatalog` | signed in; owned definitions | `list_skills` |
 | `GET /api/skills/:id` | path `SkillRef` | `Skill` | signed in; owned definition | — |
 | `GET /api/skills/:id/versions` | path `SkillRef`; required query `revision` | `Skill` | signed in; owned revision | `read_skill_version` |
-| `POST /api/agent/ask` | `AskAgent` | `AskAgentResult` | signed in; live resource access | `ask_agent` |
+| `POST /api/agent/ask` | `AskAgent` | `AskAgentQueued` | signed in; live resource access | `ask_agent` |
+| `GET /api/agent/answers/:jobId` | — | `Answer` | signed in; own job | `get_answer` |
 | `POST /api/tools/chart` | `ChartInput` | `ChartResult` | signed in; live resource access | `make_chart` |
 | `POST /api/tools/calculation-check` | `CalculationInput` | `CalculationResult` | signed in; live resource access | `check_calculation` |
 
@@ -181,6 +185,7 @@ Input types include path fields; ordinary GET routes carry the other fields as q
 | Tool | Route | Input type | Effects |
 |---|---|---|---|
 | `ask_agent` | `POST /api/agent/ask` | `AskAgent` | `NONE` |
+| `get_answer` | `GET /api/agent/answers/:jobId` | `JobRef` | `NONE` |
 | `check_calculation` | `POST /api/tools/calculation-check` | `CalculationInput` | `NONE` |
 | `check_citation` | `POST /api/library/citations/check` | `CitationCheck` | `NONE` |
 | `compare_missions` | `POST /api/cube/compare` | `CompareMissions` | `NONE` |
@@ -366,6 +371,8 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `POST /api/session` | `Me` | `app/contract/examples/session.json` |
 | `GET /api/me` | `Me` | `app/contract/examples/me.json` |
 | `PATCH /api/me` | `Me` | `app/contract/examples/me.json` |
+| `POST /api/me/tokens` | `IssuedWorkspaceToken` | `app/contract/examples/mcp-token.json` |
+| `GET /api/me/tokens` | `WorkspaceToken[]` | `app/contract/examples/tokens.json` |
 | `POST /api/me/workspace-tokens` | `IssuedWorkspaceToken` | `app/contract/examples/workspace-token.json` |
 | `GET /api/me/workspace-tokens` | `WorkspaceToken[]` | `app/contract/examples/workspace-tokens.json` |
 | `GET /api/workspace` | `Workspace` | `app/contract/examples/workspace.json` |
@@ -405,7 +412,8 @@ Every built JSON route has a synthetic response example. Binary and `204` respon
 | `GET /api/skills` | `SkillCatalog` | `app/contract/examples/skills.json` |
 | `GET /api/skills/:id` | `Skill` | `app/contract/examples/skill.json` |
 | `GET /api/skills/:id/versions` | `Skill` | `app/contract/examples/skill.json` |
-| `POST /api/agent/ask` | `AskAgentResult` | `app/contract/examples/ask-agent.json` |
+| `POST /api/agent/ask` | `AskAgentQueued` | `app/contract/examples/ask-agent.json` |
+| `GET /api/agent/answers/:jobId` | `Answer` | `app/contract/examples/answer.json` |
 | `POST /api/tools/chart` | `ChartResult` | `app/contract/examples/chart.json` |
 | `POST /api/tools/calculation-check` | `CalculationResult` | `app/contract/examples/calculation-check.json` |
 

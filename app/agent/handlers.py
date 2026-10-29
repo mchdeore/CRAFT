@@ -1,4 +1,5 @@
-"""Private typed model infrastructure entry points for trusted source processing."""
+"""Agent entry points: chat runs and their recovery, run tokens, model calls, the tool list,
+and queued questions (ask_agent queues a read-only run, get_answer reads its answer)."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -11,6 +12,7 @@ from app.agent import model
 from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import Shape
+from app.jobs.handlers import JobRef
 from app.library.handlers import CitationHandle
 from app.skills.handlers import SkillVersionRef
 
@@ -324,60 +326,45 @@ class AskAgentResult(Shape):
     run_id: UUID
 
 
+class AskAgentQueued(Shape):
+    job_id: str
+    conversation_id: UUID
+
+
 @operation(SIGNED_IN, post="/agent/ask", tool=True)
-async def ask_agent(caller: Caller, request: AskAgent) -> AskAgentResult:
-    """Ask the cited CRAFT runtime; for example a document question from an MCP application."""
-    from dataclasses import replace
-    from uuid import uuid4
-
-    from starlette.concurrency import run_in_threadpool
-
-    from app.conversations.handlers import NewConversation, create_conversation
-    from app.infrastructure.errors import ApiError
-    from app.infrastructure.operations.context import current_call
+def ask_agent(caller: Caller, request: AskAgent) -> AskAgentQueued:
+    """Queue a question for the cited CRAFT runtime and return its job at once; get_answer
+    reads the answer. For example a document question from an MCP application."""
+    from app.agent import answers
 
     if caller.run_id is not None:
         from app.infrastructure.errors import Forbidden
 
         raise Forbidden()
-    conversation = request.conversation_id
-    if conversation is None:
-        created = await run_in_threadpool(create_conversation, caller, NewConversation())
-        conversation = created.id
-    identifier = uuid4()
-    trusted = replace(caller, conversation_id=conversation, run_id=identifier)
-    context = current_call.get()
-    if context is not None:
-        context.caller = trusted
-    data = RunAgentInput(
-        thread_id=conversation,
-        run_id=identifier,
-        messages=[{"id": str(uuid4()), "role": "user", "content": request.question}],
-    )
-    from app.agent.runtime import read_only_query
+    job, conversation = answers.queue(caller, request.question, request.conversation_id)
+    return AskAgentQueued(job_id=str(job), conversation_id=conversation)
 
-    with read_only_query():
-        iterator = run_agent(trusted, data)
-        text = ""
-        answer = None
-        finished = False
-        try:
-            async for event in iterator:
-                if event.type == "TEXT_MESSAGE_START":
-                    text = ""
-                elif event.type == "TEXT_MESSAGE_CONTENT":
-                    text += event.delta
-                elif event.type == "ACTIVITY_SNAPSHOT" and event.activity_type == "craft.answer":
-                    answer = event.content
-                elif event.type == "RUN_FINISHED":
-                    finished = True
-        finally:
-            await iterator.aclose()
-        if not finished or answer is None:
-            raise ApiError()
-        return AskAgentResult(
-            answer=text,
-            citations=msgspec.convert(answer["citations"], list[AnswerCitation]),
-            confidence=msgspec.convert(answer["confidence"], AnswerConfidence),
-            run_id=identifier,
-        )
+
+class Answer(Shape):
+    status: Literal["pending", "answered"]
+    result: AskAgentResult | None
+
+
+@operation(SIGNED_IN, get="/agent/answers/{jobId}", tool=True)
+def get_answer(caller: Caller, request: JobRef) -> Answer:
+    """Read the answer to a question ask_agent queued: pending while it runs, then the cited
+    answer; for example jobId 42."""
+    from app.agent import answers
+
+    found, run = answers.read(caller, int(request.job_id))
+    if found is None:
+        return Answer(status="pending", result=None)
+    return Answer(
+        status="answered",
+        result=AskAgentResult(
+            answer=found["answer"],
+            citations=msgspec.convert(found["citations"], list[AnswerCitation]),
+            confidence=msgspec.convert(found["confidence"], AnswerConfidence),
+            run_id=run,
+        ),
+    )
