@@ -1,5 +1,7 @@
 """Serialized start limits and durable finalization end before any model wait."""
 
+from uuid import UUID
+
 from sqlalchemy.exc import IntegrityError
 
 from app.agent import storage
@@ -184,8 +186,9 @@ def principal(caller, digest):
 RUN_LOCK = "agent-run:"
 
 
-def queue_run(caller, request, read_only: bool) -> int:
-    """Record the run's next input and queue it on the agent worker; returns its segment."""
+def queue_run(caller, request, read_only: bool) -> tuple[int, int]:
+    """Record the run's next input and queue it on the agent worker; returns its segment and
+    job."""
     import msgspec
 
     from app.agent.jobs import AgentRunJob, agent_run
@@ -199,8 +202,25 @@ def queue_run(caller, request, read_only: bool) -> int:
             session, caller.user_id, request.run_id, request.thread_id, msgspec.to_builtins(request)
         )
         job = AgentRunJob(run=request.run_id, segment=segment, read_only=read_only)
-        enqueue(session, caller, agent_run, job)
-        return segment
+        return segment, enqueue(session, caller, agent_run, job)
+
+
+def asked_job(caller, job_id: int) -> tuple[str, UUID, int] | None:
+    """The state, run and segment of the caller's own ask_agent job: a read-only agent run.
+
+    None for anyone else's job, a chat turn or any other kind of job."""
+    import msgspec
+
+    from app.agent.jobs import AgentRunJob, agent_run
+    from app.jobs.handlers import requested_job
+
+    with unit_of_work(scope(caller), read_only=True) as session:
+        found = requested_job(session, job_id, agent_run.__operation__.name, caller.user_id)
+    if found is None:
+        return None
+    state, arguments = found
+    job = msgspec.convert(arguments, AgentRunJob)
+    return (state, job.run, job.segment) if job.read_only else None
 
 
 def owned_segment(caller, run) -> int:

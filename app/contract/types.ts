@@ -221,6 +221,10 @@ export interface Skill extends SkillSummary { instructions: string; exampleInput
 export interface SkillCatalog { items: SkillSummary[]; nextCursor: Id | null }
 export interface AskAgent { question: string; conversationId?: Id | null }
 export interface AskAgentResult { answer: string; citations: Citation[]; confidence: Confidence; runId: Id }
+/** The question runs as an `agent.agent_run` job (`GET /api/jobs/:jobId`); read its answer with `GET /api/agent/answers/:jobId`. */
+export interface AskAgentQueued { jobId: string; conversationId: Id }
+/** `result` is set once `status` is `answered`; a failed run returns its error instead. Answers are kept for a day. */
+export interface Answer { status: "pending" | "answered"; result: AskAgentResult | null }
 
 export interface ChartInput { spec: Record<string, unknown>; format?: "svg" | "png"; title?: string | null; sources?: CitationHandle[] }
 /** In a conversation the chart is kept as four files; outside one the image comes inline. */

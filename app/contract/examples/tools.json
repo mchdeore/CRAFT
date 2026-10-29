@@ -1472,7 +1472,7 @@
   {
     "name": "ask_agent",
     "operation": "agent.ask_agent",
-    "description": "Ask the cited CRAFT runtime; for example a document question from an MCP application.",
+    "description": "Queue a question for the cited CRAFT runtime and return its job at once; get_answer\nreads the answer. For example a document question from an MCP application.",
     "effects": "NONE",
     "needsApproval": false,
     "route": "POST /api/agent/ask",
@@ -1531,34 +1531,139 @@
       }
     },
     "outputSchema": {
-      "title": "AskAgentResult",
+      "title": "AskAgentQueued",
       "type": "object",
       "properties": {
-        "answer": {
+        "jobId": {
           "type": "string"
         },
-        "citations": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/AnswerCitation"
-          }
-        },
-        "confidence": {
-          "$ref": "#/$defs/AnswerConfidence"
-        },
-        "runId": {
+        "conversationId": {
           "type": "string",
           "format": "uuid"
         }
       },
       "required": [
-        "answer",
-        "citations",
-        "confidence",
-        "runId"
+        "jobId",
+        "conversationId"
       ],
       "additionalProperties": false,
       "$defs": {
+        "AskAgentQueued": {
+          "title": "AskAgentQueued",
+          "type": "object",
+          "properties": {
+            "jobId": {
+              "type": "string"
+            },
+            "conversationId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "jobId",
+            "conversationId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "availableIn": [
+      "api",
+      "mcp"
+    ]
+  },
+  {
+    "name": "get_answer",
+    "operation": "agent.get_answer",
+    "description": "Read the answer to a question ask_agent queued: pending while it runs, then the cited\nanswer; for example jobId 42.",
+    "effects": "NONE",
+    "needsApproval": false,
+    "route": "GET /api/agent/answers/{jobId}",
+    "inputSchema": {
+      "title": "AnswerRef",
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string",
+          "pattern": "^[0-9]{1,18}$"
+        }
+      },
+      "required": [
+        "jobId"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "AnswerRef": {
+          "title": "AnswerRef",
+          "type": "object",
+          "properties": {
+            "jobId": {
+              "type": "string",
+              "pattern": "^[0-9]{1,18}$"
+            }
+          },
+          "required": [
+            "jobId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "title": "Answer",
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "answered",
+            "pending"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AskAgentResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "result"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Answer": {
+          "title": "Answer",
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "answered",
+                "pending"
+              ]
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AskAgentResult"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "result"
+          ],
+          "additionalProperties": false
+        },
         "AskAgentResult": {
           "title": "AskAgentResult",
           "type": "object",
@@ -1683,7 +1788,9 @@
     },
     "availableIn": [
       "api",
-      "mcp"
+      "mcp",
+      "chat",
+      "read_only_query"
     ]
   },
   {

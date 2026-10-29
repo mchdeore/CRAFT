@@ -1,4 +1,5 @@
-"""Background jobs: list, read, retry and stop them."""
+"""Background jobs: list, read, retry and stop them. The plain functions below are for other
+features, which authorize the job first."""
 
 from typing import Annotated, Literal
 
@@ -89,6 +90,11 @@ def running_jobs(session, kind: str, requested_by) -> int:
 
 def job_state(session, job_id: int) -> str | None:
     return service.state(session, job_id)
+
+
+def requested_job(session, job_id: int, kind: str, requested_by) -> tuple[str, dict] | None:
+    """The state and input of one requester's job of one kind; None for any other job."""
+    return service.requested(session, job_id, kind, requested_by)
 
 
 def cancel_job_by_id(session, job_id: int) -> bool:

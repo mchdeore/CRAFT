@@ -41,6 +41,14 @@ def state(session: Session, job_id: int) -> str | None:
     return row["state"] if row else None
 
 
+def requested(session: Session, job_id: int, kind: str, requested_by: Any):
+    """(state, input) of `requested_by`'s job of this kind; None for any other job."""
+    row = storage.read(session, job_id)
+    if row is None or row["kind"] != kind or row["requested_by"] != str(requested_by):
+        return None
+    return row["state"], row["args"]["input"]
+
+
 def cancel_by_id(session: Session, job_id: int) -> bool:
     return storage.cancel(session, job_id)
 
