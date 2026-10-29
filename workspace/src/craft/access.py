@@ -215,12 +215,13 @@ def _http():
 
 def _request(tool: str, method: str, path: str, payload: dict[str, Any] | None = None) -> Result:
     values = {key: value for key, value in (payload or {}).items() if value is not None}
+    client = _http()  # checks CRAFT_API_URL before the token: the first thing to set
 
     def send(token: str):
         headers = {"Authorization": "Bearer " + token}
         if method == "GET":
-            return _http().get(path, params=values, headers=headers)
-        return _http().request(method, path, json=values, headers=headers)
+            return client.get(path, params=values, headers=headers)
+        return client.request(method, path, json=values, headers=headers)
 
     token, swapped = _token()
     response = send(token)
