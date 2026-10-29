@@ -118,11 +118,12 @@ def test_missing_token_explains_how_to_sign_in(monkeypatch, tmp_path):
     import craft.access as access
 
     monkeypatch.setenv("CRAFT_API_URL", "http://127.0.0.1:8000")
+    monkeypatch.delenv("JUPYTERHUB_API_TOKEN", raising=False)  # outside a Hub workspace
     monkeypatch.setattr(access, "_client", None)
     monkeypatch.setattr(access, "_session_token", None)
     monkeypatch.setattr(access, "TOKEN_FILE", tmp_path / "absent")
     with pytest.raises(craft.CraftError, match="craft.login"):
-        craft.search("anything")
+        craft.whoami()
 
 
 def test_package_exposes_no_generic_dispatcher():
@@ -366,17 +367,6 @@ def test_a_hub_workspace_swaps_its_server_token_and_renews_once(hub_workspace, m
     assert requests[-1].headers["authorization"] == "Bearer swapped-2"
 
 
-def test_without_any_token_the_message_says_how_to_sign_in(api, monkeypatch, tmp_path):
-    import craft
-    import craft.access as access
-
-    monkeypatch.setattr(access, "_session_token", None)
-    monkeypatch.setattr(access, "TOKEN_FILE", tmp_path / "missing")
-    monkeypatch.delenv("JUPYTERHUB_API_TOKEN", raising=False)
-    with pytest.raises(craft.CraftError, match="craft.login"):
-        craft.whoami()
-
-
 @pytest.fixture
 def hub_workspace(api, monkeypatch, tmp_path):
     """A kernel in a Hub workspace: no login, no token file, the server's own Hub token."""
@@ -428,3 +418,43 @@ def test_login_and_a_token_file_come_before_the_swap(hub_workspace, monkeypatch,
         "Bearer generated-login-token",
     ]
     assert swaps == []
+
+
+def test_threads_that_hit_an_expired_swapped_token_share_one_new_swap(hub_workspace, monkeypatch):
+    import threading
+
+    import craft
+    import craft.access as access
+
+    swaps = []
+
+    def post(url, **options):
+        swaps.append(url)
+        return httpx.Response(200, json={"token": f"swapped-{len(swaps)}"})
+
+    def handler(request):  # CRAFT refuses the first swapped token from now on
+        if request.headers["authorization"] == "Bearer swapped-1":
+            return httpx.Response(401, json={"code": "not_signed_in"})
+        return httpx.Response(200, json={"id": "generated-person"})
+
+    monkeypatch.setattr(httpx, "post", post)
+    craft.whoami()  # the first swap, while swapped-1 was still good
+    client = access._http()
+    monkeypatch.setattr(client, "_transport", httpx.MockTransport(handler))
+    gate = threading.Barrier(6)
+    failures = []
+
+    def call():
+        gate.wait()
+        try:
+            assert craft.whoami().data["id"] == "generated-person"
+        except Exception as error:  # noqa: BLE001 - collected for the assertion below
+            failures.append(error)
+
+    threads = [threading.Thread(target=call) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert failures == []
+    assert len(swaps) == 2  # the first swap and exactly one renewal for all six threads

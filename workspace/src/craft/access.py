@@ -9,10 +9,13 @@ The token is, in order: the one ``login()`` set for this kernel, the file at
 ``CRAFT_TOKEN_FILE``, or, in a workspace JupyterHub started, one CRAFT issues for
 this server's own Hub token (``JUPYTERHUB_API_TOKEN``) through
 ``POST /api/workspace-tokens/hub``. A swapped token is kept in kernel memory only.
+Each request carries the token in its own header, and one lock guards the swap, so
+calls from several threads share one client and at most one swap at a time.
 """
 
 import getpass
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -112,18 +115,16 @@ def _snake_to_api(values: dict[str, Any]) -> dict[str, Any]:
 
 TOKEN_FILE = Path(os.environ.get("CRAFT_TOKEN_FILE", "/run/craft/workspace-token"))
 _session_token: str | None = None
-_hub_token: str | None = None  # swapped for this server's own Hub token, once per kernel
+_hub_token: str | None = None  # swapped for this server's own Hub token
 _client = None
+_lock = threading.Lock()  # guards the swap and the shared client
 
 
 def login(token: str | None = None) -> None:
     """Use a workspace token for this kernel only; it is never written to a file."""
-    global _session_token, _client
+    global _session_token
     value = token if token is not None else getpass.getpass("CRAFT workspace token: ")
     _session_token = value.strip() or None
-    if _client is not None:
-        _client.close()
-        _client = None
 
 
 def _api_url() -> str:
@@ -142,17 +143,18 @@ def _api_url() -> str:
     return url
 
 
-def _token() -> str:
+def _token() -> tuple[str, bool]:
+    """The token to send, and whether it was swapped for the Hub token (so may be swapped again)."""
     if _session_token:
-        return _session_token
+        return _session_token, False
     try:
         value = TOKEN_FILE.read_text(encoding="utf-8").strip()
     except OSError:
         value = ""
     if value:
-        return value
+        return value, False
     if os.environ.get("JUPYTERHUB_API_TOKEN"):
-        return _from_hub()
+        return _from_hub(), True
     raise CraftError(
         "No CRAFT workspace token. Create one in CRAFT and run craft.login() in this kernel."
     )
@@ -161,72 +163,72 @@ def _token() -> str:
 def _from_hub() -> str:
     """A workspace token for the person the Hub started this server for; kept in memory only."""
     global _hub_token
-    if _hub_token is not None:
+    with _lock:
+        if _hub_token is None:
+            import httpx
+
+            swapped = httpx.post(
+                _api_url() + "/api/workspace-tokens/hub",
+                headers={"Authorization": "token " + os.environ["JUPYTERHUB_API_TOKEN"]},
+                trust_env=False,
+                follow_redirects=False,
+                timeout=30,
+            )
+            if swapped.status_code != 200:
+                raise CraftError(
+                    f"CRAFT gave this workspace no token (HTTP {swapped.status_code}). "
+                    "Create one in CRAFT and run craft.login() in this kernel."
+                )
+            _hub_token = str(swapped.json()["token"])
         return _hub_token
-    import httpx
-
-    swapped = httpx.post(
-        _api_url() + "/api/workspace-tokens/hub",
-        headers={"Authorization": "token " + os.environ["JUPYTERHUB_API_TOKEN"]},
-        trust_env=False,
-        follow_redirects=False,
-        timeout=30,
-    )
-    if swapped.status_code != 200:
-        raise CraftError(
-            f"CRAFT gave this workspace no token (HTTP {swapped.status_code}). "
-            "Create one in CRAFT and run craft.login() in this kernel."
-        )
-    token = str(swapped.json()["token"])
-    _hub_token = token
-    return token
 
 
-def _renew() -> bool:
-    """Forget a swapped token CRAFT refused (expired or revoked) so the next request swaps again.
+def _forget(refused: str) -> None:
+    """Drop a swapped token CRAFT refused (expired or revoked), unless another thread already has.
 
-    False when no swapped token was in use. The server's Hub token stays the credential: while
-    the server runs and the account is enabled, a new swap succeeds.
+    The server's Hub token stays the credential: while the server runs and the account is
+    enabled, the next swap succeeds.
     """
-    global _hub_token, _client
-    if _session_token or _hub_token is None:
-        return False
-    _hub_token = None
-    if _client is not None:
-        _client.close()
-        _client = None
-    return True
+    global _hub_token
+    with _lock:
+        if _hub_token == refused:
+            _hub_token = None
 
 
 def _http():
     global _client
-    if _client is None:
-        from http.cookiejar import CookieJar, DefaultCookiePolicy
+    with _lock:
+        if _client is None:
+            from http.cookiejar import CookieJar, DefaultCookiePolicy
 
-        import httpx
+            import httpx
 
-        _client = httpx.Client(
-            base_url=_api_url() + "/api",
-            headers={"Authorization": "Bearer " + _token()},
-            cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
-            trust_env=False,
-            follow_redirects=False,
-            timeout=120,
-        )
-    return _client
+            _client = httpx.Client(
+                base_url=_api_url() + "/api",
+                cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
+                trust_env=False,
+                follow_redirects=False,
+                timeout=120,
+            )
+        return _client
 
 
 def _request(tool: str, method: str, path: str, payload: dict[str, Any] | None = None) -> Result:
     values = {key: value for key, value in (payload or {}).items() if value is not None}
 
-    def send():
+    def send(token: str):
+        headers = {"Authorization": "Bearer " + token}
         if method == "GET":
-            return _http().get(path, params=values)
-        return _http().request(method, path, json=values)
+            return _http().get(path, params=values, headers=headers)
+        return _http().request(method, path, json=values, headers=headers)
 
-    response = send()
-    if response.status_code == 401 and _renew():
-        response = send()  # a refused swapped token is swapped again, once
+    token, swapped = _token()
+    response = send(token)
+    if response.status_code == 401 and swapped:
+        # A refused swapped token is swapped again, once; login() and file tokens are the
+        # person's to replace.
+        _forget(token)
+        response = send(_token()[0])
     try:
         data = response.json() if response.content else {}
     except ValueError:

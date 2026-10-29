@@ -1,9 +1,10 @@
-"""JupyterHub, reached only with CRAFT's one service token (deploy/jupyterhub/values.yaml).
+"""JupyterHub, reached with CRAFT's one service token (deploy/jupyterhub/values.yaml).
 
 ``JupyterHub`` is what the rest of CRAFT needs from the Hub; ``Hub`` is its one implementation,
 and tests may stand in their own. A person's Hub name is their CRAFT user ID, so no mapping is
-kept here. Tokens are never logged: the service token lives in a repr-less field, and every
-token travels only in an ``Authorization`` header.
+kept here. The one call made with another token is ``owner``, which asks the Hub about the
+token it is given, as that token. Tokens are never logged: the service token lives in a
+repr-less field, and every token travels only in an ``Authorization`` header.
 """
 
 import asyncio
