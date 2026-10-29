@@ -5,7 +5,7 @@ from uuid import UUID
 
 import msgspec
 
-from app.infrastructure.access import SIGNED_IN, Caller
+from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import Shape
 from app.notifications import service
@@ -46,14 +46,21 @@ def read_notification(caller: Caller, request: NotificationRef) -> Notification:
     return Notification(**service.mark_read(caller, request.id))
 
 
+class JobEnded(Shape):
+    user: UUID
+    job_id: int
+    failed: bool
+
+
+@operation(PUBLIC)
+def job_ended(caller: Caller, request: JobEnded) -> None:
+    """Tell a person that a job they queued finished or finally failed; a Python-only entry."""
+    service.job_ended(caller, request.user, request.job_id, request.failed)
+
+
 def notify(session, user, kind: str, ref_kind: str, ref_id: str) -> None:
     """Write a notification in the calling feature's transaction."""
     service.add(session, user, kind, ref_kind, ref_id)
-
-
-def notify_job(sessions, user, job_id: int, *, failed: bool) -> None:
-    """A notify job that its requester queued finished or finally failed."""
-    service.job_ended(sessions, user, job_id, failed)
 
 
 def prune_read(session, days: int) -> None:

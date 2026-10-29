@@ -3,18 +3,23 @@
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database.engine import make_engine, make_sessions
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import NotFound
 from app.notifications.handlers import (
+    JobEnded,
     NotificationPageRequest,
     NotificationRef,
+    job_ended,
     list_notifications,
     notify,
     read_notification,
 )
+from app.tests.support.cube import cube_source as cube_source
 
 
 @pytest.fixture
@@ -60,3 +65,36 @@ def test_notifications_are_listed_and_marked_read_by_their_owner(people):
     with pytest.raises(NotFound):
         read_notification(mine, NotificationRef(id=other.id))
     assert list_notifications(theirs, NotificationPageRequest())[0].read_at is None
+
+
+def test_a_job_notifies_once_and_the_write_is_a_logged_call(people, owner_engine):
+    mine, _ = people
+    job = 10**12 + uuid4().int % 10**9
+    for failed in (False, True):
+        # A worker lost after the first notification can't add a second for the same job.
+        job_ended(
+            Caller(sessions=mine.sessions), JobEnded(user=mine.user_id, job_id=job, failed=failed)
+        )
+    listed = list_notifications(mine, NotificationPageRequest())
+    assert [(item.kind, item.ref_id) for item in listed] == [("job_done", str(job))]
+    call_log = metadata.tables["call_log"]
+    with owner_engine.connect() as connection:
+        names = connection.execute(
+            select(call_log.c.name).where(call_log.c.name == "notifications.job_ended")
+        ).scalars()
+        assert len(list(names)) >= 2
+
+
+def test_notification_routes_refuse_bad_requests(client, cube_source):
+    assert client.get("/api/notifications").status_code == 401
+    with TestClient(cube_source["app"], base_url="https://testserver") as http:
+        assert cube_source["sign_in"](http).status_code == 200
+        assert http.get("/api/notifications?limit=0").status_code == 400
+        assert http.get("/api/notifications?limit=101").status_code == 400
+        assert http.get("/api/notifications?unread=true").json() == []
+        assert http.get("/api/notifications?unread=maybe").status_code == 400
+        origin = {"Origin": "https://testserver"}
+        assert http.post("/api/notifications/not-a-uuid/read", headers=origin).status_code == 400
+        assert http.post(f"/api/notifications/{uuid4()}/read", headers=origin).status_code == 404
+        # A write without the browser's Origin is refused.
+        assert http.post(f"/api/notifications/{uuid4()}/read").status_code == 403

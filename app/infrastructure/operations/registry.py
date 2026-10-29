@@ -19,7 +19,8 @@ class Job:
     lock maps the input to a key: a second call while one is queued or running returns that
     job. interrupted(sessions, input) runs when a worker died and the job will not be retried.
     every is a cron string: the workers queue the job once per tick, as the system (a PUBLIC
-    operation with no input), and a tick whose previous run is still going is skipped.
+    operation with no input, never retried: the next tick runs it again). Runs never overlap:
+    a tick during a run waits for it, and further ticks while one waits are dropped.
     notify tells the person who queued the job when it finishes or finally fails.
     """
 
@@ -165,8 +166,8 @@ def declare(
 
         from app.infrastructure.access import PUBLIC
 
-        if access != PUBLIC or input_shape is not None or path or job.notify:
-            raise ValueError("A scheduled job runs as the system: public, no input, no route")
+        if access != PUBLIC or input_shape is not None or path or job.notify or job.retry:
+            raise ValueError("A scheduled job runs as the system: public, no input, no retry")
         if not croniter.is_valid(job.every):
             raise ValueError("A scheduled job needs a valid cron string")
     return Operation(

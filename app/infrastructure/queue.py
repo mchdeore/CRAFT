@@ -204,24 +204,19 @@ def _retries(kind: Kind, job: Job, error: BaseException) -> bool:
     return kind.retry and job.attempts < len(WAITS[kind.queue]) and transient(error)
 
 
-def _overlaps(sessions: sessionmaker[Session], kind: Kind, job_id: int) -> bool:
-    """An older job of this scheduled kind is still running, so this tick is skipped."""
-    from app.jobs import storage
-
-    with sessions.begin() as session:
-        return storage.older_running(session, kind.name, job_id)
-
-
-def _ended(sessions: sessionmaker[Session], kind: Kind, job: Job, outcome: str) -> None:
+def _ended(settings: Settings, sessions: sessionmaker[Session], job: Job, *, failed: bool) -> None:
     """Tell the person who queued a notify kind that it finished or finally failed."""
-    requested_by = job.task_kwargs.get("requested_by")
-    if not kind.notify or not requested_by:
-        return
-    from app.notifications.handlers import notify_job
+    from uuid import UUID
 
-    assert job.id is not None
+    from app.infrastructure.access import Caller
+    from app.notifications.handlers import JobEnded, job_ended
+
+    requested_by = job.task_kwargs.get("requested_by")
+    if not isinstance(requested_by, str) or job.id is None:
+        return
+    ended = JobEnded(user=UUID(requested_by), job_id=job.id, failed=failed)
     try:
-        notify_job(sessions, requested_by, job.id, failed=outcome == "failed")
+        job_ended(Caller(sessions=sessions, settings=settings), ended)
     except Exception:
         logger.warning("job notification not recorded", extra={"fields": {"job_id": job.id}})
 
@@ -255,9 +250,6 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
         async def run_async(context: JobContext, **args: Any) -> Any:
             started = time.monotonic()
             run, values = arguments(context, args)
-            if kind.every and await asyncio.to_thread(_overlaps, sessions, kind, run.id):
-                _log(kind, context.job, "skipped", started)
-                return None
             try:
                 async with asyncio.timeout(kind.timeout):
                     result = await kind.func(run, **values)
@@ -267,11 +259,11 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
             except BaseException as error:
                 await asyncio.to_thread(_record_failure, settings, run.id, run.attempt, error)
                 if kind.notify and not _retries(kind, context.job, error):
-                    await asyncio.to_thread(_ended, sessions, kind, context.job, "failed")
+                    await asyncio.to_thread(_ended, settings, sessions, context.job, failed=True)
                 _log(kind, context.job, "failed", started)
                 raise
             if kind.notify:
-                await asyncio.to_thread(_ended, sessions, kind, context.job, "finished")
+                await asyncio.to_thread(_ended, settings, sessions, context.job, failed=False)
             _log(kind, context.job, "finished", started)
             return result
 
@@ -280,9 +272,6 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
     def run_sync(context: JobContext, **args: Any) -> Any:
         started = time.monotonic()
         run, values = arguments(context, args)
-        if kind.every and _overlaps(sessions, kind, run.id):
-            _log(kind, context.job, "skipped", started)
-            return None
         try:
             result = kind.func(run, **values)
         except JobAborted:
@@ -290,11 +279,12 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
             raise
         except BaseException as error:
             _record_failure(settings, run.id, run.attempt, error)
-            if not _retries(kind, context.job, error):
-                _ended(sessions, kind, context.job, "failed")
+            if kind.notify and not _retries(kind, context.job, error):
+                _ended(settings, sessions, context.job, failed=True)
             _log(kind, context.job, "failed", started)
             raise
-        _ended(sessions, kind, context.job, "finished")
+        if kind.notify:
+            _ended(settings, sessions, context.job, failed=False)
         _log(kind, context.job, "finished", started)
         return result
 
@@ -305,8 +295,8 @@ def make_app(settings: Settings, sessions: sessionmaker[Session], *, schedules: 
     """A Procrastinate app on the app's own login, with every registered kind.
 
     With schedules, its workers queue the scheduled kinds: every worker tries each tick, and
-    procrastinate_periodic_defers lets one job per kind and tick through. The queueing lock
-    keeps at most one of them waiting."""
+    procrastinate_periodic_defers lets one job per kind and tick through. The lock runs one
+    at a time, and the queueing lock drops a tick while another is still waiting."""
     app = App(connector=PsycopgConnector(conninfo=conninfo(settings), min_size=1, max_size=4))
     for kind in kinds().values():
         waits = WAITS[kind.queue] if kind.retry else ()
@@ -323,6 +313,7 @@ def make_app(settings: Settings, sessions: sessionmaker[Session], *, schedules: 
                 periodic_id="",
                 configure_kwargs={
                     "task_kwargs": dict(kind.every_args or {}),
+                    "lock": kind.name,
                     "queueing_lock": kind.name,
                 },
             )
@@ -344,7 +335,7 @@ async def recover(app: App, settings: Settings, sessions: sessionmaker[Session])
                 if kind and kind.interrupted:
                     await asyncio.to_thread(kind.interrupted, sessions, dict(job.task_kwargs))
                 if kind and kind.notify:
-                    await asyncio.to_thread(_ended, sessions, kind, job, "failed")
+                    await asyncio.to_thread(_ended, settings, sessions, job, failed=True)
         except Exception:
             # Another worker recovered it first.
             continue

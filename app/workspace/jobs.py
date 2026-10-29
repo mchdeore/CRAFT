@@ -15,7 +15,7 @@ class NotebookRunJob(Shape):
     output: Annotated[str, msgspec.Meta(min_length=1, max_length=255, pattern=r"\.ipynb$")]
 
 
-@operation(SIGNED_IN, job=Job(queue="interactive", retry=False, timeout=17 * 60))
+@operation(SIGNED_IN, job=Job(queue="interactive", retry=False, timeout=17 * 60, notify=True))
 async def notebook_run(caller: Caller, request: NotebookRunJob) -> None:
     """Run one owned notebook in a sandbox and copy its executed copy and outputs back."""
     await service.notebook_job(caller, request.path, request.output)

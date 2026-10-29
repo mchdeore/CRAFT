@@ -38,8 +38,9 @@ def add(session, user, kind: str, ref_kind: str, ref_id: str) -> None:
     storage.add(session, user, kind, ref_kind, ref_id)
 
 
-def job_ended(sessions, user, job_id: int, failed: bool) -> None:
-    with unit_of_work(sessions) as session:
+def job_ended(caller: Caller, user, job_id: int, failed: bool) -> None:
+    assert caller.sessions is not None
+    with unit_of_work(caller.sessions) as session:
         storage.add(session, user, "job_failed" if failed else "job_done", "job", str(job_id))
 
 

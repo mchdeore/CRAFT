@@ -93,20 +93,6 @@ def running_count(session: Session, kind: str, requested_by: str) -> int:
     ).scalar_one()
 
 
-def older_running(session: Session, kind: str, job_id: int) -> bool:
-    """Another job of this kind, queued before this one, is still running."""
-    return (
-        session.execute(
-            text(
-                "select 1 from procrastinate_jobs"
-                " where task_name = :kind and status = 'doing' and id < :id limit 1"
-            ),
-            {"kind": kind, "id": job_id},
-        ).first()
-        is not None
-    )
-
-
 def save_progress(session: Session, job_id: int, done: int, total: int, note: str | None) -> None:
     statement = insert(job_progress).values(job_id=job_id, done=done, total=total, note=note)
     session.execute(

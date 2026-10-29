@@ -41,6 +41,8 @@ def upgrade() -> None:
             CONSTRAINT ck_notifications_ref_kind CHECK (ref_kind IN ('job', 'run'))
         );
         CREATE INDEX ix_notifications_user_id_id ON notifications (user_id, id);
+        CREATE UNIQUE INDEX uq_notifications_job ON notifications (ref_id)
+            WHERE ref_kind = 'job';
         GRANT SELECT, INSERT, UPDATE, DELETE ON notifications TO craft_app;
         """
     )

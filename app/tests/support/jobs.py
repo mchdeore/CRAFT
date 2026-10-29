@@ -60,12 +60,14 @@ def managed(caller: Caller) -> None:
 class Count(Shape):
     total: int
     fail: bool = False
+    seconds: float = 0
 
 
 @operation(SIGNED_IN, job=Job(queue="interactive", retry=False, notify=True))
 def counted(caller: Caller, request: Count) -> None:
-    """Report progress on every step, then finish, or fail when asked to."""
+    """Report progress on every step, wait `seconds`, then finish or fail when asked to."""
     for done in range(1, request.total + 1):
         report_progress(done, request.total, "Counting")
+    time.sleep(request.seconds)
     if request.fail:
         raise PermanentError()

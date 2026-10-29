@@ -207,7 +207,7 @@ TICKS: list[int] = []
 TICK = {"seconds": 0.0}
 
 
-@operation(PUBLIC, job=Job(queue="bulk", every="* * * * *"))
+@operation(PUBLIC, job=Job(queue="bulk", retry=False, every="* * * * *"))
 async def tick(caller: Caller) -> None:
     """A scheduled job that records each run."""
     TICKS.append(current_job.get().id)
@@ -234,10 +234,15 @@ def test_a_scheduled_job_is_public_with_no_input():
     def signed_in(caller: Caller) -> None:
         """Not a scheduled job."""
 
-    with pytest.raises(ValueError):
-        operation(SIGNED_IN, job=Job(queue="bulk", every="* * * * *"))(signed_in)
-    with pytest.raises(ValueError):
-        operation(PUBLIC, job=Job(queue="bulk", every="often"))(signed_in)
+    for access, job in [
+        (SIGNED_IN, Job(queue="bulk", retry=False, every="* * * * *")),
+        # A retry would put the job back in the queue beside the next tick's.
+        (PUBLIC, Job(queue="bulk", every="* * * * *")),
+        (PUBLIC, Job(queue="bulk", retry=False, every="* * * * *", notify=True)),
+        (PUBLIC, Job(queue="bulk", retry=False, every="often")),
+    ]:
+        with pytest.raises(ValueError):
+            operation(access, job=job)(signed_in)
 
 
 def test_two_workers_queue_a_scheduled_job_once_per_tick(settings, jobs, owner_engine):
@@ -273,26 +278,43 @@ def test_two_workers_queue_a_scheduled_job_once_per_tick(settings, jobs, owner_e
     jobs.cancel(queued[0])
 
 
-def test_a_tick_is_skipped_while_the_previous_run_goes(settings, jobs, monkeypatch):
-    from app.infrastructure.operations.jobs import SCHEDULED
-    from app.jobs import storage
-
+def test_a_tick_during_a_run_waits_for_it_and_runs_as_the_system(
+    settings, jobs, owner_engine, monkeypatch
+):
+    name = tick.__operation__.name
     monkeypatch.setitem(TICK, "seconds", 1.0)
     TICKS.clear()
+    app = queue.make_app(settings, jobs.sessions)
+    periodic = app.periodic_registry.periodic_tasks[(name, "")]
+    at = 2 * 10**10 + uuid4().int % 10**9
 
-    def queue_tick():
-        with jobs.sessions.begin() as session:
-            args = SCHEDULED | {"timestamp": 0}
-            return storage.defer(session, "bulk", tick.__operation__.name, args, None)
+    def defer(timestamp):
+        async def run():
+            async with app.open_async():
+                await PeriodicDeferrer(app.periodic_registry).defer_jobs([(periodic, timestamp)])
 
+        asyncio.run(run())
+        with owner_engine.connect() as connection:
+            return connection.execute(
+                text("select max(id) from procrastinate_jobs where task_name = :name"),
+                {"name": name},
+            ).scalar_one()
+
+    # Two job slots, so only the lock keeps the second tick from overlapping the first.
     with queue.worker_thread(settings, ["bulk"], concurrency=2):
-        first = queue_tick()
+        first = defer(at)
         jobs.wait(first, {"started"})
-        second = queue_tick()
+        second = defer(at + 60)
+        time.sleep(0.5)
+        assert (jobs.row(first).state, jobs.row(second).state) == ("started", "queued")
         jobs.wait(second, {"finished"})
-        assert jobs.row(first).state == "started"
-        jobs.wait(first, {"finished"})
-    assert TICKS == [first]
+    assert TICKS == [first, second]
+    call_log = metadata.tables["call_log"]
+    with owner_engine.connect() as connection:
+        users = connection.execute(
+            select(call_log.c.user_id, call_log.c.origin).where(call_log.c.name == name)
+        ).all()
+    assert users and set(users) == {(None, "python")}
 
 
 def test_a_job_reports_progress_and_notifies_its_requester(settings, jobs, person):
@@ -316,3 +338,90 @@ def test_a_job_reports_progress_and_notifies_its_requester(settings, jobs, perso
             ).tuples()
         )
     assert written == {("job_done", "job", str(done)), ("job_failed", "job", str(failed))}
+
+
+def test_progress_is_checked_and_written_at_most_once_a_second(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.infrastructure.operations.jobs import report_progress
+    from app.jobs import handlers
+
+    with pytest.raises(RuntimeError):
+        report_progress(1, 2)
+    written = []
+    monkeypatch.setattr(handlers, "save_progress", lambda *args: written.append(args[2:]))
+    running = current_job.set(SimpleNamespace(sessions=None, id=7, progress_at=[0.0]))
+    try:
+        for bad in [(3, 2, None), (-1, 2, None), (1, 2, "x" * 81)]:
+            with pytest.raises(ValueError):
+                report_progress(*bad)
+        for done in range(1, 11):
+            report_progress(done, 10, "Counting")
+    finally:
+        current_job.reset(running)
+    # The first step, then nothing within the second, then always the last step.
+    assert written == [(1, 10, "Counting"), (10, 10, "Counting")]
+
+
+def test_a_missed_tick_runs_once_late_and_an_older_one_not_at_all(settings, jobs):
+    app = queue.make_app(settings, jobs.sessions)
+    name = tick.__operation__.name
+    deferrer = PeriodicDeferrer(app.periodic_registry)
+    periodic = app.periodic_registry.periodic_tasks[(name, "")]
+    # A worker that starts between ticks queues the last one, once.
+    minute = 10**10 - 10**10 % 60
+    assert list(deferrer.get_timestamps(periodic, None, minute + 30)) == [minute]
+    assert list(deferrer.get_timestamps(periodic, minute, minute + 30)) == []
+    # The daily prune at 03:17 is queued by a worker starting at 03:20 but not at 04:00:
+    # a missed day waits for the next one (the prune is idempotent).
+    prune = app.periodic_registry.periodic_tasks[("maintenance.prune", "")]
+    day = 10**10 - 10**10 % 86400
+    assert list(deferrer.get_timestamps(prune, None, day + 3 * 3600 + 20 * 60)) == [
+        day + 3 * 3600 + 17 * 60
+    ]
+    assert list(deferrer.get_timestamps(prune, None, day + 4 * 3600)) == []
+
+
+def test_a_notification_that_cannot_be_written_never_fails_the_job(settings, jobs):
+    # The fixture's requester has no account row, so the notification insert fails.
+    with queue.worker_thread(settings, ["interactive"]):
+        job = jobs.defer(test_jobs.counted, total=1)
+        assert jobs.wait(job, {"finished", "failed"}).state == "finished"
+
+
+@pytest.mark.slow
+def test_a_killed_workers_notify_job_fails_and_tells_its_requester(
+    settings, jobs, person, monkeypatch
+):
+    environment = os.environ | {
+        "CRAFT_DATABASE_NAME": settings.database_name,
+        "CRAFT_WORKER_QUEUES": "interactive",
+    }
+    worker = subprocess.Popen(
+        [sys.executable, "-m", "app.tests.support.job_worker"], cwd=ROOT, env=environment
+    )
+    try:
+        job = jobs.defer(test_jobs.counted, requested_by=person, total=1, seconds=60)
+        jobs.wait(job, {"started"}, seconds=30)
+    finally:
+        os.kill(worker.pid, signal.SIGKILL)
+        worker.wait()
+    monkeypatch.setattr(queue, "STALLED_SECONDS", 2.0)
+    monkeypatch.setattr(queue, "RECOVER_SECONDS", 0.5)
+    with queue.worker_thread(settings, ["interactive"]):
+        jobs.wait(job, {"finished", "failed"}, seconds=30)
+        # Recovery records the lost worker just after it fails the job.
+        deadline = time.monotonic() + 10
+        while jobs.row(job).error is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+    assert tuple(jobs.row(job))[::2] == ("failed", "WorkerLost")
+    notifications = metadata.tables["notifications"]
+    with jobs.sessions.begin() as session:
+        written = list(
+            session.execute(
+                select(notifications.c.kind, notifications.c.ref_id).where(
+                    notifications.c.user_id == person
+                )
+            ).tuples()
+        )
+    assert written == [("job_failed", str(job))]

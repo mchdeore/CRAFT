@@ -11,7 +11,7 @@ PROGRESS_DAYS = 30
 READ_NOTIFICATION_DAYS = 90
 
 
-@operation(PUBLIC, job=Job(queue="bulk", every="17 3 * * *"))
+@operation(PUBLIC, job=Job(queue="bulk", retry=False, every="17 3 * * *"))
 def prune(caller: Caller) -> None:
     """Delete expired workspace tokens and sign-in sessions, old job progress and old read
     notifications. (Agent run events keep their own one-day clean-up.)"""

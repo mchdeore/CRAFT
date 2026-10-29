@@ -47,10 +47,17 @@ PROGRESS_SECONDS = 1.0
 
 def report_progress(done: int, total: int, note: str | None = None) -> None:
     """From inside a job: `done` of `total` steps. Written at most once a second, and always
-    on the last step. note is a short fixed phrase from code, never content."""
+    on the last step. note is a short fixed phrase from code, never content. It writes to the
+    database, so an async job calls it through asyncio.to_thread."""
     job = current_job.get()
     if job is None:
         raise RuntimeError("Progress is reported from inside a job")
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError("An async job reports progress through asyncio.to_thread")
     if not 0 <= done <= total or (note is not None and len(note) > 80):
         raise ValueError("Invalid progress")
     now = monotonic()

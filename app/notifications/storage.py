@@ -13,6 +13,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database.metadata import metadata
@@ -31,12 +32,20 @@ notifications = Table(
     CheckConstraint("ref_kind IN ('job', 'run')", name="ref_kind"),
 )
 Index("ix_notifications_user_id_id", notifications.c.user_id, notifications.c.id)
+# A job ends once: a worker lost after its notification can't write a second one.
+Index(
+    "uq_notifications_job",
+    notifications.c.ref_id,
+    unique=True,
+    postgresql_where=notifications.c.ref_kind == "job",
+)
 
 
 def add(session: Session, user, kind: str, ref_kind: str, ref_id: str) -> None:
-    session.execute(
-        notifications.insert().values(user_id=user, kind=kind, ref_kind=ref_kind, ref_id=ref_id)
+    statement = insert(notifications).values(
+        user_id=user, kind=kind, ref_kind=ref_kind, ref_id=ref_id
     )
+    session.execute(statement.on_conflict_do_nothing())
 
 
 def page(session: Session, user, unread: bool, limit: int):
