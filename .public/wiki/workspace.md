@@ -8,11 +8,11 @@ Each owner has a workspace of their own: a JupyterLab server that JupyterHub sta
 
 ## Files and skills
 
-Configured workspace tools let the agent list and read the owner's files. The agent runs Python with `run_code` and changes files with `write_file` or `edit_notebook`; each call waits for the requester's approval, which shows the exact code or change, and runs once in the owner's own kernel with the owner's access. Code the owner runs in Jupyter needs no approval. In Skills, write instructions in the document editor and choose **Save to workspace** to create a Markdown file under `/workspace/skills`. Load a file to edit its current contents, or choose New for another document. The sidebar shows actual registered tool metadata and inserts tool names or personal file paths into the document. These files are not registered as app skills or immutable revisions.
+Configured workspace tools let the agent list and read the owner's files. The agent runs Python with `run_code` and changes files with `write_file` or `edit_notebook`; each call waits for the requester's approval, which shows the exact code or change, and runs once in the owner's own kernel with the owner's access. Approving a `run_code` or `edit_notebook` call for a notebook grants that notebook for the conversation: later runs and edits in it go through `run_in_granted_notebook` and `edit_granted_notebook` without asking again. Code the owner runs in Jupyter needs no approval. In Skills, write instructions in the document editor and choose **Save to workspace** to create a Markdown file under `/workspace/skills`. Load a file to edit its current contents, or choose New for another document. The sidebar shows actual registered tool metadata and inserts tool names or personal file paths into the document. These files are not registered as app skills or immutable revisions.
 
 In chat, type `/` to select a personal `skills/*.md` file or `@` to select another personal file. The picker inserts the exact `/workspace` path into message text; it refers to current file contents. Personal skills can tell the agent to read or run owned paths such as `/workspace/scripts/analysis.py`. Import source originals first.
 
-Select a `/workspace` file link in a chat response to open the current personal copy beside the conversation. The preview supports text, Python, notebook cells and saved text output, Word, Excel, PDF and PNG files. Refresh reloads saved contents; Download exports the copy. Edit scripts and notebooks in JupyterLab or ask the agent to update the owned file.
+Select a `/workspace` file link in a chat response to open the current personal copy beside the conversation. The preview supports text, Python, notebook cells and saved text output, Word, Excel, PDF and PNG files. Refresh reloads saved contents; Download exports the copy. Word and PowerPoint page previews come from the workspace and refuse a file over 25 MiB. Edit scripts and notebooks in JupyterLab or ask the agent to update the owned file.
 
 ## Source copies
 
@@ -39,7 +39,7 @@ craft.save(totals, "results/totals.csv")
 craft.docs.report("results/summary.docx", "Sales", "# Totals", totals)
 ```
 
-`read` and `save` choose the format from the extension: CSV, TSV, Excel, Parquet, JSON, Markdown, Word, PowerPoint, PDF text, Matplotlib figures and plain text. `craft.docs` reads, edits and builds Word, PowerPoint, PDF and Excel files. Starter skills `documents.md`, `analysis.md` and `cube.md` are copied into `USER_ROOT/skills` on first start; an existing file with the same name is kept.
+`save` and `craft.excel` write a hidden file beside the target and then replace it, so a failed save never leaves half a file. `read` and `save` choose the format from the extension: CSV, TSV, Excel, Parquet, JSON, Markdown, Word, PowerPoint, PDF text, Matplotlib figures and plain text. `craft.docs` reads, edits and builds Word, PowerPoint, PDF and Excel files. Starter skills `documents.md`, `analysis.md` and `cube.md` are copied into `USER_ROOT/skills` on first start; an existing file with the same name is kept.
 
 ## CRAFT access points
 
@@ -103,6 +103,7 @@ JupyterHub runs from its own unmodified chart beside CRAFT's on the same cluster
 - `GET /api/workspace`, `POST /api/workspace/start` and `POST /api/workspace/stop` report `stopped`, `starting` or `ready` and where JupyterLab opens ([api-contract](api-contract.md)). Start returns at once; the Hub tracks the spawn.
 - Hub names are CRAFT user IDs. On a person's first start CRAFT creates their Hub user and links it to their craft-id account; only then can they sign in to JupyterLab.
 - An agent run starts a stopped workspace and waits up to 90 seconds for it before its first workspace action.
+- Only Jupyter's 404 means a notebook is missing. An outage or server error returns an error and never replaces a notebook with a new empty one.
 
 Each workspace pod accepts traffic only from the Hub and its proxy, and reaches only CRAFT's API, the Hub and DNS. Installing Python packages or reaching external services requires a new reviewed image or a supplied CRAFT operation, rather than internet access from user code.
 
@@ -120,6 +121,29 @@ once; a lost response is an unknown outcome. Keep Markdown skill files under
 contents through a small approved `run_code` call; the direct list/notebook tools
 do not read plain Markdown files. Personal files remain separate from the registered
 CRAFT skill catalog.
+
+## Notebook runs
+
+`run_notebook` (`POST /api/workspace/notebooks/runs`) runs a whole notebook unattended, after the requester's approval when the agent asks. It queues a job on the `interactive` queue and returns at once; the original notebook is never changed. The executed copy is saved beside it as `<name>.run-<time>.ipynb`, and new or changed files in its `outputs/` folder come back beside it too. An existing file is never overwritten: a clashing result gets a `.run-<time>` name. A run has 15 minutes, and each cell 2 minutes.
+
+On the cluster a run is a Kubernetes Job on the person's own volume (`claim-<CRAFT user ID>`), from the workspace image, so the person's JupyterLab need not be running and no file passes through the worker:
+
+- A trusted first step makes a run folder on the volume.
+- The notebook runs with no network, a read-only root, and its folder read-only, with only the run's `outputs/` writable. A write anywhere else fails as read-only.
+- A trusted last step moves the executed copy and outputs into place with hard links, never overwriting, then deletes the run folder.
+
+Cancelling the job deletes the Job, which stops the run within seconds. The interactive worker creates these Jobs with its own service account, which may only create, read and delete Jobs; an admission policy holds every such Job to this shape, so it cannot mount another volume ([deploy/README.md](https://github.com/mchdeore/CRAFT/blob/main/deploy/README.md)). Under Docker Compose, until it is removed, the same operation runs the notebook's folder in a restricted Docker container instead.
+
+## Activity log
+
+A person's own work in JupyterLab never passes through CRAFT's operations, so the workspace logs it itself. Each line is JSON in CRAFT's log format on the pod's output, with `user_id` set to the CRAFT user ID, so `kubectl logs` lines join the call log:
+
+- File saves, renames, copies and deletes, with path and size. Reads are not logged.
+- Kernel starts, restarts, interrupts and shutdowns, with their outcome.
+- Cell runs, with notebook path, execution count, duration and outcome. They are read from the kernel's messages by the server, so code in a kernel cannot write or fake them.
+- Requests that change something, and failures, with method, path, status and duration, never the query string.
+
+No line holds code, outputs or file content.
 
 ## Notebook SDK reads
 

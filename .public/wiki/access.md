@@ -6,7 +6,7 @@ The command-line interface (CLI) creates local accounts. Agent-User Interaction 
 
 | Item | Now | Deferred |
 |---|---|---|
-| Sign-in | People sign in at craft-id, the identity provider CRAFT runs, through the OpenID Connect code flow ([identity](identity.md)). craft-app receives a signed ID token and links the person to a CRAFT user by tenant and object ID. Someone without an account sees "no access yet" until an admin runs `craft users approve`. Passwords live only in craft-id (Argon2id, at least `CRAFT_PASSWORD_MIN_LENGTH` characters), and accounts are created with `craft id users add`. No sign-up or email recovery | None: craft-id mirrors Entra ID's flow and claims and is permanent |
+| Sign-in | People sign in at craft-id, the identity provider CRAFT runs, through the OpenID Connect code flow ([identity](identity.md)). craft-app receives a signed ID token and links the person to a CRAFT user by tenant and object ID. Someone without an account sees "no access yet" until an admin runs `craft users approve`. Passwords live only in craft-id (Argon2id, at least `CRAFT_PASSWORD_MIN_LENGTH` characters), and accounts are created with `craft id users add`. A sign-in that fails at the provider, including craft-id being unreachable or answering with something malformed, returns to the interface with `signIn=failed` instead of an error. No sign-up or email recovery | None: craft-id mirrors Entra ID's flow and claims and is permanent |
 | Roles | `member` uses CRAFT; `admin` also manages accounts through `craft users promote`. Operation and resource permissions apply to both | Expanded role mapping. New values in a database check constraint (`CHECK`) require a migration |
 | Approvals | The requester decides an effectful action under [Human approval](agent.md#human-approval). The agent cannot decide | Expanded decision policy in [Deferred](roadmap.md#deferred) |
 
@@ -112,6 +112,10 @@ A workspace token lets owned Python call the same HTTP routes as the browser, as
 | Ending | `DELETE /api/me/workspace-tokens/:id`, expiry or a disabled account stops later use with `401` |
 | Storage | 32 random bytes, stored only as a SHA-256 digest with label, creation, expiry, last use (updated at most once a minute) and revocation times |
 
-The workspace image reads the token from `CRAFT_TOKEN_FILE` (default `/run/craft/workspace-token`), a private file outside `USER_ROOT`, or from `craft.login()` for the current kernel only. `CRAFT_API_URL` names the server origin.
+The workspace image reads the token from `CRAFT_TOKEN_FILE` (default `/run/craft/workspace-token`), a private file outside `USER_ROOT`, or from `craft.login()` for the current kernel only. `CRAFT_API_URL` names the server origin. Workspaces started through JupyterHub get no token file yet, so a notebook calls `craft.login()` with a token the person made.
+
+## Workspace sign-in
+
+JupyterLab signs in through JupyterHub with craft-id, the same account as CRAFT. Hub users are named by CRAFT user ID; CRAFT links a person's Hub user to their craft-id account on their first start, and the Hub refuses anyone without that link. CRAFT itself reaches the Hub with one service token (`CRAFT_HUB_TOKEN`), which never expires, is rotated by hand and is never logged. It may start, stop and read servers, and create users and groups only to make that link ([workspace](workspace.md#workspaces-through-jupyterhub)).
 
 [Identity and workspace ownership](identity.md) records the stable ownership decision, separate credential lifecycles and migration/test gates. The [table reference](identity.md) distinguishes SQL conversation attachments from personal Jupyter files.

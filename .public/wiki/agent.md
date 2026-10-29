@@ -93,7 +93,7 @@ MCP (Model Context Protocol): the standard way an agent lists and calls tools. I
 - Trusted log context: parent request/call and sign-in session identifiers come from server-owned run state. MCP metadata supplies the model tool-call identifier only; it grants no identity or parent authority. The private outbound tool observation and checked operation share that identifier.
 - The loopback target defaults to `http://127.0.0.1:8000/mcp`, configurable through `CRAFT_MCP_URL`. Remote hosts, credentials, query strings and fragments are refused. DNS rebinding protection stays enabled.
 - The application's `LocalHTTPTool` makes a single dispatch attempt per ordinary MCP tool invocation. A lost response leaves the outcome unknown and raises an error without automatic reconnect or replay. It retains native result metadata, parsing, error and cancellation behavior, input filtering, authentication and run/tool-call identity. Approved local effects consume their matching approval in the effect transaction.
-- HTTP MCP runs inside the CRAFT app; the agent runtime on `worker-agent` calls it, which is why that worker shares the app's network in Compose. The optional Compose MCP service starts the same image and registry over standard input and output. MCP transports carry tool calls; they are separate from code execution and the job queue.
+- HTTP MCP runs inside the CRAFT app; the agent runtime on `worker-agent` calls it, which is why that worker runs inside the API's pod on the cluster and shares the app's network in Compose. The optional Compose MCP service starts the same image and registry over standard input and output. MCP transports carry tool calls; they are separate from code execution and the job queue.
 
 ## Human approval
 

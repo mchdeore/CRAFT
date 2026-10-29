@@ -24,7 +24,7 @@ Each folder under `app/` is one feature: `handlers.py` declares operations, `ser
 
 ## Setup
 
-Use Git, uv, a running Docker engine, Compose and Buildx; the contract type check also needs Node.js 24 with npm. Run commands from the repository root unless shown otherwise. Keep the checkout outside iCloud or other folders that download file contents on demand.
+Use Git, uv, a running Docker engine, Compose and Buildx; the contract type check also needs Node.js 24 with npm. The local cluster also needs Colima with Kubernetes, Helm and kubectl. Run commands from the repository root unless shown otherwise. Keep the checkout outside iCloud or other folders that download file contents on demand.
 
 Copy `.env.example` to an untracked `.env`. Set separate administrative, owner and application database passwords. A previously initialized database volume keeps its original passwords. Choose a free database host port and use a new disposable volume for isolated checks.
 
@@ -49,7 +49,11 @@ curl -fsS localhost:8000/health/ready
 docker compose down
 ```
 
-`docker compose down` preserves the database volume. Windows development uses the Windows Subsystem for Linux and line-feed files. Browser and container compatibility must be checked in the selected environment.
+`docker compose down` preserves the database volume. Compose has no workspaces: they need JupyterHub on the local cluster. Windows development uses the Windows Subsystem for Linux and line-feed files. Browser and container compatibility must be checked in the selected environment.
+
+## Local cluster
+
+The full stack, workspaces included, runs on Colima's built-in k3s from one Helm chart (`deploy/craft/`) with JupyterHub's own chart beside it (`deploy/jupyterhub/`). Images are built with Colima's Docker engine and used directly, with no registry. Settings come from a `craft-env` Secret made from `.env`, and the frozen set is loaded through a port forward with `scripts/seed cluster`. The steps are in [deploy/README.md](https://github.com/mchdeore/CRAFT/blob/main/deploy/README.md). Compose keeps working beside it until it is removed.
 
 ## Checks
 
@@ -60,7 +64,7 @@ scripts/check        # quick: Ruff, format, Pyright and the fast tests; contract
 scripts/check full   # milestones: lock, migrations, every test except live ones, the workspace image, Compose and contract types
 ```
 
-`scripts/check` starts a disposable PostgreSQL container, `craft-check-db`, on port 55481 with the passwords from `.env`. A plain `uv run pytest` runs the quick set: tests marked `docker`, `live` or `slow` are left out. `uv run pytest -m ''` runs everything. In a worktree, link the main checkout's `.env` first.
+`scripts/check` starts a disposable PostgreSQL container, `craft-check-db`, on port 55481 with the passwords from `.env`. A plain `uv run pytest` runs the quick set: tests marked `docker`, `cluster`, `live` or `slow` are left out. `cluster` tests need the local cluster with the branch's images and charts and run only by hand (`uv run pytest -m cluster`). `uv run pytest -m ''` runs everything. In a worktree, link the main checkout's `.env` first.
 
 Use only `craft_test` or a named disposable database for checks, never a real corpus. To run one area:
 

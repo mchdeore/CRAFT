@@ -8,7 +8,8 @@
 | Process lifecycle | Controller-owned child processes and containers, with an optional application lifespan attachment | `app/processes/` |
 | Contract | Executable TypeScript forms, routes and examples the product interface compiles against | `app/contract/` |
 | Product interface | The signed-in web interface, built by the partner team in the separate `craft-frontend` repository | Not in this repository |
-| JupyterLab workspace | The personal workspace image, its `craft` package and built-in skills | `workspace/` |
+| JupyterLab workspace | The personal workspace image, its `craft` package, built-in skills, the activity log and the notebook-run steps; JupyterHub starts one per person | `workspace/`, `deploy/jupyterhub/` |
+| Deployment | One Helm chart for the API, workers, craft-id and PostgreSQL on the local k3s cluster | `deploy/` |
 | Workers | Background jobs from the PostgreSQL queue, including chat turns ([background jobs](processes.md#background-jobs)) | `craft worker` in `app/` |
 
 ## Application boundaries
@@ -30,6 +31,9 @@ The application agent uses `app/agent/` and PostgreSQL state. Backend chart rend
 | 5 | Local MCP application | Backend | MCP over standard input and output through `craft mcp --as <username>` | Tool calls only |
 | 6 | Backend | Document provider | Python functions over the provider folder ([document provider](datacube.md#document-provider)) | Changes and original files |
 | 7 | Backend | Workers | Jobs in PostgreSQL (`LISTEN`/`NOTIFY`) | Chat turns and other background jobs; run events back to the backend |
+| 8 | Backend | JupyterHub | Hub REST API + one service token | Start, stop and status of a person's workspace |
+| 9 | Backend | Person's JupyterLab | Jupyter Contents API and the notebook control server, through the Hub's proxy | The agent's workspace reads and approved writes |
+| 10 | Interactive worker | Kubernetes API | Jobs, with a service account limited to them | Unattended notebook runs on the person's volume |
 
 - One entry point: every route and tool is an `@operation` handler ([backend conventions](development.md#backend-conventions)). A person, a script and the agent get the same checks and log line.
 - Services aren't agent-only: every tool is also a route.

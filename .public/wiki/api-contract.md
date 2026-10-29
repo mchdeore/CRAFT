@@ -127,7 +127,7 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `POST /api/workspace/charts` | `SaveChart` | `SavedChart` | signed in; own workspace; requester approval when called by the agent | `save_chart` |
 | `POST /api/workspace/notebooks/run` | `GrantedRun` | `CodeResult` | signed in; own workspace; a notebook grant when called by the agent | `run_in_granted_notebook` |
 | `POST /api/workspace/notebooks/edit-granted` | `EditNotebook` | `EditedNotebook` | signed in; own workspace; a notebook grant when called by the agent | `edit_granted_notebook` |
-| `POST /api/workspace/notebooks/runs` | `RunNotebook` | `NotebookRunQueued` | signed in; own workspace; requester approval when called by the agent; at most two at once | `run_notebook` |
+| `POST /api/workspace/notebooks/runs` | `RunNotebook` | `NotebookRunQueued` | signed in; own workspace; requester approval when called by the agent | `run_notebook` |
 | `GET /api/cube/missions` | —; query `{query?: string; limit?: number}` | `Mission[]` | signed in; live resource access | `list_missions` |
 | `GET /api/cube/parameters` | — | `Parameter[]` | signed in; live resource access | `list_parameters` |
 | `POST /api/cube/find` | `FindMissions` | `FoundMissions` | signed in; live resource access | `find_missions` |

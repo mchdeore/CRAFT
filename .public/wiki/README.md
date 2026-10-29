@@ -10,7 +10,7 @@ This wiki is the source of truth for what CRAFT is and how it works. It is publi
 |---|---|
 | Users | Local accounts and server-owned sessions |
 | Data | Simulated, labelled corpus |
-| Runs on | Local backend and Docker Compose, or a local k3s cluster from one Helm chart |
+| Runs on | A local k3s cluster from one Helm chart, with JupyterHub for the workspaces; Docker Compose still runs the backend without workspaces until it is removed |
 | Agent | One agent, run inside the CRAFT backend |
 | Approvals | The requester decides effectful agent actions; the agent never decides |
 | Stack | Python, FastAPI, msgspec, PostgreSQL with pgvector, SQLAlchemy; Microsoft Agent Framework with models from Microsoft Foundry; the product interface is the separate `craft-frontend` repository, built against the API contract |
