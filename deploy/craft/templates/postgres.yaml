@@ -85,6 +85,9 @@ spec:
                 values:
                   - api
                   - id
+                  {{- if .Values.backup.enabled }}
+                  - backup
+                  {{- end }}
                   {{- range .Values.workers }}{{ if not .inApiPod }}
                   - {{ .name }}
                   {{- end }}{{ end }}
