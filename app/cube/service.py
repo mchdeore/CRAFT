@@ -396,6 +396,14 @@ def decimal_text(value):
     )
 
 
+def label_values(caller, request):
+    from app.cube.handlers import ValueLabel
+
+    with unit_of_work(scope(caller), read_only=True) as session:
+        rows = storage.value_labels(session, caller, request.ids)
+    return [ValueLabel(id=row["id"], label=row["label"]) for row in rows]
+
+
 def get_value_evidence(caller, request):
     from app.cube.handlers import ValueEvidence
 

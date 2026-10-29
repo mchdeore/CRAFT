@@ -15,3 +15,4 @@ def test_reset_password_creates_a_missing_credential(provider: Provider) -> None
     assert service.authenticate(provider.sessions, username, "a-new-long-password") is not None
     assert service.set_password(provider.sessions, username, "a-third-long-password")
     assert service.authenticate(provider.sessions, username, "a-new-long-password") is None
+    assert service.authenticate(provider.sessions, username, "a-third-long-password") is not None

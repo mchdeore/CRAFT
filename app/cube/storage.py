@@ -197,6 +197,20 @@ def value(session: Session, caller: Caller, identifier):
     return dict(row) if row else None
 
 
+def value_labels(session: Session, caller: Caller, identifiers):
+    """The readable values among these IDs, each with its parameter's label."""
+    return (
+        session.execute(
+            select(m.cube_values.c.id, m.parameters.c.label)
+            .join(m.parameters, m.parameters.c.key == m.cube_values.c.parameter)
+            .where(m.cube_values.c.id.in_(list(identifiers)), state.readable_values(caller))
+            .order_by(m.cube_values.c.id)
+        )
+        .mappings()
+        .all()
+    )
+
+
 def matching_groups(picked, conditions, active_items):
     groups = (
         select(picked.c.mission_key, picked.c.silo, picked.c.stage, picked.c.element_id)

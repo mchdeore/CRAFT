@@ -54,12 +54,17 @@ def test_files_must_match_their_checksums(tmp_path: Path) -> None:
     ]
     (tmp_path / "craft_dev.dump").unlink()
     assert frozen.file_problems(tmp_path, expected)[0] == "craft_dev.dump: missing"
+    # A manifest that leaves out a restored file checks nothing for it, so it is refused.
+    assert frozen.file_problems(tmp_path, manifest(tmp_path)) == [
+        "craft_dev.dump: not listed in the manifest"
+    ]
     with pytest.raises(SystemExit, match="Does not match cube-test"):
         frozen.main(["files", str(tmp_path)])
 
 
 def test_files_mode_reports_a_match(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    (tmp_path / "embedding").write_text("text-embedding-3-large")
+    for name in ["craft_dev.dump", "provider.tgz", "embedding"]:
+        (tmp_path / name).write_text(name)
     manifest(tmp_path)
     frozen.main(["files", str(tmp_path)])
     assert capsys.readouterr().out == "Matches cube-test's manifest (files)\n"
@@ -79,6 +84,8 @@ def test_the_database_must_match_counts_empty_tables_and_tags(
     owner_engine: Engine, tmp_path: Path
 ) -> None:
     with Session(owner_engine) as session:
+        # Left over from an interrupted sign-in elsewhere; the rollback at the end restores it.
+        session.execute(m.metadata.tables["sign_in_flows"].delete())
         rows, tags = frozen.snapshot(session, TABLES)
         good = manifest(tmp_path, rows=rows, empty=["sign_in_flows"], tags=tags)
         assert frozen.database_problems(session, good, restored=True)[1] == []
@@ -96,6 +103,11 @@ def test_the_database_must_match_counts_empty_tables_and_tags(
         renamed = manifest(tmp_path, rows=rows, tags=tags | {"stages": ["st1-renamed"]})
         assert frozen.database_problems(session, renamed, restored=True)[1] == [
             "stages: tag values differ from the manifest"
+        ]
+        nothing = manifest(tmp_path, tags={})
+        assert frozen.database_problems(session, nothing, restored=True)[1] == [
+            "rows: the manifest lists no table",
+            *(f"{family}: tag values not in the manifest" for family in frozen.TAGS),
         ]
         unknown = manifest(tmp_path, rows=rows, tags=tags | {"colours": ["red"]})
         assert frozen.database_problems(session, unknown, restored=True)[1] == [
@@ -129,3 +141,22 @@ def test_the_database_check_prints_only_names_and_counts(
 
 def test_the_settings_accept_the_seed_choice() -> None:
     Settings.from_env(read_env() | {"CRAFT_SEED": "/elsewhere/cube-v1"})
+
+
+def test_main_runs_the_restored_and_verify_checks(
+    owner_engine: Engine,
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with Session(owner_engine) as session:
+        rows, tags = frozen.snapshot(session, TABLES)
+    # stages always has rows, standing in for a table that grows with use, like the call log.
+    manifest(tmp_path, rows=rows, empty=["stages"], tags=tags)
+    monkeypatch.setenv("CRAFT_DATABASE_NAME", settings.database_name)
+    frozen.main(["verify", str(tmp_path)])
+    assert capsys.readouterr().out.endswith("Matches cube-test's manifest (verify)\n")
+    with pytest.raises(SystemExit, match="Does not match cube-test"):
+        frozen.main(["restored", str(tmp_path)])
+    assert "stages: " in capsys.readouterr().err

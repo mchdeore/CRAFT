@@ -146,16 +146,40 @@ def test_a_silo_grant_shows_only_that_silos_documents_and_values(cube_source, si
             m.cube_values.update().where(m.cube_values.c.id == budget).values(silo="budget")
         )
 
+    # A facet naming the item and a budget document: readable only with both silos.
+    budget_path = f"missions/{mission}/budget/st3-design/plan.md"
+    cube_source["provider"].write_content(budget_path, b"# Plan\n\nBudget.\n")
+    rows.load(cube_source["owner"], cube_source["provider"])
+    plan = next(
+        key for key, r in cube_source["provider"].items().items() if r["path"] == budget_path
+    )
+    with cube_source["owner"].begin() as connection:
+        both = connection.execute(
+            m.facet_texts.insert()
+            .values(mission_key=mission, facet="cost_and_risk", text="t", sources=[item, plan])
+            .values(model="test")
+            .returning(m.facet_texts.c.id)
+        ).scalar_one()
+    everything = relations(cube_source["caller"], RelationsRequest(item=item))
+    assert (item, "facet_source", f"facet:{both}") in edges(everything)
+
     outsider = silo_member("budget")
     with pytest.raises(NotFound):
         relations(outsider, RelationsRequest(item=item))
-    assert relations(outsider, RelationsRequest(mission=mission)).nodes == []
+    # The budget member sees the budget document only: no item, value or shared facet.
+    assert {node.id for node in relations(outsider, RelationsRequest(mission=mission)).nodes} == {
+        plan,
+        f"{plan}@1",
+        f"mission:{mission}",
+    }
 
     insider = silo_member("engineering")
     graph = relations(insider, RelationsRequest(item=item))
     values = {node.id for node in graph.nodes if node.kind == "value"}
     assert values == {f"value:{engineering}"}
     assert (f"{item}@1", "cited_by_value", f"value:{budget}") not in edges(graph)
+    assert f"facet:{both}" not in {node.id for node in graph.nodes}
+    assert plan not in {node.id for node in graph.nodes}
 
 
 def test_the_route_checks_access_and_logs_the_call(cube_source):

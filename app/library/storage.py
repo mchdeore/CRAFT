@@ -452,25 +452,6 @@ def relation_rows(session: Session, items=None, targets=None):
     return [dict(row) for row in session.execute(query).mappings()]
 
 
-def relation_values(session: Session, caller: Caller, identifiers):
-    """Labels of the cube values the caller's mission and silo grants reach, admin or not."""
-    grant = (
-        select(m.mission_grants.c.user_id)
-        .where(
-            m.mission_grants.c.user_id == caller.user_id,
-            m.mission_grants.c.mission_key == m.cube_values.c.mission_key,
-            or_(m.mission_grants.c.silo.is_(None), m.mission_grants.c.silo == m.cube_values.c.silo),
-        )
-        .exists()
-    )
-    query = (
-        select(m.cube_values.c.id, m.parameters.c.label)
-        .join(m.parameters, m.parameters.c.key == m.cube_values.c.parameter)
-        .where(grant, m.cube_values.c.id.in_([UUID(value) for value in identifiers]))
-    )
-    return {str(row["id"]): row["label"] for row in session.execute(query).mappings()}
-
-
 def relation_facets(session: Session, identifiers):
     """Facet texts by ID, with their facet key and the items they name as sources."""
     query = select(m.facet_texts.c.id, m.facet_texts.c.facet, m.facet_texts.c.sources).where(

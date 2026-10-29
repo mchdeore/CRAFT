@@ -859,10 +859,11 @@ def relations(caller: Caller, request):
     """One item's neighbourhood, or a mission's documents, from the document_relations view.
 
     Only frozen rows are read: no provider call and no model. A document appears when the
-    caller may read it; a cube value when their grants reach its mission and silo (admins
-    too, as for every cube read); a facet text only when every one of its sources is
-    readable, as read_facets requires.
+    caller may read it; a cube value when the cube's own rule (cube.label_values) lets them
+    read it, so mission and silo grants apply to admins too; a facet text only when every one
+    of its sources is readable, as read_facets requires.
     """
+    from app.cube import handlers as cube
     from app.library.handlers import Graph, GraphEdge, GraphNode
 
     if request.item is None and request.mission is None:
@@ -874,13 +875,18 @@ def relations(caller: Caller, request):
         if request.item is not None and not documents:
             raise NotFound()
         found = storage.relation_rows(session, items=documents)
-        wanted = {kind: {r["target"] for r in found if r["target_kind"] == kind} for kind in KINDS}
-        values = storage.relation_values(session, caller, wanted["value"])
+    wanted = {kind: {r["target"] for r in found if r["target_kind"] == kind} for kind in KINDS}
+    values = (
+        cube.label_values(caller, cube.ValueLabels(ids=[UUID(v) for v in wanted["value"]]))
+        if wanted["value"]
+        else []
+    )
+    with unit_of_work(sessions, read_only=True) as session:
         facets = storage.relation_facets(session, wanted["facet"])
         sources = {item for facet in facets.values() for item in facet["sources"]}
         readable = storage.relation_documents(session, caller, sources).keys()
         labels = {
-            "value": values,
+            "value": {str(value.id): value.label for value in values},
             "facet": {k: f["facet"] for k, f in facets.items() if set(f["sources"]) <= readable},
             # Mission titles are cube data; the key is already a tag on the readable document.
             "mission": {key: key for key in wanted["mission"]},

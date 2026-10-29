@@ -142,6 +142,15 @@ class ValueRef(Shape):
     id: UUID
 
 
+class ValueLabels(Shape):
+    ids: list[UUID]
+
+
+class ValueLabel(Shape):
+    id: UUID
+    label: str
+
+
 class CubeValue(Shape):
     id: UUID
     mission: str
@@ -298,3 +307,12 @@ def compare_missions(caller: Caller, request: CompareMissions) -> Comparison:
 def get_value_evidence(caller: Caller, request: ValueRef) -> ValueEvidence:
     """Read the cited source row and conversion for a value. Use an accepted value identifier."""
     return service.get_value_evidence(caller, request)
+
+
+@operation(SIGNED_IN)
+def label_values(caller: Caller, request: ValueLabels) -> list[ValueLabel]:
+    """Name the values among these IDs the caller's grants reach; the rest are left out.
+
+    Other features (library relations) use it so the cube's value rule is applied in one place.
+    """
+    return service.label_values(caller, request)
