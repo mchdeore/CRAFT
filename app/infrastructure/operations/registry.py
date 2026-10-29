@@ -21,7 +21,8 @@ class Job:
     every is a cron string: the workers queue the job once per tick, as the system (a PUBLIC
     operation with no input, never retried: the next tick runs it again). Runs never overlap:
     a tick during a run waits for it, and further ticks while one waits are dropped.
-    notify tells the person who queued the job when it finishes or finally fails.
+    notify tells the person who queued the job when it finishes or finally fails (a worker
+    shutting down mid-run counts as failing; the owner's own cancel doesn't notify).
     """
 
     queue: str

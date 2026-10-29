@@ -385,9 +385,10 @@ def test_task_mode_runs_longer_once_per_person_and_notifies(chat, monkeypatch):
             .values(owner_id=chat["caller"].user_id, title="Simulated task")
             .returning(conversations.c.id)
         ).scalar_one()
+        running = uuid4()
         connection.execute(
             runs.insert().values(
-                id=uuid4(),
+                id=running,
                 conversation_id=other,
                 started_by=chat["caller"].user_id,
                 status="running",
@@ -395,6 +396,11 @@ def test_task_mode_runs_longer_once_per_person_and_notifies(chat, monkeypatch):
                 instructions_version="simulated",
                 mode="task",
             )
+        )
+        connection.execute(
+            m.metadata.tables["agent_run_inputs"]
+            .insert()
+            .values(run_id=running, segment=1, owner_id=chat["caller"].user_id, input={})
         )
     try:
         with pytest.raises(RateLimited):

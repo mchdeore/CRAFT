@@ -52,7 +52,7 @@ api:
 workers:
   - name: worker
     queues: agent,bulk
-    concurrency: { agent: 10, bulk: 2 }
+    concurrency: { agent: 20, bulk: 2 }
     memory: 1Gi
     stopSeconds: 900         # a chat turn's ceiling
     inApiPod: true

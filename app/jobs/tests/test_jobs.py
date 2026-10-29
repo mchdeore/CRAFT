@@ -286,7 +286,7 @@ def test_a_tick_during_a_run_waits_for_it_and_runs_as_the_system(
     settings, jobs, owner_engine, monkeypatch
 ):
     name = tick.__operation__.name
-    monkeypatch.setitem(TICK, "seconds", 1.0)
+    monkeypatch.setitem(TICK, "seconds", 3.0)
     TICKS.clear()
     app = queue.make_app(settings, jobs.sessions)
     periodic = app.periodic_registry.periodic_tasks[(name, "")]
@@ -480,3 +480,29 @@ def test_job_logs_and_error_bodies_carry_no_content_or_secrets(settings, jobs, p
     assert not [secret for secret in secrets if secret in lines]
     body = msgspec.json.encode(read_job(jobs.caller, JobRef(job_id=str(failed)))).decode()
     assert '"error":"PermanentError"' in body and marker not in body
+
+
+def notified_jobs(sessions, user):
+    notifications = metadata.tables["notifications"]
+    with sessions.begin() as session:
+        return list(
+            session.execute(
+                select(notifications.c.kind, notifications.c.ref_id).where(
+                    notifications.c.user_id == user
+                )
+            ).tuples()
+        )
+
+
+@pytest.mark.slow
+def test_a_shutdown_mid_job_notifies_but_the_owners_cancel_does_not(settings, jobs, person):
+    with queue.worker_thread(settings, ["interactive"]):
+        cancelled = jobs.defer(test_jobs.counted, requested_by=person, total=1, seconds=60)
+        jobs.wait(cancelled, {"started"})
+        jobs.cancel(cancelled)
+        jobs.wait(cancelled, {"stopped"})
+        interrupted = jobs.defer(test_jobs.counted, requested_by=person, total=1, seconds=60)
+        jobs.wait(interrupted, {"started"})
+    # Leaving the block stops the worker; after its grace it aborts the running job.
+    assert jobs.row(interrupted).state == "stopped"
+    assert notified_jobs(jobs.sessions, person) == [("job_failed", str(interrupted))]

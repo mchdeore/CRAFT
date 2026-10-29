@@ -67,9 +67,14 @@ class Count(Shape):
 
 @operation(SIGNED_IN, job=Job(queue="interactive", retry=False, notify=True))
 def counted(caller: Caller, request: Count) -> None:
-    """Report progress on every step, wait `seconds`, then finish or fail when asked to."""
+    """Report progress on every step, wait `seconds` (stopping when asked to), then finish or
+    fail when asked to."""
     for done in range(1, request.total + 1):
         report_progress(done, request.total, "Counting")
-    time.sleep(request.seconds)
+    deadline = time.monotonic() + request.seconds
+    while time.monotonic() < deadline:
+        if should_abort():
+            raise JobAborted()
+        time.sleep(0.05)
     if request.fail:
         raise PermanentError()

@@ -16,7 +16,7 @@ from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import RateLimited
 
 runs, conversations = metadata.tables["agent_runs"], metadata.tables["conversations"]
-notifications = metadata.tables["notifications"]
+notifications, inputs = metadata.tables["notifications"], metadata.tables["agent_run_inputs"]
 
 
 @pytest.fixture
@@ -45,6 +45,7 @@ def person(settings, owner_engine):
         connection.execute(notifications.delete().where(notifications.c.user_id == user))
         owned = select(runs.c.id).where(runs.c.started_by == user)
         connection.execute(events.delete().where(events.c.run_id.in_(owned)))
+        connection.execute(inputs.delete().where(inputs.c.owner_id == user))
         connection.execute(runs.delete().where(runs.c.started_by == user))
         sessions_table = metadata.tables["agent_sessions"]
         connection.execute(
@@ -54,7 +55,8 @@ def person(settings, owner_engine):
         connection.execute(users.delete().where(users.c.id == user))
 
 
-def add_run(owner_engine, person, thread, status, mode):
+def add_run(owner_engine, person, thread, status, mode, queued=timedelta(0)):
+    """A run row with one segment queued `queued` ago."""
     identifier = uuid4()
     with owner_engine.begin() as connection:
         connection.execute(
@@ -68,12 +70,25 @@ def add_run(owner_engine, person, thread, status, mode):
                 mode=mode,
             )
         )
+        connection.execute(
+            inputs.insert().values(
+                run_id=identifier,
+                segment=1,
+                owner_id=person.caller.user_id,
+                input={},
+                created_at=datetime.now(UTC) - queued,
+            )
+        )
     return identifier
 
 
 def start(person, thread, mode):
+    """Queue a run's first segment, then start it, as queue_run and the worker do."""
+    run, user = uuid4(), person.caller.user_id
     with unit_of_work(person.caller.sessions) as session:
-        storage.start(session, person.caller.user_id, thread, uuid4(), "scripted", "v", mode)
+        storage.add_segment(session, user, run, thread, {})
+    with unit_of_work(person.caller.sessions) as session:
+        storage.start(session, user, thread, run, "scripted", "v", mode)
 
 
 def notified(owner_engine, person):
@@ -100,6 +115,14 @@ def test_two_task_starts_at_once_let_one_through(person):
     assert outcomes == ["refused", "started"]
     # A chat run is not held back by the running task.
     start(person, person.threads[2], "chat")
+
+
+def test_a_task_left_running_by_a_lost_connection_does_not_block_the_next(owner_engine, person):
+    # Its newest segment was queued long before any run could still be going.
+    add_run(owner_engine, person, person.threads[0], "running", "task", timedelta(hours=2))
+    start(person, person.threads[1], "task")
+    with pytest.raises(RateLimited):
+        start(person, person.threads[2], "task")
 
 
 def test_a_paused_task_resumes_only_when_no_other_task_runs(owner_engine, person):
@@ -154,15 +177,21 @@ def test_a_run_credential_outlives_the_longest_run(owner_engine, person):
 
 
 def test_a_lost_worker_ends_its_run_through_a_logged_operation(owner_engine, person):
+    from sqlalchemy import func
+
     from app.agent.jobs import AgentRunJob, interrupted
 
     run = add_run(owner_engine, person, person.threads[0], "running", "task")
-    interrupted(person.caller.sessions, AgentRunJob(run=run, segment=1))
     call_log = metadata.tables["call_log"]
+    with owner_engine.connect() as connection:
+        before = connection.execute(select(func.max(call_log.c.id))).scalar_one() or 0
+    interrupted(person.caller.sessions, AgentRunJob(run=run, segment=1))
     with owner_engine.connect() as connection:
         status = connection.execute(select(runs.c.status).where(runs.c.id == run)).scalar_one()
         logged = connection.execute(
-            select(call_log.c.outcome).where(call_log.c.name == "agent.interrupt_run")
+            select(call_log.c.outcome).where(
+                call_log.c.name == "agent.interrupt_run", call_log.c.id > before
+            )
         ).scalars()
-        assert status == "failed" and "ok" in set(logged)
+        assert status == "failed" and list(logged) == ["ok"]
     assert notified(owner_engine, person) == {("run_done", str(run))}

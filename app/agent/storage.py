@@ -213,12 +213,23 @@ def _lock_account(session: Session, user) -> None:
     )
 
 
+# Longer than any run segment can take (runtime.RUN_SECONDS plus its wait for a worker).
+SEGMENT_SECONDS = 900 + 300
+
+
 def _refuse_second_task(session: Session, user) -> None:
-    """One running task-mode run per person, so a few people can't fill the agent worker."""
+    """One running task-mode run per person, so a few people can't fill the agent worker.
+    A run counts only while its newest segment is recent: a row left "running" by a lost
+    database connection must not lock its owner out of task mode."""
+    recent = select(agent_run_inputs.c.run_id).where(
+        agent_run_inputs.c.created_at
+        > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, SEGMENT_SECONDS)
+    )
     running = select(agent_runs.c.id).where(
         agent_runs.c.started_by == user,
         agent_runs.c.mode == "task",
         agent_runs.c.status == "running",
+        agent_runs.c.id.in_(recent),
     )
     if session.execute(running.limit(1)).first() is not None:
         raise RateLimited()

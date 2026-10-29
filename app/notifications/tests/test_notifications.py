@@ -68,8 +68,13 @@ def test_notifications_are_listed_and_marked_read_by_their_owner(people):
 
 
 def test_a_job_notifies_once_and_the_write_is_a_logged_call(people, owner_engine):
+    from sqlalchemy import func
+
     mine, _ = people
     job = 10**12 + uuid4().int % 10**9
+    call_log = metadata.tables["call_log"]
+    with owner_engine.connect() as connection:
+        before = connection.execute(select(func.max(call_log.c.id))).scalar_one() or 0
     for failed in (False, True):
         # A worker lost after the first notification can't add a second for the same job.
         job_ended(
@@ -77,12 +82,14 @@ def test_a_job_notifies_once_and_the_write_is_a_logged_call(people, owner_engine
         )
     listed = list_notifications(mine, NotificationPageRequest())
     assert [(item.kind, item.ref_id) for item in listed] == [("job_done", str(job))]
-    call_log = metadata.tables["call_log"]
     with owner_engine.connect() as connection:
-        names = connection.execute(
-            select(call_log.c.name).where(call_log.c.name == "notifications.job_ended")
+        outcomes = connection.execute(
+            select(call_log.c.outcome).where(
+                call_log.c.name == "notifications.job_ended", call_log.c.id > before
+            )
         ).scalars()
-        assert len(list(names)) >= 2
+        # Both calls are logged, though only the first wrote a notification.
+        assert list(outcomes) == ["ok", "ok"]
 
 
 def test_notification_routes_refuse_bad_requests(client, cube_source):

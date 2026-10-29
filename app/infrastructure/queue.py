@@ -27,6 +27,7 @@ from typing import Any
 import psycopg
 from procrastinate import App, BaseRetryStrategy, JobContext, PsycopgConnector, RetryDecision
 from procrastinate.exceptions import JobAborted
+from procrastinate.job_context import AbortReason
 from procrastinate.jobs import Job, Status
 from procrastinate.worker import Worker
 from sqlalchemy.orm import Session, sessionmaker
@@ -254,6 +255,9 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
                 async with asyncio.timeout(kind.timeout):
                     result = await kind.func(run, **values)
             except asyncio.CancelledError:
+                # Stopped by its owner, or by a worker shutting down: only the latter is news.
+                if kind.notify and context.abort_reason() == AbortReason.SHUTDOWN:
+                    await asyncio.to_thread(_ended, settings, sessions, context.job, failed=True)
                 _log(kind, context.job, "stopped", started)
                 raise
             except BaseException as error:
@@ -275,6 +279,8 @@ def _task(settings: Settings, sessions: sessionmaker[Session], kind: Kind) -> Ca
         try:
             result = kind.func(run, **values)
         except JobAborted:
+            if kind.notify and context.abort_reason() == AbortReason.SHUTDOWN:
+                _ended(settings, sessions, context.job, failed=True)
             _log(kind, context.job, "stopped", started)
             raise
         except BaseException as error:
