@@ -9,7 +9,7 @@ import asyncio
 import inspect
 from contextvars import ContextVar
 from time import monotonic, perf_counter
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 import msgspec
@@ -33,7 +33,29 @@ SCHEDULED = {
     "parent": None,
 }
 
-current_job: ContextVar[Any] = ContextVar("current_job", default=None)
+
+class RunningJob(Protocol):
+    """What a job operation sees of its run on the worker (app.infrastructure.queue.JobRun)."""
+
+    @property
+    def sessions(self) -> Any: ...
+    @property
+    def settings(self) -> Any: ...
+    @property
+    def id(self) -> int: ...
+    @property
+    def attempt(self) -> int: ...
+    @property
+    def progress_at(self) -> list[float]:
+        """When report_progress last wrote, as a one-item list the run updates in place."""
+        ...
+
+    def should_abort(self) -> bool:
+        """Whether the job was asked to stop (blocking jobs check between steps)."""
+        ...
+
+
+current_job: ContextVar[RunningJob | None] = ContextVar("current_job", default=None)
 
 
 def should_abort() -> bool:
@@ -107,7 +129,9 @@ def _input(declared: Operation, value: Any) -> Any:
     return decode(declared, None if value is None else msgspec.json.encode(value))
 
 
-def _start(job: Any, caller: dict, parent: dict | None) -> tuple[Any, CallContext, Any, Caller]:
+def _start(
+    job: RunningJob, caller: dict, parent: dict | None
+) -> tuple[Any, CallContext, Any, Caller]:
     rebuilt = Caller(
         user_id=UUID(caller["user"]) if caller["user"] else None,
         roles=frozenset(caller["roles"]),
@@ -134,7 +158,7 @@ def runner(declared: Operation) -> Any:
 
     if inspect.iscoroutinefunction(fn):
 
-        async def run_async(job: Any, input: Any, caller: dict, parent: dict | None) -> None:
+        async def run_async(job: RunningJob, input: Any, caller: dict, parent: dict | None) -> None:
             outer, ctx, token, rebuilt = _start(job, caller, parent)
             running = current_job.set(job)
             error = None
@@ -156,7 +180,7 @@ def runner(declared: Operation) -> Any:
 
         return run_async
 
-    def run_sync(job: Any, input: Any, caller: dict, parent: dict | None) -> None:
+    def run_sync(job: RunningJob, input: Any, caller: dict, parent: dict | None) -> None:
         outer, ctx, token, rebuilt = _start(job, caller, parent)
         running = current_job.set(job)
         error = None

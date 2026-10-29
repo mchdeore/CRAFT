@@ -22,7 +22,9 @@ class Sleep(Shape):
 @operation(SIGNED_IN, job=Job(queue="interactive", lock=lambda request: request.key))
 async def sleep(caller: Caller, request: Sleep) -> None:
     """Sleep on the first attempt only; fail `times` attempts transiently or permanently."""
-    attempt = current_job.get().attempt
+    job = current_job.get()
+    assert job is not None
+    attempt = job.attempt
     if attempt == 1:
         await asyncio.sleep(request.seconds)
     if request.fail == "transient" and attempt <= request.times:

@@ -94,7 +94,10 @@ def test_notification_routes_refuse_bad_requests(client, cube_source):
         assert http.get("/api/notifications?unread=true").json() == []
         assert http.get("/api/notifications?unread=maybe").status_code == 400
         origin = {"Origin": "https://testserver"}
-        assert http.post("/api/notifications/not-a-uuid/read", headers=origin).status_code == 400
+        marker = "synthetic-content-" + uuid4().hex
+        refused = http.post(f"/api/notifications/{marker}/read", headers=origin)
+        # The error body names the problem, never the input.
+        assert refused.status_code == 400 and marker not in refused.text
         assert http.post(f"/api/notifications/{uuid4()}/read", headers=origin).status_code == 404
         # A write without the browser's Origin is refused.
         assert http.post(f"/api/notifications/{uuid4()}/read").status_code == 403

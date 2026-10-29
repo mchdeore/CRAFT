@@ -6,6 +6,8 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -210,7 +212,9 @@ TICK = {"seconds": 0.0}
 @operation(PUBLIC, job=Job(queue="bulk", retry=False, every="* * * * *"))
 async def tick(caller: Caller) -> None:
     """A scheduled job that records each run."""
-    TICKS.append(current_job.get().id)
+    job = current_job.get()
+    assert job is not None
+    TICKS.append(job.id)
     await asyncio.sleep(TICK["seconds"])
 
 
@@ -300,6 +304,12 @@ def test_a_tick_during_a_run_waits_for_it_and_runs_as_the_system(
                 {"name": name},
             ).scalar_one()
 
+    import io
+
+    from app.infrastructure.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging("INFO", stream)
     # Two job slots, so only the lock keeps the second tick from overlapping the first.
     with queue.worker_thread(settings, ["bulk"], concurrency=2):
         first = defer(at)
@@ -309,6 +319,8 @@ def test_a_tick_during_a_run_waits_for_it_and_runs_as_the_system(
         assert (jobs.row(first).state, jobs.row(second).state) == ("started", "queued")
         jobs.wait(second, {"finished"})
     assert TICKS == [first, second]
+    ran = [line for line in stream.getvalue().splitlines() if f'"kind":"{name}"' in line]
+    assert len(ran) == 2 and all('"scheduled":true' in line for line in ran)
     call_log = metadata.tables["call_log"]
     with owner_engine.connect() as connection:
         users = connection.execute(
@@ -340,9 +352,21 @@ def test_a_job_reports_progress_and_notifies_its_requester(settings, jobs, perso
     assert written == {("job_done", "job", str(done)), ("job_failed", "job", str(failed))}
 
 
-def test_progress_is_checked_and_written_at_most_once_a_second(monkeypatch):
-    from types import SimpleNamespace
+@dataclass
+class StubRun:
+    """A RunningJob without a worker: report_progress needs only its id and throttle."""
 
+    sessions: Any = None
+    settings: Any = None
+    id: int = 7
+    attempt: int = 1
+    progress_at: list[float] = field(default_factory=lambda: [0.0])
+
+    def should_abort(self) -> bool:
+        return False
+
+
+def test_progress_is_checked_and_written_at_most_once_a_second(monkeypatch):
     from app.infrastructure.operations.jobs import report_progress
     from app.jobs import handlers
 
@@ -350,7 +374,7 @@ def test_progress_is_checked_and_written_at_most_once_a_second(monkeypatch):
         report_progress(1, 2)
     written = []
     monkeypatch.setattr(handlers, "save_progress", lambda *args: written.append(args[2:]))
-    running = current_job.set(SimpleNamespace(sessions=None, id=7, progress_at=[0.0]))
+    running = current_job.set(StubRun())
     try:
         for bad in [(3, 2, None), (-1, 2, None), (1, 2, "x" * 81)]:
             with pytest.raises(ValueError):
@@ -425,3 +449,34 @@ def test_a_killed_workers_notify_job_fails_and_tells_its_requester(
             ).tuples()
         )
     assert written == [("job_failed", str(job))]
+
+
+def test_job_logs_and_error_bodies_carry_no_content_or_secrets(settings, jobs, person):
+    import io
+
+    import msgspec
+
+    from app.infrastructure.config.env import read_env
+    from app.infrastructure.logging import configure_logging
+    from app.jobs.handlers import JobRef, read_job
+
+    marker = "synthetic-content-" + uuid4().hex
+    stream = io.StringIO()
+    configure_logging("DEBUG", stream)
+    with queue.worker_thread(settings, ["interactive"]):
+        # The marker is job input: it reaches the job, never a log line or an error body.
+        failed = jobs.defer(test_jobs.sleep, key=marker, fail="permanent")
+        notified = jobs.defer(test_jobs.counted, requested_by=person, total=3)
+        jobs.wait(failed, {"failed"})
+        jobs.wait(notified, {"finished"})
+    lines = stream.getvalue()
+    secrets = [marker] + [
+        value
+        for key, value in read_env().items()
+        if len(value) >= 8 and any(word in key for word in ("PASSWORD", "KEY", "TOKEN", "SECRET"))
+    ]
+    assert '"kind":"tests.sleep"' in lines and '"kind":"tests.counted"' in lines
+    assert '"name":"notifications.job_ended"' in lines
+    assert not [secret for secret in secrets if secret in lines]
+    body = msgspec.json.encode(read_job(jobs.caller, JobRef(job_id=str(failed)))).decode()
+    assert '"error":"PermanentError"' in body and marker not in body

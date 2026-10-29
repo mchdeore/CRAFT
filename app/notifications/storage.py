@@ -42,6 +42,7 @@ Index(
 
 
 def add(session: Session, user, kind: str, ref_kind: str, ref_id: str) -> None:
+    """Insert one notification; a second one for the same job is ignored."""
     statement = insert(notifications).values(
         user_id=user, kind=kind, ref_kind=ref_kind, ref_id=ref_id
     )
@@ -79,6 +80,7 @@ def mark_read(session: Session, user, identifier):
 
 
 def prune_read(session: Session, days: int) -> None:
+    """Delete notifications read more than `days` days ago; unread ones stay."""
     session.execute(
         notifications.delete().where(
             notifications.c.read_at < func.now() - func.make_interval(0, 0, 0, days)

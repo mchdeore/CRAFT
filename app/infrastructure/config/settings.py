@@ -25,8 +25,9 @@ RETIRED = {
     "worker_concurrency",
 }
 QUEUES = ("agent", "interactive", "bulk")
-# High default until measured; a worker always needs some concurrency number.
-DEFAULT_WORKER_CONCURRENCY = 50
+# Jobs at once per queue, sized for the proof of concept's 10 people at a time: a chat turn
+# and a notebook run each, and a little background work (a scheduled job never overlaps itself).
+DEFAULT_WORKER_CONCURRENCY = {"agent": 10, "interactive": 10, "bulk": 2}
 MAX_WORKER_CONCURRENCY = 1000
 
 
@@ -42,13 +43,13 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     process_root: str = ""
     worker_queues: str = "agent,interactive,bulk"
     worker_concurrency_agent: Annotated[int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)] = (
-        DEFAULT_WORKER_CONCURRENCY
+        DEFAULT_WORKER_CONCURRENCY["agent"]
     )
     worker_concurrency_interactive: Annotated[
         int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)
-    ] = DEFAULT_WORKER_CONCURRENCY
+    ] = DEFAULT_WORKER_CONCURRENCY["interactive"]
     worker_concurrency_bulk: Annotated[int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)] = (
-        DEFAULT_WORKER_CONCURRENCY
+        DEFAULT_WORKER_CONCURRENCY["bulk"]
     )
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12

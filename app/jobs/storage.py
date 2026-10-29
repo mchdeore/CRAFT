@@ -94,6 +94,7 @@ def running_count(session: Session, kind: str, requested_by: str) -> int:
 
 
 def save_progress(session: Session, job_id: int, done: int, total: int, note: str | None) -> None:
+    """Insert or replace the job's one progress row."""
     statement = insert(job_progress).values(job_id=job_id, done=done, total=total, note=note)
     session.execute(
         statement.on_conflict_do_update(
@@ -104,6 +105,7 @@ def save_progress(session: Session, job_id: int, done: int, total: int, note: st
 
 
 def progress(session: Session, job_id: int):
+    """The job's progress (done, total, note), or None if it reported none."""
     return (
         session.execute(
             select(job_progress.c.done, job_progress.c.total, job_progress.c.note).where(
@@ -116,6 +118,7 @@ def progress(session: Session, job_id: int):
 
 
 def prune_progress(session: Session, days: int) -> None:
+    """Delete progress rows not updated for `days` days."""
     session.execute(
         job_progress.delete().where(
             job_progress.c.updated_at < func.now() - func.make_interval(0, 0, 0, days)

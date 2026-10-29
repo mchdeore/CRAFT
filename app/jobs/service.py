@@ -81,11 +81,13 @@ def read(caller: Caller, job_id: int) -> dict[str, Any]:
 
 
 def save_progress(sessions, job_id: int, done: int, total: int, note: str | None) -> None:
+    """Record a running job's progress in its own short transaction."""
     with unit_of_work(sessions) as session:
         storage.save_progress(session, job_id, done, total, note)
 
 
 def prune_progress(session: Session, days: int) -> None:
+    """Delete progress not updated for this many days."""
     storage.prune_progress(session, days)
 
 
