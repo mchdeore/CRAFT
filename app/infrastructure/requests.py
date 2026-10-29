@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 import msgspec
+from starlette.routing import Mount
 
 from app.infrastructure.logging import get_logger
 
@@ -53,7 +54,7 @@ class RequestIdMiddleware:
                 extra={
                     "fields": {
                         "method": scope["method"],
-                        "path": getattr(scope.get("route"), "path", "/unmatched"),
+                        "path": route_path(scope),
                         "status": status,
                         "duration_ms": duration_ms,
                         "request_id": rid,
@@ -61,6 +62,19 @@ class RequestIdMiddleware:
                 },
             )
             request_id.reset(token)
+
+
+def route_path(scope: Scope) -> str:
+    """The matched route's template. The router names operations on the scope but not mounts,
+    which are matched here by prefix against the app's own routes."""
+    route = scope.get("route")
+    if route is not None:
+        return route.path
+    path = scope["path"]
+    for mount in getattr(scope.get("app"), "routes", ()):
+        if isinstance(mount, Mount) and (path == mount.path or path.startswith(mount.path + "/")):
+            return mount.path
+    return "/unmatched"
 
 
 async def send_internal_error(send: Any, rid: str) -> None:
