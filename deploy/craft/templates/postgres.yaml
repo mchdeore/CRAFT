@@ -38,13 +38,18 @@ spec:
             - { name: data, mountPath: /var/lib/postgresql }    # the PostgreSQL 18 image's path
             - { name: initdb, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
           # TCP, as compose: not ready during initdb, which listens on the socket only.
+          # Starting pg_isready can take over a second on a busy machine; the 1 s default
+          # timeout then killed a healthy database. Liveness allows a minute of failures.
           readinessProbe:
             exec: { command: [pg_isready, -U, postgres, -h, localhost] }
             periodSeconds: 2
+            timeoutSeconds: 5
           livenessProbe:
             exec: { command: [pg_isready, -U, postgres, -h, localhost] }
             initialDelaySeconds: 60
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             limits: { memory: {{ .Values.postgres.memory }} }
             requests: { memory: {{ .Values.memoryRequest }} }

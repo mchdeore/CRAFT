@@ -7,7 +7,7 @@ CRAFT on Colima's built-in Kubernetes (k3s), with one Helm chart: the API, the w
 - `local.yaml` the local values: `worker-agent`, `worker-interactive` and `worker-bulk`, as compose has them, each with its queues, jobs at once per queue and memory limit.
 - `worker-agent` runs inside the API's pod because chat turns call the API's MCP on `127.0.0.1`. The other workers have their own Deployments.
 - PostgreSQL first boots with `app/infrastructure/database/initdb.sh` (`craft/initdb.sh` links to it).
-- Probes: the API is live on `/health/live` and ready on `/health/ready`, so it's ready only once the database is at the latest migration (after `scripts/seed` or `alembic upgrade head`). The workers use `craft worker --check`, and craft-id uses `/health/live`.
+- Probes: the API is live on `/health/live` and ready on `/health/ready`, so it's ready only once the database is at the latest migration (after `scripts/seed` or `alembic upgrade head`). The workers check their heartbeat file with `python -I -S app/infrastructure/heartbeat.py`, which never imports the app, and craft-id uses `/health/live`. Every probe sets its own timeout: on a busy machine the 1 s default killed a healthy database.
 
 ## Start
 

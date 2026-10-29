@@ -63,7 +63,7 @@ services:
     volumes: *provider_mount
     stop_grace_period: 900s                             # a chat turn's ceiling
     healthcheck: &worker_health
-      test: ["CMD", "craft", "worker", "--check"]
+      test: ["CMD", "python", "-I", "-S", "/app/app/infrastructure/heartbeat.py"]   # no app import
       interval: 10s
       retries: 6
       start_period: 30s

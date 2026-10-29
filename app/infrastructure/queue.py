@@ -10,18 +10,15 @@ import asyncio
 import contextlib
 import inspect
 import logging
-import os
 import signal
 import socket
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib import import_module
-from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -32,6 +29,7 @@ from procrastinate.jobs import Job, Status
 from procrastinate.worker import Worker
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.infrastructure import heartbeat
 from app.infrastructure.config.settings import QUEUES, Settings
 from app.infrastructure.database.engine import conninfo, make_engine, make_sessions
 
@@ -50,8 +48,6 @@ STALLED_SECONDS = 30.0
 RECOVER_SECONDS = 15.0
 # How often workers write queue depth samples for craft queues report.
 SAMPLE_SECONDS = 30.0
-HEALTHY_SECONDS = 60.0
-HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "craft-worker-heartbeat"
 assert set(WAITS) == set(GRACE) == set(QUEUES)
 
 
@@ -387,7 +383,7 @@ async def _maintain(
 ) -> None:
     next_sample = time.monotonic()
     while True:
-        HEARTBEAT_FILE.touch()
+        heartbeat.FILE.touch()
         # Each step logs its own failure, so one failing step doesn't skip the others.
         await _step("recover", recover(app, settings, sessions))
         for func in MAINTENANCE:
@@ -444,7 +440,7 @@ def wait_for_schema(settings: Settings) -> None:
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     logged = False
     while True:
-        HEARTBEAT_FILE.touch()
+        heartbeat.FILE.touch()
         try:
             with psycopg.connect(conninfo(settings)) as connection:
                 row = connection.execute("select to_regclass('procrastinate_jobs')").fetchone()
@@ -466,11 +462,11 @@ def run_worker(settings: Settings) -> None:
 
 
 def check_worker() -> bool:
-    """`craft worker --check`: this container's worker wrote a heartbeat in the last minute."""
-    try:
-        return time.time() - os.stat(HEARTBEAT_FILE).st_mtime < HEALTHY_SECONDS
-    except OSError:
-        return False
+    """`craft worker --check`: this container's worker wrote a heartbeat in the last minute.
+
+    Container probes run `app/infrastructure/heartbeat.py` by path instead, which skips
+    importing the `app` package."""
+    return heartbeat.healthy()
 
 
 @contextmanager

@@ -30,9 +30,11 @@ spec:
             httpGet: { path: /health/live, port: http }
             periodSeconds: 2
             failureThreshold: 30
+            timeoutSeconds: 5
           livenessProbe:
             httpGet: { path: /health/live, port: http }
             periodSeconds: 10
+            timeoutSeconds: 5
           # Ready once the database answers at the expected migration (after scripts/seed).
           readinessProbe:
             httpGet: { path: /health/ready, port: http }
