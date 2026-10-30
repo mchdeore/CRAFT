@@ -96,7 +96,7 @@ def test_chat_stream_valid_events_in_order(chat):
         < types.index("TOOL_CALL_RESULT")
         < types.index("TEXT_MESSAGE_CONTENT")
     )
-    from app.tests.test_contract import validate_chat_events
+    from app.tests.support.contract import validate_chat_events
 
     assert valid_events(events) and validate_chat_events(events)
     answer = next(event for event in events if event["type"] == "ACTIVITY_SNAPSHOT")["content"]

@@ -31,18 +31,3 @@ def test_diff_labels():
         {"change": "moved", "from_block": 3, "to_block": 2},
     ]
     assert compare(old, old) == []
-
-
-def test_examples_validate():
-    import json
-    from pathlib import Path
-
-    import jsonschema
-
-    from app.tests.test_contract import typescript_schema
-
-    for filename, shape in [("citation-status", "CitationStatus"), ("version-diff", "VersionDiff")]:
-        jsonschema.validate(
-            json.loads(Path(f"app/contract/examples/{filename}.json").read_text()),
-            typescript_schema(shape),
-        )

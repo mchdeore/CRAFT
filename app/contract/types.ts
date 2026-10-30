@@ -35,8 +35,26 @@ export interface Mission { key: string; title: string; currentStage: string; ali
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }
 export interface FieldError { path: string; message: string }
-/** `code` also takes `workspace_unavailable` (503: the Hub or the workspace failed), `run_timeout` (504: code ran past its limit and was interrupted) and `not_understood` (400: the calculation service couldn't read the expression; `fields` carries its reply). */
-export interface ApiError { code: string; message: string; requestId: string; fields?: FieldError[] }
+/** Every `code` the server sends, with its HTTP status. A chat stream's `RUN_ERROR` uses the same codes. */
+export type ErrorCode =
+  | "invalid_input"          // 400: `fields` lists each problem
+  | "not_understood"         // 400: the calculation service couldn't read the expression; `fields` carries its reply
+  | "not_signed_in"          // 401
+  | "sign_in_failed"         // 401: browser sign-in did not complete
+  | "forbidden"              // 403
+  | "not_found"              // 404
+  | "conflict"               // 409
+  | "approval_required"      // 409: the call needs approval first
+  | "too_large"              // 413
+  | "rate_limited"           // 429
+  | "run_limit"              // 429: a run used up its tool calls
+  | "budget_exhausted"       // 429: the model budget is spent
+  | "internal_error"         // 500
+  | "external_unavailable"   // 502: the calculation service is unavailable
+  | "not_configured"         // 503: the calculation service is not configured
+  | "workspace_unavailable"  // 503: the Hub or the workspace failed
+  | "run_timeout";           // 504: code ran past its limit and was interrupted
+export interface ApiError { code: ErrorCode; message: string; requestId: string; fields?: FieldError[] }
 export type Classification = "unclassified" | "protected-a" | "protected-b";
 export interface CitationHandle { item: string; version: number; block: number; locator: string; quoteSha256: string; simulated: boolean }
 export interface Tags { mission: string | null; silo: string | null; stage: string | null }
@@ -153,7 +171,7 @@ export interface VersionDiff { blocks: {change: "added" | "removed" | "changed" 
 export interface PrepareValues { handle: CitationHandle; mission?: string; silo?: string; stage?: string; validFrom?: string }
 export interface Candidate { row: number; header: string; parameter: string | null; element: string | null; sourceNumber: string; sourceUnit: string | null; kind: ValueKind; low: number | null; high: number | null; citation: CitationHandle; problem: string | null }
 export interface Candidates { mission: string | null; silo: string | null; stage: string | null; validFrom: string | null; candidates: Candidate[]; problems: string[] }
-export interface SubmitValues { mission: string; silo: string; stage: string | null; validFrom: string; candidates: Candidate[] }
+export interface SubmitValues { mission: string; silo: string; stage?: string | null; validFrom: string; candidates: Candidate[] }
 export interface ValueReceipt { approvalId: Id; valueIds: Id[] }
 
 export type Facet = "purpose" | "design" | "operations" | "program" | "cost_and_risk";

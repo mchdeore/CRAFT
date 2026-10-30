@@ -9,7 +9,7 @@ from app.accounts import storage
 from app.accounts.tests.test_sessions import account as account
 from app.accounts.tests.test_sessions import login
 from app.infrastructure import access
-from app.tests.test_contract import typescript_schema
+from app.tests.support.contract import typescript_schema
 
 
 @pytest.mark.slow
@@ -56,7 +56,6 @@ def test_me_ignores_browser_identity(account) -> None:
     response = account.client.get("/api/me", headers={"X-User-Id": "another", "X-Roles": "admin"})
     assert response.json()["id"] == str(account.id)
     assert set(response.json()) == {"id", "username", "displayName", "roles", "language", "email"}
-    jsonschema.validate(json.load(open("app/contract/examples/me.json")), typescript_schema("Me"))
 
 
 def test_me_changes_only_the_callers_language(account) -> None:

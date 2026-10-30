@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import create_app
 from app.agent.tests.test_chat_stream import collect, request
-from app.tests.test_contract import typescript_schema, validate_chat_events
+from app.tests.support.contract import typescript_schema, validate_chat_events
 
 
 @pytest.mark.slow

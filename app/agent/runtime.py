@@ -171,7 +171,7 @@ def fault(code):
 
 
 class RunLimit(ApiError):
-    code, message = "run_limit", "Run limit reached."
+    status, code, message = 429, "run_limit", "Run limit reached."
 
 
 class StatefulAgent(Agent):
