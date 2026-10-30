@@ -7,7 +7,6 @@ import subprocess
 import threading
 import time
 from dataclasses import replace
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import msgspec
@@ -454,15 +453,15 @@ def test_chat_stream_spend_cap(chat, monkeypatch):
         "usage",
         {"input_token_count": 10, "cache_read_input_token_count": 4, "output_token_count": 10},
     )
-    since = datetime.now(UTC)
     configured = msgspec.structs.replace(
         chat["settings"],
-        model_budget_since=since,
         model_budget_usd=0.5,
         model_price_input=12500.0,
         model_price_output=12500.0,
     )
     caller = replace(chat["caller"], settings=configured)
+    with chat["owner"].begin() as connection:  # earlier runs on the check database are in the day
+        connection.execute(model_usage.delete())
     refused = request(chat)
     with chat["worker"].using(configured):
         finished = collect(caller, request(chat))
@@ -481,7 +480,7 @@ def test_chat_stream_spend_cap(chat, monkeypatch):
                 model_usage.c.input_tokens,
                 model_usage.c.cached_input_tokens,
                 model_usage.c.output_tokens,
-            ).where(model_usage.c.at >= since)
+            )
         ).all()
     assert [tuple(usage) for usage in rows] == [("main", 10, 4, 10)] * 2
 

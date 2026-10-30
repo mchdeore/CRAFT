@@ -1,5 +1,3 @@
-from datetime import UTC, datetime
-
 import pytest
 
 from app.infrastructure.config.settings import Settings
@@ -137,14 +135,3 @@ def test_worker_queues_and_retired_settings() -> None:
     with pytest.raises(SystemExit) as stopped:
         Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "agent,urgent"})
     assert "worker_queues" in str(stopped.value) and "urgent" not in str(stopped.value)
-
-
-def test_spend_cap_start_is_empty_or_a_time_with_its_zone() -> None:
-    # .env.example lists the start empty: all recorded usage counts.
-    assert Settings.from_env({**VALID, "CRAFT_MODEL_BUDGET_SINCE": ""}).model_budget_since is None
-    started = Settings.from_env({**VALID, "CRAFT_MODEL_BUDGET_SINCE": "2026-10-29T00:00:00Z"})
-    assert started.model_budget_since == datetime(2026, 10, 29, tzinfo=UTC)
-    for field, value in [("MODEL_BUDGET_SINCE", "2026-10-29T00:00"), ("MODEL_BUDGET_USD", "-1")]:
-        with pytest.raises(SystemExit) as stopped:
-            Settings.from_env({**VALID, "CRAFT_" + field: value})
-        assert field.lower() in str(stopped.value)

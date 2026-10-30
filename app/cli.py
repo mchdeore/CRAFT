@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> None:
         default=parse_since("24h"),
         help="lookback window (default 24h)",
     )
-    commands.add_parser("usage", help="model tokens and spend since CRAFT_MODEL_BUDGET_SINCE")
+    commands.add_parser("usage", help="model tokens and spend in the last 24 hours and in all")
     call = commands.add_parser("call")
     call.add_argument("operation")
     call.add_argument("--as", dest="username", required=True)

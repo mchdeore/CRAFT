@@ -1,10 +1,10 @@
 """Model spend: one row of token counts per model response, priced by the settings, and the cap
-that refuses a request once the spend since CRAFT_MODEL_BUDGET_SINCE reaches the budget.
+that refuses a request once the spend in the last 24 hours reaches the daily budget.
 
 Rows hold token counts, the role and the model name: never prompts, answers or keys."""
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -28,6 +28,8 @@ from app.infrastructure.database.metadata import metadata
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.context import current_call
+
+DAY = timedelta(hours=24)  # the budget is per rolling day, so no time zone decides when it resets
 
 model_usage = Table(
     "model_usage",
@@ -76,13 +78,13 @@ def dollars(settings: Settings, counted: Mapping[str, int]) -> float:
 
 
 def check() -> None:
-    """Before each model request: refuse once the recorded spend reaches the budget."""
+    """Before each model request: refuse once the last 24 hours' spend reaches the budget."""
     context = current_call.get()
     caller = context.caller if context is not None else None
     if caller is None or caller.sessions is None or caller.settings is None:
         return
     with unit_of_work(caller.sessions, read_only=True) as session:
-        spent = dollars(caller.settings, tokens(session, caller.settings.model_budget_since))
+        spent = dollars(caller.settings, tokens(session, datetime.now(UTC) - DAY))
     if spent >= caller.settings.model_budget_usd:
         raise BudgetExhausted()
 
@@ -107,12 +109,13 @@ def record(role: str, model: str, reported: Mapping[str, Any] | None) -> None:
 
 
 def report(settings: Settings, sessions: sessionmaker[Session]) -> dict[str, Any]:
-    """Tokens and dollars since CRAFT_MODEL_BUDGET_SINCE, for `craft usage`."""
+    """`craft usage`: tokens and dollars in the cap's window (the last 24 hours) and in all."""
     with unit_of_work(sessions, read_only=True) as session:
-        counted = tokens(session, settings.model_budget_since)
-    since = settings.model_budget_since
-    return counted | {
-        "since": since.isoformat() if since is not None else None,
-        "spent_usd": round(dollars(settings, counted), 4),
-        "budget_usd": settings.model_budget_usd,
+        windows = {
+            "last_24_hours": tokens(session, datetime.now(UTC) - DAY),
+            "total": tokens(session, None),
+        }
+    return {"budget_usd_per_day": settings.model_budget_usd} | {
+        name: counted | {"spent_usd": round(dollars(settings, counted), 4)}
+        for name, counted in windows.items()
     }
