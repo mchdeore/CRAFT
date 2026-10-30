@@ -135,3 +135,9 @@ def test_worker_queues_and_retired_settings() -> None:
     with pytest.raises(SystemExit) as stopped:
         Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "agent,urgent"})
     assert "worker_queues" in str(stopped.value) and "urgent" not in str(stopped.value)
+
+
+def test_the_process_manager_setting_is_retired() -> None:
+    """An older .env may still set CRAFT_PROCESS_ROOT; startup ignores it."""
+    configured = Settings.from_env({**VALID, "CRAFT_PROCESS_ROOT": ".local/runtime/processes"})
+    assert "process_root" not in configured.__struct_fields__

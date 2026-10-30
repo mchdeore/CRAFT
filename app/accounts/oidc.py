@@ -12,14 +12,14 @@ import time
 from urllib.parse import urlencode
 from uuid import UUID
 
+import httpx
 import jwt
-import requests
 
 from app.infrastructure.errors import ApiError
 
 SCOPE = "openid profile email"
 LEEWAY = 60  # seconds of clock skew allowed on iat, nbf and exp
-http = requests.Session()  # tests swap in the in-process provider
+http = httpx.Client(follow_redirects=True)  # tests swap in the in-process provider
 _metadata: dict[str, tuple[float, dict]] = {}
 _keys: dict[str, tuple[float, jwt.PyJWKSet]] = {}
 
@@ -37,7 +37,7 @@ def _get(url: str) -> dict:
         response = http.get(url, timeout=5)
         response.raise_for_status()
         document = response.json()
-    except (requests.RequestException, ValueError):
+    except (httpx.HTTPError, ValueError):
         raise ApiError("The identity provider is not reachable.") from None
     if not isinstance(document, dict):
         raise ApiError("The identity provider is misconfigured.")
@@ -114,7 +114,7 @@ def finish(settings, flow: dict, state: str | None, code: str | None) -> dict:
             timeout=10,
         )
         token = response.json().get("id_token") if response.status_code == 200 else None
-    except (requests.RequestException, ValueError, AttributeError):
+    except (httpx.HTTPError, ValueError, AttributeError):
         token = None
     if not isinstance(token, str):
         raise SignInFailed()

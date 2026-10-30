@@ -5,10 +5,10 @@ from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
+import httpx
 import jwt
 import msgspec
 import pytest
-import requests
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
@@ -23,7 +23,7 @@ from app.tests.support.identity import PUBLIC, REDIRECT, Provider, keys, provide
 
 @pytest.fixture
 def site(settings, provider: Provider, owner_engine, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(oidc, "http", provider.http)
+    monkeypatch.setattr(oidc, "http", provider.client)
     monkeypatch.setattr(oidc, "_metadata", {})
     monkeypatch.setattr(oidc, "_keys", {})
     configured = msgspec.structs.replace(
@@ -161,7 +161,7 @@ def test_bad_id_tokens_are_refused(site, monkeypatch, change) -> None:
         other.kid = site.provider.keys.kid
         token = other.sign(jwt.decode(token, options={"verify_signature": False}))
     answer = SimpleNamespace(status_code=200, json=lambda: {"id_token": token})
-    monkeypatch.setattr(site.provider.http, "post", lambda *a, **k: answer, raising=False)
+    monkeypatch.setattr(site.provider.client, "post", lambda *a, **k: answer, raising=False)
     with pytest.raises(oidc.SignInFailed):
         oidc.finish(site.settings, flow, flow["state"], "code")
 
@@ -198,7 +198,7 @@ def test_only_the_three_provider_settings_change_for_entra() -> None:
 def test_a_malformed_discovery_document_is_refused(site, monkeypatch, document) -> None:
     document = [] if document == "list" else {"issuer": site.provider.authority}
     answer = SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: document)
-    monkeypatch.setattr(site.provider.http, "get", lambda *a, **k: answer)
+    monkeypatch.setattr(site.provider.client, "get", lambda *a, **k: answer)
     with pytest.raises(oidc.ApiError):
         oidc.metadata(site.settings.oidc_authority)
 
@@ -208,7 +208,7 @@ def test_a_non_uuid_object_id_is_refused(site, monkeypatch) -> None:
     answer = SimpleNamespace(
         status_code=200, json=lambda: {"id_token": forged(site, flow, oid="x")}
     )
-    monkeypatch.setattr(site.provider.http, "post", lambda *a, **k: answer, raising=False)
+    monkeypatch.setattr(site.provider.client, "post", lambda *a, **k: answer, raising=False)
     with pytest.raises(oidc.SignInFailed):
         oidc.finish(site.settings, flow, flow["state"], "code")
 
@@ -217,10 +217,10 @@ def unreachable(site, monkeypatch) -> None:
     """The provider stops answering, and the discovery document it served is forgotten."""
 
     def down(*args, **kwargs):
-        raise requests.ConnectionError()
+        raise httpx.ConnectError("the provider is down")
 
     monkeypatch.setattr(oidc, "_metadata", {})
-    monkeypatch.setattr(site.provider.http, "get", down)
+    monkeypatch.setattr(site.provider.client, "get", down)
 
 
 def test_an_unreachable_provider_at_the_callback_fails_the_sign_in(site, monkeypatch) -> None:

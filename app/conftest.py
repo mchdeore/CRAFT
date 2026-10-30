@@ -10,11 +10,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import URL, Engine, create_engine
 
-from app import create_app
+from app import create_app, load_operations
 from app.infrastructure.config.env import read_env
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.paths import ROOT
 from app.tests.support import model as scripted_model
+
+# Tests read the operation registry directly, often before or without create_app.
+load_operations()
 
 # scripts/check gives each worktree its own; a plain pytest uses craft_test.
 TEST_DATABASE = read_env().get("CRAFT_TEST_DATABASE") or "craft_test"

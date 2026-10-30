@@ -12,7 +12,8 @@ PREFIX = "CRAFT_"
 # Setup, Compose and tests only; scripts/seed reads CRAFT_SEED, the tests CRAFT_TEST_DATABASE.
 OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account", "seed", "test_database"}
 IDENTITY = {"id_db_password", "id_signing_key", "id_public_url"}  # craft-id's own settings
-# Settings of the deleted indexer, RQ queue and dev page; older .env files may still set them.
+# Settings of the deleted indexer, RQ queue, dev page and process manager; older .env files may
+# still set them.
 RETIRED = {
     "model_ocr",
     "ocr_max_bytes",
@@ -22,6 +23,7 @@ RETIRED = {
     "queue_url",
     "queue_name",
     "dev_page",
+    "process_root",
     # Replaced by per-queue CRAFT_WORKER_CONCURRENCY_AGENT / _INTERACTIVE / _BULK.
     "worker_concurrency",
 }
@@ -42,7 +44,6 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     provider: Literal["simulated", "livelink_test"] = "simulated"
     provider_url: str = ""
     provider_token: str = ""
-    process_root: str = ""
     worker_queues: str = "agent,interactive,bulk"
     worker_concurrency_agent: Annotated[int, msgspec.Meta(ge=1, le=MAX_WORKER_CONCURRENCY)] = (
         DEFAULT_WORKER_CONCURRENCY["agent"]
