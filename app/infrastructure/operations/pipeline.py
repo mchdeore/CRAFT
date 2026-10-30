@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import logging
 from functools import wraps
 from time import perf_counter
 from typing import Annotated, Any, get_args, get_origin
@@ -17,6 +16,7 @@ from starlette.responses import Response, StreamingResponse
 
 from app.infrastructure.access import Caller, anonymous_http, require, resolve_http
 from app.infrastructure.errors import ApiError, InvalidInput, TooLarge, error_response
+from app.infrastructure.logging import get_logger
 from app.infrastructure.operations.context import (
     CallContext,
     current_call,
@@ -27,6 +27,8 @@ from app.infrastructure.operations.registry import Operation, registry, stream_o
 from app.infrastructure.operations.service import record
 from app.infrastructure.requests import current_request_id
 from app.infrastructure.shapes import FieldError, Health, RawFile, json_response
+
+log = get_logger("craft.operations")
 
 
 class ApprovalRequired(ApiError):
@@ -97,14 +99,9 @@ def begin(caller: Caller) -> tuple[CallContext, Any]:
     return ctx, current_call.set(ctx)
 
 
-def finish(
-    ctx: CallContext,
-    token: Any,
-    name: str,
-    kind: str,
-    error: ApiError | None,
-    skip_database: bool = False,
-) -> None:
+def finish(ctx: CallContext, token: Any, name: str, kind: str, error: ApiError | None) -> None:
+    """Log the call, then append its call_log row; health probes get no row. A row that can't
+    be written is logged and dropped: it never changes the call's result or error."""
     caller = ctx.caller
     fields = {
         "kind": kind,
@@ -128,9 +125,15 @@ def finish(
     # Log persistence is not included in domain statement counts or the parent call.
     local_token = current_call.set(None)
     try:
-        logging.getLogger("craft.operations").info(kind, extra={"fields": fields})
-        if not skip_database:
-            record(caller, fields)
+        log.info(kind, extra={"fields": fields})
+        if not name.startswith("health."):
+            try:
+                record(caller, fields)
+            except Exception as failure:
+                log.warning(
+                    "call_log_record_failed",
+                    extra={"fields": {"error_type": type(failure).__name__}},
+                )
     finally:
         current_call.reset(local_token)
         if token is not None:
@@ -317,7 +320,6 @@ def wrap(operation: Operation) -> Any:
         async def asynchronous(caller: Caller, request: Any = None) -> Any:
             ctx, token = begin(caller)
             error = None
-            output = None
             try:
                 if isinstance(request, (RawHttpFile, JsonHttpInput)):
                     resolved = checked_access(operation, caller)
@@ -357,13 +359,8 @@ def wrap(operation: Operation) -> Any:
                 error = ApiError()
                 raise error from None
             finally:
-                skip = operation.name == "health.live" or (
-                    isinstance(output, Health) and output.status == "unavailable"
-                )
                 try:
-                    await run_in_threadpool(
-                        finish, ctx, None, operation.name, "operation", error, skip
-                    )
+                    await run_in_threadpool(finish, ctx, None, operation.name, "operation", error)
                 finally:
                     current_call.reset(token)
 
@@ -396,9 +393,7 @@ def wrap(operation: Operation) -> Any:
                 error = ApiError()
                 raise error from None
             finally:
-                finish(
-                    ctx, token, operation.name, "operation", error, operation.name == "health.live"
-                )
+                finish(ctx, token, operation.name, "operation", error)
 
         wrapper = synchronous
     wrapper.__dict__["__operation__"] = operation

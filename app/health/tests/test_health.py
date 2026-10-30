@@ -7,9 +7,11 @@ import msgspec
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, select
 
 from app import create_app
 from app.infrastructure.config.settings import Settings
+from app.infrastructure.operations.storage import call_log
 
 
 def app_on_port(settings: Settings, port: int) -> FastAPI:
@@ -51,6 +53,20 @@ def test_health_live(settings: Settings) -> None:
 def test_health_ready_checks_db_and_head(client: TestClient) -> None:
     response = client.get("/health/ready")
     assert response.status_code == 200 and response.json() == {"status": "ok"}
+
+
+def test_health_probes_add_no_call_log_rows(
+    client: TestClient, owner_engine: Engine, last_call_id: int
+) -> None:
+    for path in ["/health/live", "/health/ready", "/health/queue"]:
+        assert client.get(path).status_code == 200
+    with owner_engine.connect() as connection:
+        added = connection.execute(
+            select(call_log.c.name).where(
+                call_log.c.id > last_call_id, call_log.c.name.startswith("health.")
+            )
+        ).all()
+    assert added == []
 
 
 def test_health_ready_503_when_db_down(settings: Settings) -> None:
