@@ -67,7 +67,11 @@ def transport():
 
 @observe("agent.model")
 async def complete(source, role: str, model: str):
-    usage.check()
+    try:
+        usage.check()
+    except usage.BudgetExhausted:
+        source.close()  # never sent; closed so it isn't left unawaited
+        raise
     try:
         response = await source
     except Exception:
