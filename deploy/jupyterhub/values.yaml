@@ -108,9 +108,14 @@ singleuser:
   networkPolicy:
     enabled: true
     egress:
+      # Every port of the API pod but 8100: craft-id shares that pod, and a notebook must not
+      # reach its sign-in form. The API listens on 8000, the run bridge on an ephemeral port.
       - to:
           - podSelector:
               matchLabels: { app.kubernetes.io/name: api }
+        ports:
+          - { protocol: TCP, port: 1, endPort: 8099 }
+          - { protocol: TCP, port: 8101, endPort: 65535 }
     egressAllowRules:
       cloudMetadataServer: false
       dnsPortsCloudMetadataServer: false
