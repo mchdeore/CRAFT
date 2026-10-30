@@ -52,7 +52,7 @@ spec:
             failureThreshold: 6
           resources:
             limits: { memory: {{ .Values.postgres.memory }} }
-            requests: { memory: {{ .Values.memoryRequest }} }
+            requests: { memory: {{ .Values.memoryRequest }}, cpu: {{ .Values.postgres.cpu }} }
       volumes:
         - name: initdb
           configMap: { name: {{ .Release.Name }}-initdb, defaultMode: 0555 }
@@ -70,8 +70,8 @@ spec:
   selector: { app.kubernetes.io/name: postgres, app.kubernetes.io/instance: {{ .Release.Name }} }
   ports: [{ name: postgres, port: 5432, targetPort: postgres }]
 ---
-# Only CRAFT's own pods reach the database: the API (with its in-pod workers), the other
-# workers and craft-id. kubectl port-forward still works: it enters the pod's own network.
+# Only CRAFT's own pods reach the database: the API (with craft-id and its in-pod workers) and
+# the other workers. kubectl port-forward still works: it enters the pod's own network.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -89,7 +89,6 @@ spec:
                 operator: In
                 values:
                   - api
-                  - id
                   {{- if .Values.backup.enabled }}
                   - backup
                   {{- end }}

@@ -5,17 +5,20 @@ workers:
     queues: agent
     concurrency: { agent: 20 }
     memory: 1Gi
+    cpu: 100m
     stopSeconds: 900         # a chat turn's ceiling
     inApiPod: true           # calls the API's MCP on 127.0.0.1
   - name: worker-interactive
     queues: interactive
     concurrency: { interactive: 10 }
     memory: 768Mi
+    cpu: 100m
     stopSeconds: 120
   - name: worker-bulk
     queues: bulk
     concurrency: { bulk: 2 }
     memory: 768Mi
+    cpu: 50m
     stopSeconds: 120
 
 backup:

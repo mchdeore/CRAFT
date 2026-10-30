@@ -435,16 +435,18 @@ async def work(
 
 
 def wait_for_schema(settings: Settings) -> None:
-    """Migrations run as their own step; until the queue's tables exist, wait (and stay healthy).
+    """Migrations run as their own step; until the database is at this code's newest migration
+    (which also makes the queue's tables), wait and stay healthy, as readiness does for the API.
     A container's first process ignores SIGTERM without a handler, so stop on it here."""
+    from app.health.handlers import current_migration, migration_head
+
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    head = migration_head()
     logged = False
     while True:
         heartbeat.FILE.touch()
         try:
-            with psycopg.connect(conninfo(settings)) as connection:
-                row = connection.execute("select to_regclass('procrastinate_jobs')").fetchone()
-            if row and row[0] is not None:
+            if asyncio.run(current_migration(settings)) == head:
                 return
         except psycopg.Error:
             pass

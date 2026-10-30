@@ -1,6 +1,6 @@
 #!/bin/bash
 # First boot only, as the postgres superuser: logins, databases, extension, default grants.
-# Passwords come from the environment, so none is committed. Also run by CI against its service.
+# Passwords come from the environment, so none is committed.
 set -euo pipefail
 
 psql -v ON_ERROR_STOP=1 -U postgres \

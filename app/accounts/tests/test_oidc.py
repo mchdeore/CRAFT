@@ -213,6 +213,16 @@ def test_a_non_uuid_object_id_is_refused(site, monkeypatch) -> None:
         oidc.finish(site.settings, flow, flow["state"], "code")
 
 
+def unreachable(site, monkeypatch) -> None:
+    """The provider stops answering, and the discovery document it served is forgotten."""
+
+    def down(*args, **kwargs):
+        raise requests.ConnectionError()
+
+    monkeypatch.setattr(oidc, "_metadata", {})
+    monkeypatch.setattr(site.provider.http, "get", down)
+
+
 def test_an_unreachable_provider_at_the_callback_fails_the_sign_in(site, monkeypatch) -> None:
     username, password, _ = site.provider.account()
     start = site.browser.get("/api/auth/login", params={"returnTo": "/after"})
@@ -221,11 +231,32 @@ def test_an_unreachable_provider_at_the_callback_fails_the_sign_in(site, monkeyp
     answer = site.provider.client.post(
         authorize.split("?")[0], data=form | {"username": username, "password": password}
     )
-    monkeypatch.setattr(oidc, "_metadata", {})
-
-    def down(*args, **kwargs):
-        raise requests.ConnectionError()
-
-    monkeypatch.setattr(site.provider.http, "get", down)
+    unreachable(site, monkeypatch)
     done = site.browser.get(answer.headers["location"])
     assert done.status_code == 302 and done.headers["location"] == "/?signIn=failed"
+
+
+def test_an_unreachable_provider_at_the_start_fails_the_sign_in(site, monkeypatch) -> None:
+    unreachable(site, monkeypatch)
+    start = site.browser.get("/api/auth/login", params={"returnTo": "/after"})
+    assert start.status_code == 302 and start.headers["location"] == "/?signIn=failed"
+    assert not site.browser.cookies.get("__Host-craft_signin")
+
+
+def test_sign_out_clears_the_cookie_with_the_provider_unreachable(
+    site, owner_engine, monkeypatch
+) -> None:
+    username, password, _ = site.provider.account(email=f"{uuid4().hex[:8]}@example.org")
+    with site.provider.sessions() as session:
+        email = identity.storage.account(session, username)["email"]
+    craft_user(site, owner_engine, email)
+    assert sign_in(site, username, password).headers["location"] == "/after"
+    unreachable(site, monkeypatch)
+
+    out = site.browser.post(
+        "/api/auth/logout", headers={"Origin": site.settings.allowed_origins.split(",")[0]}
+    )
+
+    assert out.status_code == 200 and out.json() == {"logoutUrl": None}
+    cookie = out.headers["set-cookie"]
+    assert cookie.startswith("__Host-craft_session=") and "Max-Age=0" in cookie
