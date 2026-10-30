@@ -444,8 +444,8 @@ def test_a_short_token_list_leaves_run_token_calls_as_they_were(account):
 
 
 def test_a_run_token_resolves_once_per_request_and_reads_only_its_transport(account):
-    """Issuing merges the transport ids into the stored state, and resolving reads them alone:
-    neither reads nor rewrites the thread snapshot beside them."""
+    """Issuing merges the transport ids into the stored state, and resolving reads them alone
+    (a JSONB subscript): neither reads nor rewrites the thread snapshot beside them."""
     import re
 
     from sqlalchemy import event
@@ -492,4 +492,4 @@ def test_a_run_token_resolves_once_per_request_and_reads_only_its_transport(acco
     assert state["craftTransport"]["runId"] == str(data.run_id)
     touched = [s for s in statements if "agent_sessions.state" in s]
     assert touched
-    assert not [s for s in touched if re.search(r"agent_sessions\.state(?!\s*(->|\|\|))", s)]
+    assert not [s for s in touched if re.search(r"agent_sessions\.state(?!\s*(\[|->|\|\|))", s)]

@@ -249,7 +249,8 @@ def test_file_list_reads_no_file_bytes(chat):
     from sqlalchemy import event
 
     content = b"\0" * (20 * 1024 * 1024)
-    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
+    app = create_app(chat["settings"])
+    with TestClient(app, base_url="https://testserver") as http:
         assert chat["sign_in"](http).status_code == 200
         uploaded = http.post(
             "/api/conversations/" + str(chat["thread"]) + "/files",
@@ -267,7 +268,7 @@ def test_file_list_reads_no_file_bytes(chat):
         def record(connection, cursor, statement, *_):
             statements.append(statement)
 
-        engine = http.app.state.engine
+        engine = app.state.engine
         event.listen(engine, "before_cursor_execute", record)
         try:
             listed = http.get("/api/conversations/" + str(chat["thread"]) + "/files")
