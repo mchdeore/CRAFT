@@ -5,7 +5,10 @@ import hashlib
 import hmac
 import json
 import secrets
+import time
+from collections import deque
 from datetime import timedelta
+from threading import BoundedSemaphore, Lock
 from uuid import UUID
 
 import jwt
@@ -13,7 +16,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.identity import storage
@@ -27,6 +30,15 @@ TOKEN_LIFETIME = timedelta(hours=1)
 SCOPES = {"openid", "profile", "email", "offline_access"}
 PASSWORDS = PasswordHasher()
 DUMMY = PASSWORDS.hash("unused-synthetic-dummy-password")
+MIN_PASSWORD = 12
+# A verify takes 64 MiB, and craft-id's container has room for one: the next waits its turn.
+VERIFYING = BoundedSemaphore(1)
+VERIFY_WAIT = 2  # seconds
+# The last minute's attempts, oldest first, as (time, sha256 of the username): one bounded
+# deque, so neither many names nor long ones pile up in memory.
+ATTEMPTS: deque[tuple[float, bytes]] = deque()
+ATTEMPT_LOCK = Lock()
+ATTEMPTS_PER_MINUTE = 5  # per username
 
 
 class Refused(Exception):
@@ -92,22 +104,43 @@ def check_client(sessions, client_id: str, redirect_uri: str):
 
 
 def authenticate(sessions, username: str, password: str):
-    """The enabled account for these credentials, or None. Always verifies a hash."""
+    """The enabled account for these credentials, or None. Always verifies a hash.
+
+    Refused("temporarily_unavailable") when the username has used its attempts for the minute,
+    or the verify before this one is still running after VERIFY_WAIT."""
+    username = username.strip().lower()
+    key, at = sha256(username), time.monotonic()
+    with ATTEMPT_LOCK:
+        while ATTEMPTS and ATTEMPTS[0][0] <= at - 60:
+            ATTEMPTS.popleft()
+        if sum(seen == key for _, seen in ATTEMPTS) >= ATTEMPTS_PER_MINUTE:
+            raise Refused("temporarily_unavailable")
+        ATTEMPTS.append((at, key))
     with unit_of_work(sessions, read_only=True) as session:
-        account = storage.account(session, username.strip().lower())
+        account = storage.account(session, username)
         digest = storage.password_hash(session, account["id"]) if account else None
+    if not VERIFYING.acquire(timeout=VERIFY_WAIT):
+        raise Refused("temporarily_unavailable")
     try:
         valid = PASSWORDS.verify(digest or DUMMY, password)
     except (VerificationError, InvalidHashError):
         valid = False
+    finally:
+        VERIFYING.release()
     if not valid or account is None or digest is None or account["disabled_at"] is not None:
         return None
     return account
 
 
 def issue_code(sessions, client, account, request: dict) -> str:
+    """A new single-use code; expired and used codes go in the same transaction."""
     code = b64(secrets.token_bytes(32))
     with unit_of_work(sessions) as session:
+        session.execute(
+            storage.id_codes.delete().where(
+                or_(storage.id_codes.c.expires_at < now(), storage.id_codes.c.used_at.is_not(None))
+            )
+        )
         session.execute(
             storage.id_codes.insert().values(
                 code_sha256=sha256(code),
@@ -192,8 +225,14 @@ def redeem(sessions, keys: Keys, public_url: str, form: dict, basic: tuple[str, 
     }
 
 
+def hashed(password: str) -> str:
+    if len(password) < MIN_PASSWORD:
+        raise ValueError(f"a password needs at least {MIN_PASSWORD} characters")
+    return PASSWORDS.hash(password)
+
+
 def add_account(sessions, username: str, name: str, email: str | None, password: str) -> UUID:
-    digest = PASSWORDS.hash(password)
+    digest = hashed(password)
     with unit_of_work(sessions) as session:
         identifier = session.execute(
             storage.id_accounts.insert()
@@ -208,7 +247,7 @@ def add_account(sessions, username: str, name: str, email: str | None, password:
 
 def set_password(sessions, username: str, password: str) -> bool:
     """Set or replace the password; an account seeded without one gets its first here."""
-    digest = PASSWORDS.hash(password)
+    digest = hashed(password)
     with unit_of_work(sessions) as session:
         account = storage.account(session, username.lower())
         if account is None:
