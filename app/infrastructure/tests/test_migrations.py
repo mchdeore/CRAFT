@@ -1,4 +1,4 @@
-"""Migration verification rolls back DDL in craft_test, preserving other fixtures."""
+"""Migration verification rolls back DDL in the test database, preserving other fixtures."""
 
 from collections.abc import Iterator
 from datetime import timedelta
@@ -12,6 +12,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, Engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
+from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.metadata import (
     doc_versions,
     include_name,
@@ -22,11 +23,14 @@ from app.infrastructure.paths import ROOT
 
 
 @pytest.fixture
-def isolated_migrations(owner_engine: Engine) -> Iterator[tuple[Config, Connection]]:
+def isolated_migrations(
+    owner_engine: Engine, settings: Settings
+) -> Iterator[tuple[Config, Connection]]:
+    name = settings.database_name
     with owner_engine.connect() as connection, connection.begin() as transaction:
-        assert connection.execute(text("select current_database()")).scalar() == "craft_test"
+        assert connection.execute(text("select current_database()")).scalar() == name
         config = Config(toml_file=str(ROOT / "pyproject.toml"))
-        config.attributes["database_name"] = "craft_test"
+        config.attributes["database_name"] = name
         config.attributes["connection"] = connection
         yield config, connection
         transaction.rollback()
@@ -300,5 +304,60 @@ def test_token_kinds_upgrade_as_workspace_and_downgrade_revokes_mcp_tokens(
     }
     # An MCP token must not come back as a workspace token that reaches /api.
     assert revoked == {earlier: (False, timedelta(hours=168)), mcp: (True, timedelta(hours=168))}
+    command.upgrade(config, "head")
+    assert_models(connection)
+
+
+def test_notebook_grants_take_their_approvals_operation_and_downgrade_revokes_them(
+    isolated_migrations: tuple[Config, Connection],
+) -> None:
+    config, connection = isolated_migrations
+    command.downgrade(config, "0031")
+    user = connection.execute(
+        text("insert into users (username, display_name) values ('grants', 'G') returning id")
+    ).scalar_one()
+    conversation = connection.execute(
+        text("insert into conversations (owner_id, title) values (:u, 'Generated') returning id"),
+        {"u": user},
+    ).scalar_one()
+    run = connection.execute(
+        text(
+            "insert into agent_runs (conversation_id, started_by, status, model, "
+            "instructions_version) values (:c, :u, 'finished', 'scripted', 'generated') "
+            "returning id"
+        ),
+        {"c": conversation, "u": user},
+    ).scalar_one()
+    ids = {"u": user, "c": conversation, "r": run}
+
+    def approval(operation: str) -> object:
+        return connection.execute(
+            text(
+                "insert into approval_requests (run_id, conversation_id, requested_by, "
+                "operation, arguments, arguments_sha256, evidence, reasoning, retrieval_path, "
+                "interrupt_id) values (:r, :c, :u, :o, '{}', :d, '[]', 'Generated.', '[]', :o) "
+                "returning id"
+            ),
+            ids | {"o": operation, "d": operation.encode()},
+        ).scalar_one()
+
+    grant = (
+        "insert into notebook_grants (approval_id, user_id, conversation_id, path{column}) "
+        "values (:a, :u, :c, 'work/fit.ipynb'{value})"
+    )
+    edit = approval("workspace.edit_notebook")
+    connection.execute(text(grant.format(column="", value="")), ids | {"a": edit})
+    command.upgrade(config, "0032")
+    grants = "select operation, revoked_at is not null from notebook_grants where user_id = :u"
+    assert connection.execute(text(grants), ids).all() == [("workspace.edit_notebook", False)]
+    # An approved run of the edit-granted notebook gets its own active grant.
+    connection.execute(
+        text(grant.format(column=", operation", value=", 'workspace.run_code'")),
+        ids | {"a": approval("workspace.run_code")},
+    )
+    command.downgrade(config, "0031")
+    # Without the operation an edit grant would cover runs again.
+    revoked = "select revoked_at is not null from notebook_grants where user_id = :u"
+    assert connection.execute(text(revoked), ids).scalars().all() == [True, True]
     command.upgrade(config, "head")
     assert_models(connection)

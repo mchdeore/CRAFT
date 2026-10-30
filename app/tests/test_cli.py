@@ -22,7 +22,7 @@ from app.tests.support.cube import cube_source as cube_source
 def test_cli_call_and_mcp(cube_source) -> None:
     configured, username = cube_source["settings"], cube_source["username"]
     env = os.environ | {
-        "CRAFT_DATABASE_NAME": "craft_test",
+        "CRAFT_DATABASE_NAME": configured.database_name,
         "CRAFT_PROVIDER_ROOT": configured.provider_root,
     }
     result = subprocess.run(

@@ -36,9 +36,10 @@ def test_unit_of_work_commits_and_rolls_back(app: FastAPI, probe_table: str) -> 
 
 
 def test_test_database_is_separate(app: FastAPI) -> None:
-    assert app.state.settings.database_name == "craft_test"
+    name = app.state.settings.database_name
+    assert name.startswith("craft_test")
     with app.state.engine.connect() as connection:
-        assert connection.execute(text("select current_database()")).scalar() == "craft_test"
+        assert connection.execute(text("select current_database()")).scalar() == name
 
 
 def test_app_login_cannot_create_tables(app: FastAPI) -> None:

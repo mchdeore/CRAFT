@@ -9,7 +9,7 @@ from app.cli import main
 from app.infrastructure.errors import Conflict, InvalidInput
 
 
-def test_users_add_list_and_password_policy(owner_engine, monkeypatch, capsys) -> None:
+def test_users_add_list_and_password_policy(owner_engine, settings, monkeypatch, capsys) -> None:
     name = "cli_" + uuid4().hex
     actor = "cli_admin_" + uuid4().hex
     with owner_engine.begin() as connection:
@@ -19,7 +19,7 @@ def test_users_add_list_and_password_policy(owner_engine, monkeypatch, capsys) -
             .returning(storage.users.c.id)
         ).scalar_one()
         connection.execute(storage.user_roles.insert().values(user_id=admin, role="admin"))
-    monkeypatch.setenv("CRAFT_DATABASE_NAME", "craft_test")
+    monkeypatch.setenv("CRAFT_DATABASE_NAME", settings.database_name)
     monkeypatch.setattr("getpass.getpass", lambda _: "short")
     with pytest.raises(InvalidInput):
         main(["users", "--as", actor, "add", name])

@@ -20,7 +20,8 @@ class Workspace(Shape):
 
 class RunCode(Shape):
     code: Annotated[str, msgspec.Meta(min_length=1, max_length=100_000)]
-    # The notebook this code works on; approving it grants that notebook for the conversation.
+    # The notebook this code works on. Approving the run also covers later runs in this
+    # conversation (run_in_granted_notebook): all code runs in the one analysis kernel.
     notebook: NotebookPath | None = None
 
 
@@ -109,15 +110,26 @@ async def stop_workspace(caller: Caller) -> Workspace:
 
 @operation(SIGNED_IN, post="/workspace/run", tool=True, effects=EXTERNAL, grants="notebook")
 async def run_code(caller: Caller, request: RunCode) -> CodeResult:
-    """Run Python in the requester's workspace kernel after approval; for example an analysis."""
+    """Run Python in the requester's workspace kernel after approval; for example an analysis.
+
+    With notebook set, approving the run also covers later runs in this conversation.
+    """
     return CodeResult(**await service.run_code(caller, request.code))
 
 
 @operation(
-    SIGNED_IN, post="/workspace/notebooks/run", tool=True, effects=EXTERNAL, granted="notebook"
+    SIGNED_IN,
+    post="/workspace/notebooks/run",
+    tool=True,
+    effects=EXTERNAL,
+    granted="notebook",
+    granted_by="workspace.run_code",
 )
 async def run_in_granted_notebook(caller: Caller, request: GrantedRun) -> CodeResult:
-    """Run Python for a notebook already granted in this conversation, without asking again."""
+    """Run Python for a notebook already granted in this conversation, without asking again.
+
+    Only an approved run_code with this notebook grants it; an approved edit does not.
+    """
     return CodeResult(**await service.run_code(caller, request.code))
 
 
@@ -140,10 +152,18 @@ async def save_chart(caller: Caller, request: SaveChart) -> SavedChart:
 
 
 @operation(
-    SIGNED_IN, post="/workspace/notebooks/edit-granted", tool=True, effects=EXTERNAL, granted="path"
+    SIGNED_IN,
+    post="/workspace/notebooks/edit-granted",
+    tool=True,
+    effects=EXTERNAL,
+    granted="path",
+    granted_by="workspace.edit_notebook",
 )
 async def edit_granted_notebook(caller: Caller, request: EditNotebook) -> EditedNotebook:
-    """Change a cell of a notebook already granted in this conversation, without asking again."""
+    """Change a cell of a notebook already granted in this conversation, without asking again.
+
+    Only an approved edit_notebook of this notebook grants it; an approved run does not.
+    """
     return EditedNotebook(**await service.edit_notebook(caller, request))
 
 
