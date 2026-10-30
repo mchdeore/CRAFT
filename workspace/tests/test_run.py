@@ -3,6 +3,7 @@ results beside the notebook out."""
 
 import contextlib
 import json
+import math
 import os
 import sys
 import time
@@ -32,7 +33,7 @@ def kernel(monkeypatch):
     state = SimpleNamespace(now=0.0, limits=[])
 
     class NotebookClient:
-        timeout = 0  # the run step sets it before each cell
+        timeout: int | None = None  # the run step sets it before each cell
 
         def __init__(self, notebook, **options):
             pass
@@ -48,8 +49,9 @@ def kernel(monkeypatch):
             if cell["source"] == "die":
                 raise DeadKernelError()
             seconds = float(cell["source"])
-            state.now += min(seconds, self.timeout)
-            if seconds > self.timeout:
+            limit = self.timeout or math.inf  # as in nbclient, 0 or None is no limit
+            state.now += min(seconds, limit)
+            if seconds > limit:
                 raise CellTimeoutError()
             cell["outputs"] = ["ran"]
 

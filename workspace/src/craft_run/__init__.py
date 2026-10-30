@@ -74,8 +74,8 @@ def prepare(root: Path = ROOT) -> None:
 
 def run(work: Path = WORK, out: Path = OUT) -> None:
     """Execute the notebook cell by cell, each within its own limit and what is left of the
-    run's. However it ends, the executed copy, as far as it got, and ``.status`` are written
-    and the step exits 0, so collect brings them back."""
+    run's. Once the notebook is read, however the run ends, the executed copy, as far as it
+    got, and ``.status`` are written and the step exits 0, so collect brings them back."""
     # The workspace image's own packages, not the app's.
     import nbformat  # pyright: ignore[reportMissingImports]
     from nbclient import NotebookClient  # pyright: ignore[reportMissingImports]
@@ -104,7 +104,7 @@ def run(work: Path = WORK, out: Path = OUT) -> None:
         status = RAISED
     except TimeoutError:  # the total, or a cell over its own limit (nbclient's CellTimeoutError)
         status = TIMED_OUT
-    except DeadKernelError:  # often a notebook over the run's memory
+    except DeadKernelError:
         status = KERNEL_DIED
     except Exception:
         pass  # FAILED, and collect still brings back what ran

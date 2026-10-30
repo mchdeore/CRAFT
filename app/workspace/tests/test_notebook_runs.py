@@ -332,6 +332,8 @@ def test_a_run_job_is_offline_read_only_and_bounded():
     assert pod["volumes"][0]["persistentVolumeClaim"]["claimName"] == f"claim-{user}"
     prepare, run = pod["initContainers"]
     (collect,) = pod["containers"]
+    (rule,) = job["spec"]["podFailurePolicy"]["rules"]  # collect's code for a run cut short
+    assert rule["onExitCodes"]["containerName"] == collect["name"]
     mounts = {mount["mountPath"]: mount for mount in run["volumeMounts"]}
     assert mounts["/work"] == {
         "name": "volume", "mountPath": "/work", "subPath": "work", "readOnly": True
@@ -383,7 +385,7 @@ def test_a_finished_failed_or_timed_out_job_is_reported_and_deleted(monkeypatch)
         assert requests[-1][0] == "DELETE"  # deleting a Job that is already gone is quiet
 
 
-def test_a_blip_while_polling_is_asked_again_and_the_job_deleted_once(monkeypatch):
+def test_only_a_blip_while_polling_is_asked_again_and_the_job_is_deleted_once(monkeypatch):
     import httpx
 
     monkeypatch.setattr(notebook_jobs, "POLL_SECONDS", 0)
@@ -404,6 +406,11 @@ def test_a_blip_while_polling_is_asked_again_and_the_job_deleted_once(monkeypatc
     cluster = notebook_jobs.Cluster("https://k8s", "craft", {}, transport=transport)
     asyncio.run(notebook_jobs.JobRunner(cluster, "image", uuid4()).run("", "nb.ipynb", "o.ipynb"))
     assert methods == ["POST", "GET", "GET", "GET", "GET", "DELETE"]
+
+    answers[:], methods[:] = [httpx.Response(503), httpx.Response(404)], []
+    with pytest.raises(httpx.HTTPStatusError):  # a missing Job is no blip
+        asyncio.run(notebook_jobs.JobRunner(cluster, "image", uuid4()).run("", "nb.ipynb", "o"))
+    assert methods == ["POST", "GET", "GET", "DELETE"]
 
 
 def test_the_runner_in_the_image_keeps_the_same_limits_and_codes():
