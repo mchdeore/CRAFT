@@ -110,7 +110,8 @@ def personal_token(base: Caller, digest: bytes, claimed: str | None) -> Personal
 
 
 def run_token(base: Caller, digest: bytes, claimed: str | None) -> RunToken | None:
-    """A current run's token. X-Craft-User does not apply: run tokens are unchanged."""
+    """A current run's token, resolved once to its run's caller and principal. X-Craft-User does
+    not apply to it."""
     try:
         return RunToken(*resolve_run(base, digest))
     except NotSignedIn:
@@ -146,4 +147,4 @@ async def current() -> tuple[Caller, RunPrincipal | None]:
     entry = credential.get()
     if entry is None:
         raise NotSignedIn()
-    return await run_in_threadpool(entry.current)
+    return entry.current()

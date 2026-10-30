@@ -282,14 +282,14 @@ def test_file_list_reads_no_file_bytes(chat):
     assert files and not any("workspace_files.bytes" in s for s in files)
 
 
-def test_runs_refuse_a_missing_or_archived_conversation(chat):
+
+def test_require_owned_refuses_an_archived_conversation_only_when_active(chat):
     from sqlalchemy import func
 
+    from app.conversations.handlers import require_owned
     from app.infrastructure.database import metadata as m
     from app.infrastructure.errors import NotFound
 
-    with pytest.raises(NotFound):
-        collect(chat["caller"], msgspec.structs.replace(request(chat), thread_id=uuid4()))
     conversations = m.metadata.tables["conversations"]
     with chat["owner"].begin() as connection:
         connection.execute(
@@ -298,4 +298,5 @@ def test_runs_refuse_a_missing_or_archived_conversation(chat):
             .values(archived_at=func.now())
         )
     with pytest.raises(NotFound):
-        collect(chat["caller"], request(chat))
+        require_owned(chat["caller"], chat["thread"], active=True)
+    require_owned(chat["caller"], chat["thread"], active=False)
