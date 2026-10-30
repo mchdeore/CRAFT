@@ -7,7 +7,8 @@ MCP server the caller for each message:
 
 - `PersonalToken`: resolved once per HTTP request to its account, with current roles and
   grants; refused over its rate limit; reaches only the read tools (`token_allowed`).
-- `RunToken`: re-resolved for each message through the run handler, unchanged.
+- `RunToken`: resolved once per HTTP request through the run handler to its run's caller and
+  principal. /mcp takes one JSON-RPC message per request, so that is once per message.
 
 A session cookie never signs in here. Only token digests are kept or passed on.
 """
@@ -74,17 +75,16 @@ class PersonalToken:
 
 @dataclass(frozen=True)
 class RunToken:
-    """An agent run token; its run and roles are read again for every message."""
+    """An agent run token, resolved once per request to its run's caller and principal."""
 
-    base: Caller
-    digest: bytes
     caller: Caller
+    principal: RunPrincipal
 
     def admit(self) -> None:
         pass
 
     def current(self) -> tuple[Caller, RunPrincipal | None]:
-        return resolve_run(self.base, self.digest)
+        return self.caller, self.principal
 
 
 def resolve_run(base: Caller, digest: bytes) -> tuple[Caller, RunPrincipal]:
@@ -112,10 +112,9 @@ def personal_token(base: Caller, digest: bytes, claimed: str | None) -> Personal
 def run_token(base: Caller, digest: bytes, claimed: str | None) -> RunToken | None:
     """A current run's token. X-Craft-User does not apply: run tokens are unchanged."""
     try:
-        caller, _ = resolve_run(base, digest)
+        return RunToken(*resolve_run(base, digest))
     except NotSignedIn:
         return None
-    return RunToken(base, digest, caller)
 
 
 RESOLVERS: tuple[TokenResolver, ...] = (personal_token, run_token)

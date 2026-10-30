@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Table,
@@ -52,6 +53,17 @@ agent_runs = Table(
     ),
     CheckConstraint("tool_calls IS NULL OR tool_calls >= 0", name="tool_calls"),
     CheckConstraint("active_seconds IS NULL OR active_seconds >= 0", name="active_seconds"),
+)
+# A conversation's running or paused run: starts, archiving and pending counts look it up.
+Index(
+    "ix_agent_runs_conversation_id_active",
+    agent_runs.c.conversation_id,
+    postgresql_where=text("status IN ('running', 'paused')"),
+)
+Index(
+    "ix_agent_runs_conversation_id_started_at",
+    agent_runs.c.conversation_id,
+    agent_runs.c.started_at.desc(),
 )
 agent_sessions = Table(
     "agent_sessions",
@@ -424,38 +436,32 @@ def finish(
 
 
 def issue_token(session, user, identifier, digest, expires, context):
-    row = session.execute(
-        select(agent_runs.c.conversation_id)
+    """Store the running run's token digest, and its transport ids in the session state."""
+    conversation = session.execute(
+        agent_runs.update()
         .where(
             agent_runs.c.id == identifier,
             agent_runs.c.started_by == user,
             agent_runs.c.status == "running",
         )
-        .with_for_update()
-    ).first()
-    if row is None:
+        .values(token_sha256=digest, token_expires_at=expires)
+        .returning(agent_runs.c.conversation_id)
+    ).scalar_one_or_none()
+    if conversation is None:
         from app.infrastructure.errors import NotFound
 
         raise NotFound()
-    session.execute(
-        agent_runs.update()
-        .where(agent_runs.c.id == identifier)
-        .values(token_sha256=digest, token_expires_at=expires)
+    # Merged in the database, so the thread snapshot beside it is neither read nor rewritten.
+    statement = insert(agent_sessions).values(
+        conversation_id=conversation, state={"craftTransport": context}
     )
-    state = (
-        session.execute(
-            select(agent_sessions.c.state)
-            .where(agent_sessions.c.conversation_id == row.conversation_id)
-            .with_for_update()
-        ).scalar_one_or_none()
-        or {}
-    )
-    state = state | {"craftTransport": context}
-    statement = insert(agent_sessions).values(conversation_id=row.conversation_id, state=state)
     session.execute(
         statement.on_conflict_do_update(
             index_elements=[agent_sessions.c.conversation_id],
-            set_={"state": state, "updated_at": func.now()},
+            set_={
+                "state": agent_sessions.c.state.op("||")(statement.excluded.state),
+                "updated_at": func.now(),
+            },
         )
     )
 
@@ -474,7 +480,12 @@ def principal(session, digest, at):
     roles = metadata.tables["user_roles"]
     row = (
         session.execute(
-            select(agent_runs, agent_sessions.c.state)
+            select(
+                agent_runs.c.id,
+                agent_runs.c.started_by,
+                agent_runs.c.conversation_id,
+                agent_sessions.c.state["craftTransport"].label("transport"),
+            )
             .join(users, users.c.id == agent_runs.c.started_by)
             .join(conversations, conversations.c.id == agent_runs.c.conversation_id)
             .outerjoin(agent_sessions, agent_sessions.c.conversation_id == conversations.c.id)

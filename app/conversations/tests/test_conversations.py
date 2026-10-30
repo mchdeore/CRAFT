@@ -243,3 +243,58 @@ def test_french_reply_carries_english_originals(chat):
     }
     record = records[str(french.run_id)]
     assert record["replyLanguage"] == "fr" and record["originals"] == len(shown["items"])
+
+
+def test_file_list_reads_no_file_bytes(chat):
+    from sqlalchemy import event
+
+    content = b"\0" * (20 * 1024 * 1024)
+    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
+        assert chat["sign_in"](http).status_code == 200
+        uploaded = http.post(
+            "/api/conversations/" + str(chat["thread"]) + "/files",
+            content=content,
+            headers={
+                "Origin": "https://testserver",
+                "Content-Type": "application/octet-stream",
+                "X-File-Name": "generated.bin",
+                "X-Simulated": "true",
+            },
+        )
+        assert uploaded.status_code == 200
+        statements = []
+
+        def record(connection, cursor, statement, *_):
+            statements.append(statement)
+
+        engine = http.app.state.engine
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            listed = http.get("/api/conversations/" + str(chat["thread"]) + "/files")
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+    assert listed.status_code == 200 and listed.json() == [uploaded.json()]
+    assert listed.json()[0]["sizeBytes"] == len(content)
+    files = [
+        s for s in statements if s.lstrip().upper().startswith("SELECT") and "workspace_files" in s
+    ]
+    assert files and not any("workspace_files.bytes" in s for s in files)
+
+
+def test_runs_refuse_a_missing_or_archived_conversation(chat):
+    from sqlalchemy import func
+
+    from app.infrastructure.database import metadata as m
+    from app.infrastructure.errors import NotFound
+
+    with pytest.raises(NotFound):
+        collect(chat["caller"], msgspec.structs.replace(request(chat), thread_id=uuid4()))
+    conversations = m.metadata.tables["conversations"]
+    with chat["owner"].begin() as connection:
+        connection.execute(
+            conversations.update()
+            .where(conversations.c.id == chat["thread"])
+            .values(archived_at=func.now())
+        )
+    with pytest.raises(NotFound):
+        collect(chat["caller"], request(chat))

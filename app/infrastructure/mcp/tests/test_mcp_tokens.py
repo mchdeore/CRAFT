@@ -436,8 +436,60 @@ def test_a_short_token_list_leaves_run_token_calls_as_they_were(account):
         # write_note is not on the MCP token's list; the run token reaches it (approval-gated).
         refused = call(account, raw, "write_note", {"title": "x", "body": "y"}).json()["result"]
         assert refused["structuredContent"]["code"] == "approval_required"
-        # As before this change: once to sign in, once for the message.
-        assert resolutions() - start == 2
+        # Once per request: at sign-in, reused for its one message.
+        assert resolutions() - start == 1
     finally:
         revoke_run_token(trusted, RunRef(run=data.run_id))
         agent_service.finish(trusted, data, "cancelled", {})
+
+
+def test_a_run_token_resolves_once_per_request_and_reads_only_its_transport(account):
+    """Issuing merges the transport ids into the stored state, and resolving reads them alone:
+    neither reads nor rewrites the thread snapshot beside them."""
+    import re
+
+    from sqlalchemy import event
+    from sqlalchemy.dialects.postgresql import insert
+
+    sessions = m.metadata.tables["agent_sessions"]
+    data = request(account)
+    agent_service.start(account["caller"], data, "simulated")
+    stored = {"craftAguiSnapshot": {"messages": ["generated"]}, "state": {"craftApprovals": []}}
+    with account["owner"].begin() as connection:
+        values = insert(sessions).values(conversation_id=data.thread_id, state=stored)
+        connection.execute(
+            values.on_conflict_do_update(
+                index_elements=[sessions.c.conversation_id], set_={"state": stored}
+            )
+        )
+    trusted = replace(account["caller"], conversation_id=data.thread_id, run_id=data.run_id)
+    statements = []
+
+    def record(connection, cursor, statement, *_):
+        statements.append(statement)
+
+    def resolutions():
+        return len(logged(account, name="agent.resolve_run_token", run_id=data.run_id))
+
+    engine = account["app"].state.engine
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        raw = issue_run_token(trusted, RunRef(run=data.run_id)).token
+        start = resolutions()
+        assert post(account, raw).status_code == 200
+        listed = call(account, raw, "list_missions").json()["result"]
+        assert listed["isError"] is False
+        assert resolutions() - start == 2
+        with account["owner"].connect() as connection:
+            state = connection.execute(
+                select(sessions.c.state).where(sessions.c.conversation_id == data.thread_id)
+            ).scalar_one()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+        revoke_run_token(trusted, RunRef(run=data.run_id))
+        agent_service.finish(trusted, data, "cancelled", {})
+    assert {key: state[key] for key in stored} == stored
+    assert state["craftTransport"]["runId"] == str(data.run_id)
+    touched = [s for s in statements if "agent_sessions.state" in s]
+    assert touched
+    assert not [s for s in touched if re.search(r"agent_sessions\.state(?!\s*(->|\|\|))", s)]

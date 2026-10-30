@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.conversations.handlers import ConversationRef, read_conversation
+from app.conversations.handlers import require_owned
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import Conflict, NotFound
 from app.notes import storage
@@ -30,7 +30,7 @@ def shape(row, body=True) -> dict[str, Any]:
 
 def write(caller, request):
     if request.conversation_id is not None:
-        read_conversation(caller, ConversationRef(id=request.conversation_id))
+        require_owned(caller, request.conversation_id, active=False)
     with unit_of_work(scope(caller)) as session:
         storage.serialize(session, caller.user_id)
         existing = storage.by_title(session, caller.user_id, request.title)
@@ -41,7 +41,7 @@ def write(caller, request):
 
 def list_owned(caller, conversation):
     if conversation is not None:
-        read_conversation(caller, ConversationRef(id=conversation))
+        require_owned(caller, conversation, active=False)
     with unit_of_work(scope(caller), read_only=True) as session:
         return [
             shape(row, False) for row in storage.list_owned(session, caller.user_id, conversation)

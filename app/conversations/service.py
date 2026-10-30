@@ -7,11 +7,10 @@ from typing import Any
 from urllib.parse import quote
 
 import msgspec
-from sqlalchemy import func, select
+from sqlalchemy import func
 from starlette.responses import Response
 
 from app.conversations import storage
-from app.infrastructure.database import metadata as m
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
 from app.infrastructure.operations.context import current_call
@@ -34,14 +33,7 @@ def append(caller, request):
     with unit_of_work(scope(caller)) as session:
         if storage.read_owned(session, caller.user_id, request.id) is None:
             raise NotFound()
-        run = session.execute(
-            select(m.metadata.tables["agent_runs"].c.id).where(
-                m.metadata.tables["agent_runs"].c.id == request.run,
-                m.metadata.tables["agent_runs"].c.conversation_id == request.id,
-                m.metadata.tables["agent_runs"].c.started_by == caller.user_id,
-            )
-        ).first()
-        if run is None:
+        if storage.started_run(session, caller.user_id, request.id, request.run) is None:
             raise NotFound()
         storage.append(session, request.id, request.run, request.messages)
 
@@ -56,20 +48,33 @@ def owned(caller, session, identifier, *, active=True, lock=False):
     return row
 
 
-def summary(row) -> dict[str, Any]:
+def require_owned(caller, identifier, *, active):
+    """Check ownership in a transaction of its own, without reading the history."""
+    with unit_of_work(scope(caller), read_only=True) as session:
+        owned(caller, session, identifier, active=active)
+
+
+def summary(row, pending_approvals=0) -> dict[str, Any]:
     return dict(
         id=row["id"],
         title=row["title"],
         group_name=row["group_name"],
         updated_at=row["updated_at"].isoformat(),
         archived=row["archived_at"] is not None,
-        pending_approvals=0,
+        pending_approvals=pending_approvals,
     )
+
+
+def summary_with_pending(session, row) -> dict[str, Any]:
+    """One conversation's summary, with its paused run's pending approvals."""
+    return summary(row, storage.pending_approvals(session, [row["id"]]).get(row["id"], 0))
 
 
 def list_owned(caller):
     with unit_of_work(scope(caller), read_only=True) as session:
-        return [summary(row) for row in storage.summaries(session, caller.user_id)]
+        rows = storage.summaries(session, caller.user_id)
+        pending = storage.pending_approvals(session, [row["id"] for row in rows])
+        return [summary(row, pending.get(row["id"], 0)) for row in rows]
 
 
 def create(caller, title, group_name=None):
@@ -80,7 +85,7 @@ def create(caller, title, group_name=None):
 def read(caller, identifier) -> dict[str, Any]:
     with unit_of_work(scope(caller), read_only=True) as session:
         row = owned(caller, session, identifier, active=False)
-        return summary(row) | {
+        return summary_with_pending(session, row) | {
             "messages": [
                 {key: value for key, value in message.items() if not key.startswith("_")}
                 for message in storage.history(session, identifier)
@@ -103,7 +108,9 @@ def update(caller, request):
             values["archived_at"] = func.now() if request.archived else None
             if request.archived:
                 storage.clear_files(session, request.id)
-        return summary(storage.update_conversation(session, request.id, values))
+        return summary_with_pending(
+            session, storage.update_conversation(session, request.id, values)
+        )
 
 
 def file_shape(row) -> dict[str, Any]:

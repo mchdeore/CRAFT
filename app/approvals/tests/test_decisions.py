@@ -343,3 +343,40 @@ def test_concurrent_decisions_append_only_one_result(context):
             .all()
         )
     assert len(events) == 2 and "requested" in events
+
+
+def test_status_lists_and_pending_counts_follow_the_paused_run(context):
+    from app.approvals.handlers import ApprovalQuery, list_approvals
+    from app.conversations.handlers import ConversationRef, list_conversations, read_conversation
+
+    caller = context["caller"]
+    first = request_approval(caller, context["proposal"](1, "first-call"))
+    second = request_approval(caller, context["proposal"](2, "second-call"))
+
+    def listed(status=None):
+        return {row.id: row.status for row in list_approvals(caller, ApprovalQuery(status=status))}
+
+    def counts():
+        summary = next(
+            row for row in list_conversations(caller) if row.id == context["conversation"]
+        )
+        detail = read_conversation(caller, ConversationRef(id=context["conversation"]))
+        return summary.pending_approvals, detail.pending_approvals
+
+    assert listed("pending") == {first.id: "pending", second.id: "pending"}
+    # A running run's requests are not waiting on anyone yet.
+    assert counts() == (0, 0)
+    runs = metadata.tables["agent_runs"]
+    with context["owner"].begin() as db:
+        db.execute(runs.update().where(runs.c.id == context["run"]).values(status="paused"))
+    assert counts() == (2, 2)
+    decide_approval(replace(caller, origin="http"), Decision(id=first.id, approve=True))
+    assert listed() == {first.id: "approved", second.id: "pending"}
+    assert listed("approved") == {first.id: "approved"}
+    assert listed("pending") == {second.id: "pending"}
+    assert listed("rejected") == {}
+    assert counts() == (1, 1)
+    # Once the run stops being paused, its leftover request no longer counts.
+    with context["owner"].begin() as db:
+        db.execute(runs.update().where(runs.c.id == context["run"]).values(status="failed"))
+    assert counts() == (0, 0)
