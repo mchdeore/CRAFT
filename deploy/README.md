@@ -5,13 +5,13 @@ CRAFT on Colima's built-in Kubernetes (k3s), with one Helm chart: the API, the w
 - `craft/` the chart. Each setting comes from the `craft-env` Secret, made from `.env`; a container reads only the keys it needs, the same `CRAFT_*` variables compose passes.
 - `jupyterhub/` the workspaces: JupyterHub's own chart beside this one (`jupyterhub/README.md`).
 - `local.yaml` the local values: `worker-agent`, `worker-interactive` and `worker-bulk`, as compose has them, each with its queues, jobs at once per queue and memory limit.
-- `worker-agent` runs inside the API's pod because chat turns call the API's MCP on `127.0.0.1`. The other workers have their own Deployments.
+- `worker-agent` and craft-id run inside the API's pod. Chat turns call the API's MCP on `127.0.0.1`, and the API reaches craft-id on `localhost:8100`, the address the browser uses. The API runs there as a sidecar, so it starts before `worker-agent` and stops after it. The other workers have their own Deployments.
 - PostgreSQL first boots with `app/infrastructure/database/initdb.sh` (`craft/initdb.sh` links to it).
 - Probes: the API is live on `/health/live` and ready on `/health/ready`, so it's ready only once the database is at the latest migration (after `scripts/seed` or `alembic upgrade head`). The workers check their heartbeat file with `python -I -S app/infrastructure/heartbeat.py`, which never imports the app, and craft-id uses `/health/live`. Every probe sets its own timeout: on a busy machine the 1 s default killed a healthy database.
 
 ## Start
 
-Run these from the repository root. `.env` needs `CRAFT_ID_DB_PASSWORD` for craft-id.
+Run these from the repository root. `.env` needs `CRAFT_ID_DB_PASSWORD` for craft-id; without it craft-id can't start, and the API's pod, which it shares, never becomes ready.
 
 ```bash
 colima start --kubernetes
@@ -61,16 +61,22 @@ craft-id answers on `localhost:8100` through `kubectl port-forward svc/craft-id 
 
 ## Change
 
-After a code change, rebuild the image and restart the pods:
+After a code change, rebuild the image and restart CRAFT's pods. The label leaves JupyterHub's running, with everyone's open workspaces:
 
 ```bash
-docker build -t craft-app:local -f app/Dockerfile . && kubectl rollout restart deployment
+docker build -t craft-app:local -f app/Dockerfile . && kubectl rollout restart deployment -l app.kubernetes.io/instance=craft
+```
+
+If the change adds a migration, apply it through the forward to port 55432 from Start. Until then the API isn't ready and the workers wait:
+
+```bash
+CRAFT_DATABASE_PORT=55432 uv run alembic upgrade head
 ```
 
 After a change to `.env`, recreate the Secret and restart:
 
 ```bash
-kubectl create secret generic craft-env --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f - && kubectl rollout restart deployment
+kubectl create secret generic craft-env --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f - && kubectl rollout restart deployment -l app.kubernetes.io/instance=craft
 ```
 
 ## Checks against the cluster's database

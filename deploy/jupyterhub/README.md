@@ -31,7 +31,7 @@ docker build -t craft-workspace-control:local -f workspace/mcp.Dockerfile worksp
 Register the Hub with craft-id. It prints the client ID and secret once:
 
 ```bash
-kubectl exec deploy/craft-id -- craft id clients add craft-hub --redirect-uri http://localhost:8200/hub/oauth_callback
+kubectl exec deploy/craft-api -c id -- craft id clients add craft-hub --redirect-uri http://localhost:8200/hub/oauth_callback
 ```
 
 Make a service token:

@@ -67,6 +67,14 @@ tables=$(sql "select count(*) from pg_tables where schemaname = 'public'")
 
 echo "Restoring the frozen database into $DATABASE"
 admin pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
+# craft-id's login: initdb.sh makes it only at the database's first boot, and only if its password
+# was set then.
+if [ -n "${CRAFT_ID_DB_PASSWORD:-}" ] && [ -z "$(sql "select 1 from pg_roles where rolname = 'craft_id'")" ]; then
+  echo "Creating craft-id's login"
+  admin psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -v id_pw="$CRAFT_ID_DB_PASSWORD" >/dev/null <<'SQL'
+create role craft_id login password :'id_pw';
+SQL
+fi
 # A dump taken past migration 0022 holds no grants for craft-id's login, which only some
 # databases have; give it 0022's grants here. An older dump gets them from 0022 itself.
 sql "DO \$\$ BEGIN

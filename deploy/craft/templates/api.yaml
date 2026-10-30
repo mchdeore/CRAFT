@@ -15,13 +15,19 @@ spec:
   template:
     metadata:
       labels: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
+      # kubectl exec and logs reach the API unless told otherwise (-c id, -c worker-agent).
+      annotations: { kubectl.kubernetes.io/default-container: api }
     spec:
-      terminationGracePeriodSeconds: {{ $grace }}
+      # The workers' own grace (stopSeconds), then 15 s to abort what is left before SIGKILL.
+      terminationGracePeriodSeconds: {{ add $grace 15 }}
       # No service-link variables: services named craft-* would add unknown CRAFT_* settings.
       enableServiceLinks: false
       automountServiceAccountToken: false
-      containers:
+      # The API is a sidecar: it is up before the in-pod workers start, since their chat turns
+      # call its MCP, and it stops only after they have finished.
+      initContainers:
         - name: api
+          restartPolicy: Always
           {{- include "craft.image" . | nindent 10 }}
           {{- include "craft.env" . | nindent 10 }}
           ports: [{ name: http, containerPort: {{ .Values.api.port }} }]
@@ -42,14 +48,46 @@ spec:
             timeoutSeconds: 4
           resources:
             limits: { memory: {{ .Values.api.memory }} }
-            requests: { memory: {{ .Values.memoryRequest }} }
+            requests: { memory: {{ .Values.memoryRequest }}, cpu: {{ .Values.api.cpu }} }
           {{- include "craft.containerSecurity" . | nindent 10 }}
+      containers:
+        {{- if .Values.id.enabled }}
+        # craft-id shares the pod's localhost, as in compose: http://localhost:8100 then reaches it
+        # from the API as from the browser.
+        - name: id
+          {{- include "craft.image" . | nindent 10 }}
+          command: [craft, id, serve]
+          env:
+            {{- range list "CRAFT_DATABASE_NAME" "CRAFT_ID_DB_PASSWORD" "CRAFT_ID_SIGNING_KEY" "CRAFT_LOG_LEVEL" }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.secret }}, key: {{ . }}, optional: true }
+            {{- end }}
+            - { name: CRAFT_DATABASE_HOST, value: {{ .Release.Name }}-postgres }
+            - { name: CRAFT_DATABASE_PORT, value: "5432" }
+            - { name: CRAFT_ID_PUBLIC_URL, value: {{ .Values.id.publicUrl | quote }} }
+          ports: [{ name: id, containerPort: {{ .Values.id.port }} }]
+          volumeMounts: [{ name: tmp-id, mountPath: /tmp }]
+          # No readiness probe: the pod is ready when the API is, and Service craft-id
+          # doesn't wait for that.
+          livenessProbe:
+            httpGet: { path: /health/live, port: id }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            limits: { memory: {{ .Values.id.memory }} }
+            requests: { memory: {{ .Values.memoryRequest }}, cpu: {{ .Values.id.cpu }} }
+          {{- include "craft.containerSecurity" . | nindent 10 }}
+        {{- end }}
         {{- range $inPod }}
         {{- include "craft.worker" (dict "worker" . "root" $) | nindent 8 }}
         {{- end }}
       volumes:
         {{- include "craft.provider" . | nindent 8 }}
         - { name: tmp-api, emptyDir: {} }
+        {{- if .Values.id.enabled }}
+        - { name: tmp-id, emptyDir: {} }
+        {{- end }}
         {{- range $inPod }}
         - { name: tmp-{{ .name }}, emptyDir: {} }
         {{- end }}
@@ -61,4 +99,17 @@ metadata:
 spec:
   type: {{ .Values.api.service.type }}
   selector: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
-  ports: [{ name: http, port: {{ .Values.api.port }}, targetPort: http }]
+  ports: [{ name: http, port: {{ .Values.api.port }}, targetPort: {{ .Values.api.port }} }]
+{{- if .Values.id.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-id
+spec:
+  type: {{ .Values.id.service.type }}
+  # The Hub's token requests reach craft-id while the API is not ready, such as before a migration.
+  publishNotReadyAddresses: true
+  selector: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports: [{ name: http, port: {{ .Values.id.port }}, targetPort: {{ .Values.id.port }} }]
+{{- end }}
