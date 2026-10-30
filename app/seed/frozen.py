@@ -12,6 +12,8 @@ table names, counts and file names, never row content:
     python -m app.seed.frozen restored <set>   just restored: counts, tags and the empty tables
     python -m app.seed.frozen verify <set>     in use: counts and tags only (the call log and
                                                credentials grow with use)
+
+Every check also needs `CRAFT_MODEL_EMBEDDING` to name the model the set's vectors came from.
 """
 
 import hashlib
@@ -80,13 +82,22 @@ def file_problems(directory: Path, manifest: Manifest) -> list[str]:
     return problems
 
 
+def embedding_problems(manifest: Manifest, model: str) -> list[str]:
+    """A line when the configured embedding model is not the one the set's vectors came from."""
+    if model == manifest.embedding.model:
+        return []
+    return [f"embedding: the vectors come from {manifest.embedding.model}, not {model}"]
+
+
 def snapshot(session: Session, tables: list[str]) -> tuple[dict[str, int], dict[str, list[str]]]:
-    """Row counts of these tables and every tag family's sorted values, as a manifest holds them."""
+    """Row counts of the tables among these that exist, and every tag family's sorted values, as a
+    manifest holds them."""
     rows = {
         name: session.execute(
             select(func.count()).select_from(table(name, schema="public"))
         ).scalar_one()
         for name in tables
+        if session.execute(select(func.to_regclass(f"public.{name}"))).scalar() is not None
     }
     tags = {family: sorted(session.execute(query).scalars()) for family, query in TAGS.items()}
     return rows, tags
@@ -95,19 +106,21 @@ def snapshot(session: Session, tables: list[str]) -> tuple[dict[str, int], dict[
 def database_problems(
     session: Session, manifest: Manifest, *, restored: bool
 ) -> tuple[dict[str, int], list[str]]:
-    """The counts read, and one line per count or tag family that differs or is not listed.
+    """The counts read, and one line per listed table that is missing, per count or tag family
+    that differs and per tag family that is not listed.
 
     Just after a restore (`restored`), the tables the manifest lists as empty must be empty too.
     """
     empty = manifest.empty if restored else []
     rows, tags = snapshot(session, [*manifest.rows, *empty])
     problems = ["rows: the manifest lists no table"] if not manifest.rows else []
+    problems += [f"{name}: missing" for name in sorted({*manifest.rows, *empty} - rows.keys())]
     problems += [
         f"{name}: {rows[name]} rows, expected {count}"
         for name, count in manifest.rows.items()
-        if rows[name] != count
+        if name in rows and rows[name] != count
     ]
-    problems += [f"{name}: {rows[name]} rows, expected none" for name in empty if rows[name]]
+    problems += [f"{name}: {rows[name]} rows, expected none" for name in empty if rows.get(name)]
     problems += [
         f"{family}: tag values differ from the manifest"
         for family, values in sorted(manifest.tags.items())
@@ -140,15 +153,18 @@ def check_database(manifest: Manifest, *, restored: bool) -> list[str]:
 
 def main(argv: list[str] | None = None) -> None:
     """Run one check (files, restored or verify) on a set folder; exit non-zero on a mismatch."""
+    from app.infrastructure.config.settings import Settings
+
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 2 or args[0] not in {"files", "restored", "verify"}:
         raise SystemExit("usage: python -m app.seed.frozen files|restored|verify <set folder>")
     directory = Path(args[1])
     manifest = read(directory)
+    problems = embedding_problems(manifest, Settings.from_env().model_embedding)
     if args[0] == "files":
-        problems = file_problems(directory, manifest)
+        problems += file_problems(directory, manifest)
     else:
-        problems = check_database(manifest, restored=args[0] == "restored")
+        problems += check_database(manifest, restored=args[0] == "restored")
     for problem in problems:
         print(f"  {problem}", file=sys.stderr)
     if problems:

@@ -87,8 +87,8 @@ class SimulatedProvider:
             raise ValueError("invalid provider path")
         return path
 
-    @synchronized_read
     def items(self) -> dict[str, dict[str, Any]]:
+        # save() replaces the file in one rename, so a read needs no lock and sees a whole state.
         file = self.meta / "items.jsonl"
         return (
             {r["item"]: r for line in file.read_text().splitlines() if (r := json.loads(line))}
@@ -234,22 +234,16 @@ class SimulatedProvider:
         )
         return changes, changes[-1]["cursor"] if changes else cursor
 
-    @synchronized_read
     def get_item(self, item: str) -> dict[str, Any]:
         if item not in (items := self.items()):
             raise KeyError(item)
         return items[item]
 
-    @synchronized_read
-    def read_content(self, item: str, version: int, *, max_bytes: int | None = None) -> bytes:
-        record = self.get_item(item)
-        if version not in {v["version"] for v in record["versions"]}:
+    def read_content(self, item: str, version: int) -> bytes:
+        # A listed version's snapshot is complete and never changes, so it is read without a lock.
+        if version not in {v["version"] for v in self.get_item(item)["versions"]}:
             raise KeyError("unknown version")
-        with (self.meta / "versions" / item / str(version)).open("rb") as source:
-            content = source.read() if max_bytes is None else source.read(max_bytes + 1)
-        if max_bytes is not None and len(content) > max_bytes:
-            raise ValueError("Source exceeds configured byte limit.")
-        return content
+        return (self.meta / "versions" / item / str(version)).read_bytes()
 
     @synchronized
     def write_content(self, path: str, content: bytes) -> None:

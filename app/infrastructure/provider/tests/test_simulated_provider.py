@@ -2,8 +2,6 @@ import hashlib
 from contextlib import contextmanager
 from pathlib import Path
 
-import pytest
-
 from app.infrastructure.provider import simulated
 from app.infrastructure.provider.simulated import SimulatedProvider
 
@@ -20,15 +18,6 @@ def test_scan_assigns_items_and_versions(tmp_path: Path) -> None:
     provider.scan()
     assert provider.get_item(item)["versions"][-1]["version"] == 2
     assert provider.read_content(item, 1) == b"a"
-
-
-def test_content_read_limit(tmp_path: Path) -> None:
-    provider = SimulatedProvider(tmp_path)
-    provider.write_content("generated.md", b"Generated")
-    item = next(iter(provider.items()))
-    assert provider.read_content(item, 1, max_bytes=9) == b"Generated"
-    with pytest.raises(ValueError, match="byte limit"):
-        provider.read_content(item, 1, max_bytes=8)
 
 
 def test_unchanged_scan_does_not_stage_source(tmp_path, monkeypatch):

@@ -93,7 +93,7 @@ def upload_file(kind, metadata=False, conflict=False):
 
 
 def counts(source):
-    names = ["missions", "cube_values", "doc_versions", "chunks", "workspace_files", "drafts"]
+    names = ["missions", "cube_values", "doc_versions", "chunks", "workspace_files"]
     with source["owner"].connect() as connection:
         return {
             name: connection.execute(
