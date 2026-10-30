@@ -156,6 +156,18 @@ def test_a_run_is_offline_read_only_and_moves_results_back_without_overwriting(p
     assert "work/escape.txt" not in found and not any(k.startswith(".craft-runs/") for k in found)
 
 
+def test_a_dead_kernel_brings_back_the_copy_as_far_as_it_got(person):
+    kill = "import os, signal\nos.kill(os.getpid(), signal.SIGKILL)"
+    person["write"]("work/nb.ipynb", notebook("print('before')", kill, "print('after')"))
+    died = person["run"]()
+    assert died.returncode != 0 and "RunError: kernel_died" in died.stderr, died.stderr[-2000:]
+    found = person["files"]()
+    executed = json.loads(found["work/nb.run.ipynb"])
+    printed = ["".join(o.get("text", "")) for c in executed["cells"] for o in c["outputs"]]
+    assert printed == ["before\n"]
+    assert not any(k.startswith(".craft-runs/") for k in found)
+
+
 def test_cancel_stops_a_running_notebook_within_five_seconds(person):
     person["write"]("work/nb.ipynb", notebook("import time; time.sleep(600)"))
     cancelled = person["run"](cancel_after=20)
