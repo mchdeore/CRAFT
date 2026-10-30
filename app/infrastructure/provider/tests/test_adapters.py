@@ -33,7 +33,7 @@ def livelink(root, denied=None, ticket=TICKET):
     api = TestClient(livelink_api(root, TICKET, denied), base_url="http://livelink.test")
 
     def handle(request: httpx.Request) -> httpx.Response:
-        # The in-process API over HTTP semantics; the adapter streams the answer as usual.
+        # The in-process API over HTTP semantics; the adapter reads the answer as usual.
         answer = api.request(request.method, str(request.url), headers=dict(request.headers))
         return httpx.Response(answer.status_code, headers=answer.headers, content=answer.content)
 
@@ -62,10 +62,8 @@ def test_both_read_the_same_records_and_original_bytes(source, folder):
     assert source.list_changes(0) == SimulatedProvider(folder).list_changes(0)
 
 
-def test_limits_and_unknown_versions(source):
+def test_unknown_versions(source):
     item = the_item(source)["item"]
-    with pytest.raises(ValueError):
-        source.read_content(item, 2, max_bytes=10)
     with pytest.raises(KeyError):
         source.read_content(item, 9)
     with pytest.raises(KeyError):

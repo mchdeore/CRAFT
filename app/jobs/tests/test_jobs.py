@@ -7,7 +7,8 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -203,6 +204,37 @@ def test_a_killed_workers_job_is_retried_and_finishes(settings, jobs, monkeypatc
     with queue.worker_thread(settings, ["interactive"]):
         done = jobs.wait(job, {"finished", "failed"}, seconds=30)
     assert (done.state, done.attempts, done.error) == ("finished", 2, "WorkerLost")
+
+
+def test_a_failing_recovery_hook_is_logged_and_the_lost_worker_still_recorded(
+    settings, monkeypatch, caplog
+):
+    def interrupted(sessions, args):
+        raise RuntimeError("hook failed")
+
+    kind = queue.Kind("test.lost", lambda: None, "agent", None, False, None, interrupted)
+    monkeypatch.setitem(queue.KINDS, kind.name, kind)
+    recorded = []
+    monkeypatch.setattr(
+        queue,
+        "_record_failure",
+        lambda _, job_id, attempt, error: recorded.append((job_id, type(error).__name__)),
+    )
+    lost = SimpleNamespace(id=1, task_name=kind.name, queue="agent", attempts=0, task_kwargs={})
+
+    class Manager:
+        async def get_stalled_jobs(self, seconds_since_heartbeat):
+            return [lost]
+
+        async def finish_job(self, job, status, delete_job):
+            pass
+
+    app = cast(Any, SimpleNamespace(job_manager=Manager()))
+    with caplog.at_level("WARNING", logger="craft.jobs"):
+        assert asyncio.run(queue.recover(app, settings, cast(Any, None))) == 1
+    assert recorded == [(1, "WorkerLost")]
+    warnings = [record.getMessage() for record in caplog.records]
+    assert warnings == ["job recovery hook failed", "job recovered"]
 
 
 TICKS: list[int] = []

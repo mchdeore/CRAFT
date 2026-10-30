@@ -34,14 +34,9 @@ class LiveLinkProvider:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.records = SimulatedProvider(root)
-        self.http = httpx.Client(
-            base_url=url.rstrip("/") + "/api/v2/",
-            headers={"OTCSTicket": token},
-            transport=transport,
-            trust_env=False,
-            follow_redirects=False,
-            timeout=60,
-        )
+        self.url = url.rstrip("/") + "/api/v2/"
+        self.token = token
+        self.transport = transport
 
     def scan(self) -> list[dict[str, Any]]:
         raise RuntimeError("The LiveLink adapter reads originals only; the index stays frozen")
@@ -55,21 +50,24 @@ class LiveLinkProvider:
     def get_item(self, item: str) -> dict[str, Any]:
         return self.records.get_item(item)
 
-    def read_content(self, item: str, version: int, *, max_bytes: int | None = None) -> bytes:
+    def read_content(self, item: str, version: int) -> bytes:
         entry = next((v for v in self.get_item(item)["versions"] if v["version"] == version), None)
         if entry is None:
             raise KeyError("unknown version")
-        address = f"nodes/{node_id(item)}/versions/{version}/content"
+        # One client per read, closed with it, so no connection outlives the read.
+        with httpx.Client(
+            base_url=self.url,
+            headers={"OTCSTicket": self.token},
+            transport=self.transport,
+            trust_env=False,
+            follow_redirects=False,
+            timeout=60,
+        ) as http:
+            response = http.get(f"nodes/{node_id(item)}/versions/{version}/content")
         # 403 and 404 mean unreadable; an outage or any other status stays an error.
-        with self.http.stream("GET", address) as response:
-            if response.status_code in {403, 404}:
-                raise KeyError("unreadable version")
-            response.raise_for_status()
-            content = b""
-            for chunk in response.iter_bytes():
-                content += chunk
-                if max_bytes is not None and len(content) > max_bytes:
-                    raise ValueError("Source exceeds configured byte limit.")
-        if hashlib.sha256(content).hexdigest() != entry["sha256"]:
+        if response.status_code in {403, 404}:
+            raise KeyError("unreadable version")
+        response.raise_for_status()
+        if hashlib.sha256(response.content).hexdigest() != entry["sha256"]:
             raise KeyError("changed version")  # versions are immutable; changed bytes withdraw it
-        return content
+        return response.content

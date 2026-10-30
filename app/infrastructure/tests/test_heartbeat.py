@@ -1,14 +1,19 @@
-"""The worker heartbeat check, as the probes run it: by path, fast, and without the app."""
+"""The worker heartbeat check, as the probes run it: by path, fast, and without the app; the
+worker's wait for migrations; and the chart's pods around their workers."""
 
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
+from functools import cache
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from app.infrastructure import heartbeat, queue
 from app.infrastructure.paths import ROOT
@@ -80,24 +85,26 @@ def probe_blocks(rendered: str) -> list[str]:
     return blocks
 
 
-@pytest.mark.skipif(shutil.which("helm") is None, reason="helm is not installed")
-def test_chart_probes_never_start_the_cli_and_always_set_a_timeout():
-    rendered = subprocess.run(
-        [
-            "helm",
-            "template",
-            "craft",
-            str(ROOT / "deploy/craft"),
-            "-f",
-            str(ROOT / "deploy/local.yaml"),
-            "--set",
-            "provider.hostPath=/tmp/provider",
-        ],
+LOCAL = ("-f", str(ROOT / "deploy/local.yaml"))
+needs_helm = pytest.mark.skipif(shutil.which("helm") is None, reason="helm is not installed")
+
+
+@cache
+def helm_template(*values: str) -> str:
+    """The chart as Helm renders it, with these values options (none: the chart's defaults)."""
+    return subprocess.run(
+        ["helm", "template", "craft", str(ROOT / "deploy/craft"), *values]
+        + ["--set", "provider.hostPath=/tmp/provider"],
         capture_output=True,
         text=True,
         check=True,
         timeout=60,
     ).stdout
+
+
+@needs_helm
+def test_chart_probes_never_start_the_cli_and_always_set_a_timeout():
+    rendered = helm_template(*LOCAL)
     blocks = probe_blocks(rendered)
     worker = [block for block in blocks if IN_IMAGE in block]
     # A startup and a liveness probe for each worker container (craft.worker in _helpers.tpl).
@@ -114,3 +121,75 @@ def test_compose_worker_healthcheck_runs_the_same_check():
     compose = (ROOT / "compose.yaml").read_text()
     assert f'["CMD", "python", "-I", "-S", "{IN_IMAGE}"]' in compose
     assert '"craft", "worker", "--check"' not in compose
+
+
+def manifests(values: tuple[str, ...]) -> dict[tuple[str, str], dict]:
+    documents = yaml.safe_load_all(helm_template(*values))
+    return {(doc["kind"], doc["metadata"]["name"]): doc for doc in documents if doc}
+
+
+@needs_helm
+@pytest.mark.parametrize("values", [LOCAL, ()], ids=["local", "defaults"])
+def test_chart_runs_craft_id_beside_the_api_which_outlives_its_workers(values):
+    rendered = manifests(values)
+    pod = rendered["Deployment", "craft-api"]["spec"]["template"]
+    # A sidecar: up before the main containers (the in-pod workers) start, stopped after them.
+    assert [(c["name"], c["restartPolicy"]) for c in pod["spec"]["initContainers"]] == [
+        ("api", "Always")
+    ]
+    # craft-id on the pod's localhost, where the API finds its issuer, as compose shares one.
+    assert "id" in [container["name"] for container in pod["spec"]["containers"]]
+    assert rendered["Service", "craft-id"]["spec"]["selector"] == pod["metadata"]["labels"]
+    assert ("Deployment", "craft-id") not in rendered
+
+
+@needs_helm
+@pytest.mark.parametrize("values", [LOCAL, ()], ids=["local", "defaults"])
+def test_chart_pods_outlast_their_workers_grace_and_request_cpu(values):
+    served = set()
+    for (kind, name), document in manifests(values).items():
+        if kind not in {"Deployment", "StatefulSet"}:
+            continue
+        pod = document["spec"]["template"]["spec"]
+        containers = pod.get("initContainers", []) + pod["containers"]
+        for container in containers:
+            assert container["resources"]["requests"].get("cpu"), (name, container["name"])
+        queues = {
+            queue_name
+            for container in containers
+            for variable in container.get("env", [])
+            if variable["name"] == "CRAFT_WORKER_QUEUES"
+            for queue_name in variable["value"].split(",")
+        }
+        if queues:
+            # Procrastinate stops waiting at GRACE, then aborts; SIGKILL must come after that.
+            grace = max(queue.GRACE[queue_name] for queue_name in queues)
+            assert pod["terminationGracePeriodSeconds"] > grace, name
+            served |= queues
+    assert served == set(queue.GRACE)
+
+
+def test_a_worker_waits_until_the_database_is_at_the_newest_migration(
+    settings, monkeypatch, tmp_path
+):
+    from app.health import handlers as health
+
+    class Waited(Exception):
+        pass
+
+    def sleep(seconds):
+        raise Waited()
+
+    head = health.migration_head
+    monkeypatch.setattr(heartbeat, "FILE", tmp_path / "craft-worker-heartbeat")
+    # The pytest process keeps its own SIGTERM handling.
+    monkeypatch.setattr(
+        queue, "signal", SimpleNamespace(signal=lambda *_: None, SIGTERM=signal.SIGTERM)
+    )
+    monkeypatch.setattr(queue, "time", SimpleNamespace(sleep=sleep))
+    monkeypatch.setattr(health, "migration_head", lambda: "a newer migration")
+    with pytest.raises(Waited):
+        queue.wait_for_schema(settings)
+    assert heartbeat.healthy()  # healthy while it waits
+    monkeypatch.setattr(health, "migration_head", head)
+    queue.wait_for_schema(settings)  # returns at once: the test database is at the head

@@ -11,12 +11,12 @@ from uuid import uuid4
 
 import msgspec
 import pytest
-from agent_framework import ChatResponse, Content, Message
+from agent_framework import ChatResponse, ChatResponseUpdate, Content, Message, ResponseStream
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import create_app
-from app.agent import runtime
+from app.agent import runtime, service
 from app.agent.handlers import (
     RunAgentInput,
     RunEventsRef,
@@ -25,6 +25,7 @@ from app.agent.handlers import (
     run_agent,
     run_events,
 )
+from app.agent.usage import model_usage
 from app.infrastructure import queue
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_engine
@@ -352,6 +353,47 @@ def test_chat_stream_tool_and_time_budgets(chat, monkeypatch):
     assert recorded["token_sha256"] is None
 
 
+def test_the_time_limit_ends_a_run_whose_reader_is_slow(chat, monkeypatch):
+    class Deltas(ScriptedChatClient):
+        def _inner_get_response(self, *, messages, options, stream=False, **kwargs):
+            async def updates():
+                # Distinct deltas: the adapter drops one that repeats the whole text so far.
+                for index in range(500):
+                    await asyncio.sleep(0.001)  # a model stream waits on the network
+                    yield ChatResponseUpdate(
+                        role="assistant",
+                        contents=[Content.from_text(f"{index} ")],
+                        message_id="generated-deltas",
+                        model="scripted",
+                    )
+
+            answer = Message(role="assistant", contents=[Content.from_text("Generated deltas")])
+            return ResponseStream(updates(), finalizer=lambda _: ChatResponse(messages=[answer]))
+
+    write = service.append_event
+
+    def slow(*args):
+        time.sleep(0.05)
+        write(*args)
+
+    monkeypatch.setattr(runtime.model, "client", lambda _: Deltas())
+    monkeypatch.setattr(service, "append_event", slow)
+    # Long enough for the run's MCP connect, so the limit fires while text streams.
+    monkeypatch.setattr(runtime, "RUN_SECONDS", 1.0)
+    data = msgspec.structs.replace(request(chat), mode="task")
+
+    async def execute():
+        return [msgspec.to_builtins(event) async for event in run_agent(chat["caller"], data)]
+
+    started = time.monotonic()
+    events = asyncio.run(asyncio.wait_for(execute(), 10))
+    assert time.monotonic() - started < 5
+    # The limit fired mid-stream, while the worker was still writing earlier events.
+    assert "TEXT_MESSAGE_CONTENT" in [event["type"] for event in events]
+    assert (events[-1]["type"], events[-1]["code"]) == ("RUN_ERROR", "run_timeout")
+    assert row(chat, data.run_id)["end_reason"] == "time_limit"
+
+
 def test_task_mode_runs_longer_once_per_person_and_notifies(chat, monkeypatch):
     notifications = m.metadata.tables["notifications"]
 
@@ -442,6 +484,46 @@ def test_chat_stream_output_budget(chat, monkeypatch):
             .one()
         )
     assert result == "error"
+
+
+def test_chat_stream_spend_cap(chat, monkeypatch):
+    # Each scripted response reports 10 input tokens (4 cached) and 10 output tokens, $0.25 at
+    # these prices: one run (a search, then the answer) spends the budget and the next is refused.
+    monkeypatch.setattr(
+        ScriptedChatClient,
+        "usage",
+        {"input_token_count": 10, "cache_read_input_token_count": 4, "output_token_count": 10},
+    )
+    configured = msgspec.structs.replace(
+        chat["settings"],
+        model_budget_usd=0.5,
+        model_price_input=12500.0,
+        model_price_output=12500.0,
+    )
+    caller = replace(chat["caller"], settings=configured)
+    with chat["owner"].begin() as connection:  # earlier runs on the check database are in the day
+        connection.execute(model_usage.delete())
+    refused = request(chat)
+    with chat["worker"].using(configured):
+        finished = collect(caller, request(chat))
+        stopped = collect(caller, refused)
+    assert finished[-1]["type"] == "RUN_FINISHED"
+    assert stopped[-1] == {
+        "type": "RUN_ERROR",
+        "code": "budget_exhausted",
+        "message": "Model budget reached.",
+    }
+    assert row(chat, refused.run_id)["status"] == "failed"
+    with chat["owner"].connect() as connection:
+        rows = connection.execute(
+            select(
+                model_usage.c.role,
+                model_usage.c.input_tokens,
+                model_usage.c.cached_input_tokens,
+                model_usage.c.output_tokens,
+            )
+        ).all()
+    assert [tuple(usage) for usage in rows] == [("main", 10, 4, 10)] * 2
 
 
 def test_http_disconnect_keeps_the_run_going(chat):

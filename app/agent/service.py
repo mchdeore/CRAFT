@@ -8,8 +8,8 @@ from app.agent import storage
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import Conflict, NotFound
 
-# A run credential outlives any run (runtime.RUN_SECONDS); the run revokes it when it ends.
-TOKEN_SECONDS = 900 + 60
+# A run credential outlives any run; the run revokes it when it ends.
+TOKEN_SECONDS = storage.RUN_SECONDS + 60
 
 
 def scope(caller):
@@ -246,10 +246,19 @@ def run_job_state(caller, run) -> str | None:
 
 
 def cancel_run(caller, run) -> None:
-    """Stop the run's job; one still queued ends here, a running one ends on its worker."""
-    from app.jobs.handlers import active_job, cancel_job_by_id, cancel_queued_job
+    """Stop the run's job; one still queued ends here, a running one ends on its worker. A
+    paused run, which has no job, ends here too, and its pending approval is rejected."""
+    from app.approvals.handlers import reject_pending
+    from app.jobs.handlers import active_job, cancel_job_by_id
 
     with unit_of_work(scope(caller)) as session:
+        # Owned through the run itself: prune may have removed a paused run's segments.
+        if storage.cancel_paused(session, caller.user_id, run):
+            reject_pending(session, caller.user_id, run)
+            segment = storage.owned_segment(session, caller.user_id, run)
+            if segment is not None:
+                storage.append_event(session, run, segment, CANCELLED)
+            return
         segment = storage.owned_segment(session, caller.user_id, run)
         if segment is None:
             raise NotFound()
@@ -258,10 +267,29 @@ def cancel_run(caller, run) -> None:
             raise Conflict()
         # Deciding "still queued" and cancelling in one statement means a worker
         # that claims the job meanwhile is stopped instead and writes the end itself.
-        if cancel_queued_job(session, job):
-            storage.append_event(session, run, segment, CANCELLED)
-        else:
+        if not _cancel_queued(session, run, segment, job):
             cancel_job_by_id(session, job)
+
+
+def cancel_queued_run(caller, run) -> bool:
+    """End the run as cancel_run does, but only while its job is still queued."""
+    from app.jobs.handlers import active_job
+
+    with unit_of_work(scope(caller)) as session:
+        segment = storage.owned_segment(session, caller.user_id, run)
+        job = active_job(session, RUN_LOCK + str(run))
+        if segment is None or job is None:
+            return False
+        return _cancel_queued(session, run, segment, job)
+
+
+def _cancel_queued(session, run, segment, job) -> bool:
+    from app.jobs.handlers import cancel_queued_job
+
+    if not cancel_queued_job(session, job):
+        return False
+    storage.append_event(session, run, segment, CANCELLED)
+    return True
 
 
 # Worker side: sessions come from the worker, not a request.
@@ -283,6 +311,17 @@ def interrupt(sessions, run, segment) -> None:
         if ended is not None and ended.mode == "task":
             _notify(session, ended.started_by, run, "failed")
         storage.append_event(session, run, segment, INTERRUPTED)
+
+
+def end_stalled(sessions) -> None:
+    """A run left running with no job (its finish failed) ends failed, which frees its
+    conversation. A live run's job holds its lock, so it is never ended here."""
+    from app.jobs.handlers import active_job
+
+    with unit_of_work(sessions) as session:
+        for run in storage.stalled(session):
+            if active_job(session, RUN_LOCK + str(run)) is None:
+                storage.interrupt(session, run)
 
 
 def prune_events(sessions) -> None:

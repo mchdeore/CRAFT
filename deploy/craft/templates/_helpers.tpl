@@ -70,6 +70,6 @@ volumeMounts:
     timeoutSeconds: 10
   resources:
     limits: { memory: {{ $w.memory }} }
-    requests: { memory: {{ .root.Values.memoryRequest }} }
+    requests: { memory: {{ .root.Values.memoryRequest }}, cpu: {{ $w.cpu }} }
   {{- include "craft.containerSecurity" .root | nindent 2 }}
 {{- end }}

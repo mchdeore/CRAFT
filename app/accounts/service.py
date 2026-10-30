@@ -168,14 +168,19 @@ def return_target(settings, value: str | None) -> str:
     return value if f"{parsed.scheme}://{parsed.netloc}" in origins and not parsed.username else "/"
 
 
-def start_sign_in(caller: Caller, return_to: str | None) -> str:
-    """Remember the round trip under a fresh cookie and return the provider's authorize URL."""
+def start_sign_in(caller: Caller, return_to: str | None) -> str | None:
+    """Remember the round trip under a fresh cookie and return the provider's authorize URL;
+    None when the provider is unreachable or misconfigured."""
     from app.accounts import oidc
 
     settings = caller.settings
     if caller.sessions is None or settings is None or not settings.oidc_authority:
         raise NotFound()
-    url, flow = oidc.begin(settings)
+    try:
+        url, flow = oidc.begin(settings)
+    except ApiError as error:
+        logger.warning("sign-in failed", extra={"fields": {"error_type": type(error).__name__}})
+        return None
     raw = secrets.token_bytes(32)
     at = access.now()
     with unit_of_work(caller.sessions) as session:
@@ -241,7 +246,8 @@ def finish_sign_in(caller: Caller, cookie: str | None, state, code) -> tuple[str
 
 
 def provider_logout(caller: Caller) -> str | None:
-    """Where the browser goes to end the provider's own sign-in, after the session is revoked."""
+    """Where the browser goes to end the provider's own sign-in, after the session is revoked;
+    None when the provider is unreachable or misconfigured, so sign-out still completes."""
     from urllib.parse import urlsplit
 
     from app.accounts import oidc
@@ -250,7 +256,13 @@ def provider_logout(caller: Caller) -> str | None:
     if settings is None or not settings.oidc_authority:
         return None
     redirect = urlsplit(settings.oidc_redirect_uri)
-    return oidc.logout_url(settings, f"{redirect.scheme}://{redirect.netloc}/")
+    try:
+        return oidc.logout_url(settings, f"{redirect.scheme}://{redirect.netloc}/")
+    except ApiError as error:
+        logger.warning(
+            "provider sign-out skipped", extra={"fields": {"error_type": type(error).__name__}}
+        )
+        return None
 
 
 def change_language(caller: Caller, language: str) -> None:

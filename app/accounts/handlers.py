@@ -99,8 +99,10 @@ class SignedOut(Shape):
 
 @operation(PUBLIC, get="/auth/login")
 def auth_login(caller: Caller, request: SignInStart) -> Response:
-    """Send the browser to the identity provider; `returnTo` is where it comes back to."""
-    return RedirectResponse(service.start_sign_in(caller, request.return_to), 302)
+    """Send the browser to the identity provider; `returnTo` is where it comes back to. With the
+    provider unreachable, the browser goes to `/?signIn=failed` instead."""
+    url = service.start_sign_in(caller, request.return_to)
+    return RedirectResponse(url or "/?signIn=failed", 302)
 
 
 @operation(PUBLIC, get="/auth/callback")

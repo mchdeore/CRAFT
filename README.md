@@ -3,7 +3,7 @@
 CRAFT answers questions about project documents with cited sources and maintains an engineering datacube. Everything about what it is and how it works is in the wiki: **[mchdeore.github.io/CRAFT](https://mchdeore.github.io/CRAFT/)** (source in [`.public/wiki/`](.public/wiki/README.md)).
 
 ```bash
-cp .env.example .env              # set the three database passwords and the Foundry endpoint and key
+cp .env.example .env              # set the four database passwords and the Foundry endpoint and key
 docker compose up --build --wait  # database, queue and app on localhost:8000
 scripts/check                     # quick checks; scripts/check full for milestones
 ```

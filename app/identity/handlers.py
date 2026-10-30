@@ -47,19 +47,19 @@ def page(body: str, status: int = 200, also: str = "") -> HTMLResponse:
     )
 
 
-def form(request: dict, failed: bool = False) -> HTMLResponse:
+def form(request: dict, alert: str = "", status: int = 200) -> HTMLResponse:
     hidden = "".join(
         f'<input type=hidden name="{name}" value="{html.escape(request.get(name, ""))}">'
         for name in FIELDS
     )
     return page(
         "<h1>Sign in</h1>"
-        + ("<p role=alert>That username and password did not match.</p>" if failed else "")
+        + (f"<p role=alert>{alert}</p>" if alert else "")
         + "<form method=post><label>Username<input name=username autocomplete=username required "
         f'value="{html.escape(request.get("username", ""))}"></label>'
         "<label>Password<input name=password type=password autocomplete=current-password "
         "required></label>" + hidden + "<button>Sign in</button></form>",
-        401 if failed else 200,
+        status,
         also=f"{target.scheme}://{target.netloc}"
         if (target := urlsplit(request.get("redirect_uri", ""))).netloc
         else "",
@@ -163,12 +163,16 @@ def create_identity_app(settings, sessions, keys: Keys) -> FastAPI:
         if refusal is not None:
             return refusal
         password = values.pop("password", "")
-        account = await run_in_threadpool(
-            service.authenticate, sessions, values.get("username", ""), password
-        )
+        try:
+            account = await run_in_threadpool(
+                service.authenticate, sessions, values.get("username", ""), password
+            )
+        except Refused:  # temporarily_unavailable
+            log.info("identity.sign_in_busy")
+            return form(values, "Too many sign-in attempts. Wait a minute and try again.", 429)
         if account is None:
             log.info("identity.sign_in_refused")
-            return form(values, failed=True)
+            return form(values, "That username and password did not match.", 401)
         client = await run_in_threadpool(
             service.check_client, sessions, values["client_id"], values["redirect_uri"]
         )

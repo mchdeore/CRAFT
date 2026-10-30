@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from app.conversations.handlers import WorkspaceUpload, store_generated_file
 from app.infrastructure.errors import ApiError, InvalidInput, NotFound, TooLarge
 from app.infrastructure.operations import observe
+from app.infrastructure.shapes import FieldError
 
 
 def capabilities(caller):
@@ -47,6 +48,10 @@ class NotConfigured(ApiError):
 
 class Unavailable(ApiError):
     status, code, message = 502, "external_unavailable", "The calculation service is unavailable."
+
+
+class NotUnderstood(InvalidInput):
+    code, message = "not_understood", "The calculation service did not understand the expression."
 
 
 UNITS = frozenset(
@@ -285,6 +290,12 @@ async def request_wolfram(expression, app_id):
                     params={"input": expression},
                     headers={"Authorization": "Bearer " + app_id},
                 )
+                if response.status_code == 501:
+                    # Its reply says what it couldn't interpret; it goes back to the caller only.
+                    hint = response.text[:500]
+                    raise NotUnderstood(fields=[FieldError(path="expression", message=hint)])
+                if response.status_code in {401, 403}:
+                    raise NotConfigured()  # a wrong or revoked app ID
                 response.raise_for_status()
                 if not response.text or len(response.content) > 1024 * 1024:
                     raise Unavailable()

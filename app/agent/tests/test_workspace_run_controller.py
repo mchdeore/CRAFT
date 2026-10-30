@@ -16,6 +16,7 @@ import pytest
 from agent_framework import FunctionInvocationContext, tool
 from agent_framework.exceptions import ToolExecutionException
 from mcp.types import CallToolResult, ListToolsResult, Tool
+from websockets.exceptions import ConnectionClosedError
 
 from app.agent.tests.test_workspace_agent import prepared_run
 from app.agent.tests.test_workspace_session import bound
@@ -191,8 +192,17 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
     from craft import client as sdk
 
     actual_http = httpx.AsyncClient
+    real_jupyter_http = lifecycle.jupyter_http
     recorded = SimpleNamespace(
-        sockets=[], servers=[], messages=[], http=[], order=[], namespace={}, failure=failure
+        sockets=[],
+        servers=[],
+        messages=[],
+        http=[],
+        order=[],
+        namespace={},
+        failure=failure,
+        channels=[],
+        noise=0,
     )
 
     class Socket:
@@ -241,10 +251,21 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
                 recorded.order.append("server_closed")
 
     class Channel:
-        def __init__(self):
+        def __init__(self, max_size):
             self.replies = asyncio.Queue()
+            self.max_size, self.closed = max_size, False
+
+        def hear(self, size):
+            """A kernel broadcast; websockets closes a channel on a frame over its max_size."""
+            if size > self.max_size:
+                self.closed = True
+                return
+            broadcast = {"channel": "iopub", "parent_header": {"msg_id": "other"}}
+            self.replies.put_nowait(json.dumps(broadcast | {"content": {"text": "x" * size}}))
 
         async def send(self, payload):
+            if self.closed:
+                raise ConnectionClosedError(None, None)
             message = json.loads(payload)
             recorded.messages.append(message)
             content = message["content"]
@@ -286,7 +307,17 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
             )
 
         async def recv(self):
+            if self.closed:
+                raise ConnectionClosedError(None, None)
             return await self.replies.get()
+
+    def broadcast(size):
+        """Every open kernel channel hears a frame of ``size``, as does each one opened later."""
+        recorded.noise = size
+        for channel in recorded.channels:
+            channel.hear(size)
+
+    recorded.broadcast = broadcast
 
     @asynccontextmanager
     async def open_channel(url, **kwargs):
@@ -294,9 +325,14 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
         assert kwargs["additional_headers"] == {"Authorization": "token generated-jupyter-token"}
         assert kwargs["proxy"] is None
         assert not kwargs["logger"].isEnabledFor(50)
+        channel = Channel(kwargs.get("max_size", 2**20))  # websockets' default is 1 MiB
+        if recorded.noise:
+            channel.hear(recorded.noise)
+        recorded.channels.append(channel)
         try:
-            yield Channel()
+            yield channel
         finally:
+            recorded.channels.remove(channel)
             recorded.order.append("kernel_channel_closed")
 
     def reply(request):
@@ -317,16 +353,19 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
             raise AssertionError(request.url.path)
         return httpx.Response(200, json=value)
 
-    def jupyter_http(**kwargs):
-        assert kwargs["trust_env"] is False and kwargs["follow_redirects"] is False
-        return actual_http(transport=httpx.MockTransport(reply), **kwargs)
+    @asynccontextmanager
+    async def jupyter_http(target):
+        async with real_jupyter_http(target) as http:
+            assert http.trust_env is False and http.follow_redirects is False
+            http._transport = httpx.MockTransport(reply)
+            yield http
 
     def native_http(**kwargs):
         return actual_http(
             transport=httpx.ASGITransport(app=recorded.servers[0].config.app), **kwargs
         )
 
-    monkeypatch.setattr(lifecycle, "httpx", SimpleNamespace(AsyncClient=jupyter_http))
+    monkeypatch.setattr(lifecycle, "jupyter_http", jupyter_http)
     monkeypatch.setattr(lifecycle, "open_channel", open_channel)
     monkeypatch.setattr(lifecycle, "_BridgeServer", Server)
     monkeypatch.setattr(
@@ -441,9 +480,12 @@ def test_partial_provisioning_releases_bridge_socket_and_owner_lease(monkeypatch
         async with bound() as run:
             controller, session, _ = owned_controller(lifecycle, run)
             try:
-                error = asyncio.CancelledError if failure == "cancel" else RuntimeError
-                with pytest.raises(error):
-                    await controller.start()
+                if failure == "binding":  # refused, as when another run's binding is still there
+                    assert await controller.start() == lifecycle.SDK_BUSY
+                else:
+                    error = asyncio.CancelledError if failure == "cancel" else RuntimeError
+                    with pytest.raises(error):
+                        await controller.start()
             finally:
                 recorded.failure = None
                 await controller.close()
@@ -460,7 +502,7 @@ def test_partial_provisioning_releases_bridge_socket_and_owner_lease(monkeypatch
 
 
 @pytest.mark.parametrize("bridge_port", [0, 54301])
-def test_overlapping_owner_run_cannot_overwrite_the_kernel_bearer(monkeypatch, bridge_port):
+def test_a_second_run_of_one_owner_goes_on_without_the_kernel_binding(monkeypatch, bridge_port):
     from craft import client as sdk
 
     lifecycle = lifecycle_module()
@@ -468,25 +510,77 @@ def test_overlapping_owner_run_cannot_overwrite_the_kernel_bearer(monkeypatch, b
 
     async def execute():
         async with bound() as first, bound() as second:
-            second.parent.caller = replace(
-                second.parent.caller, user_id=first.parent.caller.user_id
-            )
+            owner = first.parent.caller.user_id
+            second.parent.caller = replace(second.parent.caller, user_id=owner)
             active, _, _ = owned_controller(lifecycle, first, bridge_port=bridge_port)
             overlap, _, _ = owned_controller(lifecycle, second, bridge_port=bridge_port)
             try:
                 await active.start()
                 bearer = sdk._binding.run_token
-                with pytest.raises(RuntimeError, match="already.*workspace"):
-                    await overlap.start()
+                instructions = await overlap.start()
+                assert "busy in another of the owner's runs" in instructions
+                assert "run_code still executes" in instructions
                 assert sdk._binding.run_id == str(first.parent.caller.run_id)
                 assert sdk._binding.run_token == bearer
-                assert len(recorded.sockets) == 1
+                assert len(recorded.sockets) == 1 and len(recorded.messages) == 1
             finally:
                 await overlap.close()
                 assert sdk._binding.run_id == str(first.parent.caller.run_id)
+                assert str(owner) in lifecycle._owners  # still the first run's
                 await active.close()
+            assert sdk._binding is None and str(owner) not in lifecycle._owners
 
     asyncio.run(execute())
+
+
+def test_a_large_kernel_broadcast_after_the_bind_never_stops_the_unbind(monkeypatch):
+    from craft import client as sdk
+
+    lifecycle = lifecycle_module()
+    recorded = fake_boundaries(monkeypatch, lifecycle)
+
+    async def execute():
+        async with bound() as run:
+            first, _, _ = owned_controller(lifecycle, run)
+            try:
+                await first.start()
+                assert not recorded.channels  # closed right after the bind
+                recorded.broadcast(2 * 1024 * 1024)
+            finally:
+                await first.close()
+            assert sdk._binding is None
+            second, _, _ = owned_controller(lifecycle, run)
+            try:
+                await second.start()
+                assert sdk._binding.binding_id == second._binding_id
+            finally:
+                await second.close()
+            assert sdk._binding is None
+
+    asyncio.run(execute())
+
+
+def test_a_failed_unbind_is_logged_without_content(monkeypatch, caplog):
+    from craft import client as sdk
+
+    lifecycle = lifecycle_module()
+    recorded = fake_boundaries(monkeypatch, lifecycle)
+
+    async def execute():
+        async with bound() as run:
+            controller, _, _ = owned_controller(lifecycle, run)
+            try:
+                await controller.start()
+                recorded.broadcast(16 * 1024 * 1024)  # over even the unbind channel's 8 MiB
+            finally:
+                await controller.close()
+                sdk._unbind_run(controller._binding_id)  # what the lost unbind would have done
+            return str(run.parent.caller.run_id)
+
+    caplog.set_level(logging.WARNING, logger="craft.workspace")
+    run_id = asyncio.run(execute())
+    (line,) = [r for r in caplog.records if r.getMessage() == "workspace unbind failed"]
+    assert line.__dict__["fields"] == {"run_id": run_id, "error_type": "ConnectionClosedError"}
 
 
 def test_kernel_memory_binding_expires_without_controller_cleanup():

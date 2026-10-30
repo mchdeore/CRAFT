@@ -19,6 +19,10 @@ settings:
   - CRAFT_MODEL_ENDPOINT
   - CRAFT_MODEL_KEY
   - CRAFT_MODEL_MAX_OUTPUT_TOKENS
+  - CRAFT_MODEL_BUDGET_USD
+  - CRAFT_MODEL_PRICE_INPUT
+  - CRAFT_MODEL_PRICE_OUTPUT
+  - CRAFT_EMBEDDING_PRICE
   - CRAFT_AGENT_RUN_SECONDS
   - CRAFT_WOLFRAM_APP_ID
   - CRAFT_MCP_URL
@@ -31,7 +35,8 @@ settings:
   - CRAFT_HUB_TOKEN
 
 # Each container's memory limit is in its own values; this is what each one reserves, so a
-# small node can start everything.
+# small node can start everything. Each one's CPU request (cpu) is its share of a busy node;
+# none has a CPU limit.
 memoryRequest: 256Mi
 
 # The provider files, mounted read-only at /provider. Empty: an empty folder.
@@ -43,23 +48,27 @@ api:
   service:
     type: ClusterIP
   memory: 1Gi
+  cpu: 100m
 
 # One Deployment per worker, each with its queues and jobs at once per queue
 # (app/infrastructure/queue.py).
 # inApiPod: the worker runs inside the API's pod instead, sharing its localhost, because chat
 # turns call the API's MCP on 127.0.0.1 (CRAFT_MCP_URL must be a loopback address).
 # Notebook runs (interactive queue) need their own worker: it holds the Job-creating account.
+# stopSeconds: the worker's SIGTERM grace, GRACE for its queues in app/infrastructure/queue.py.
 workers:
   - name: worker
     queues: agent,bulk
     concurrency: { agent: 20, bulk: 2 }
     memory: 1Gi
-    stopSeconds: 900         # a chat turn's ceiling
+    cpu: 100m
+    stopSeconds: 900         # a chat turn's ceiling (app.agent.storage.RUN_SECONDS)
     inApiPod: true
   - name: worker-interactive
     queues: interactive
     concurrency: { interactive: 10 }
     memory: 768Mi
+    cpu: 100m
     stopSeconds: 120
 
 # Notebook runs as Kubernetes Jobs on the person's volume (notebook-runs.yaml). The image is
@@ -68,7 +77,7 @@ notebookRuns:
   enabled: true
   image: craft-user-workspace:local
 
-# craft-id, the stand-in for Entra (needs CRAFT_ID_DB_PASSWORD in the Secret).
+# craft-id, the stand-in for Entra, in the API's pod (needs CRAFT_ID_DB_PASSWORD in the Secret).
 id:
   enabled: true
   port: 8100
@@ -76,6 +85,7 @@ id:
   service:
     type: ClusterIP
   memory: 256Mi
+  cpu: 50m
 
 # PostgreSQL with pgvector, first booted by app/infrastructure/database/initdb.sh.
 postgres:
@@ -83,6 +93,7 @@ postgres:
   image: pgvector/pgvector:0.8.7-pg18
   storage: 5Gi
   memory: 1Gi
+  cpu: 250m
 
 # The nightly dump of the whole database (backup-cronjob.yaml): pg_dump -Fc into hostPath on the
 # node's disk, the newest `keep` files kept. Off here; on in local.yaml.

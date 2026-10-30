@@ -18,7 +18,8 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: {{ .name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
     spec:
-      terminationGracePeriodSeconds: {{ .stopSeconds }}
+      # The worker's own grace (stopSeconds), then 15 s to abort what is left before SIGKILL.
+      terminationGracePeriodSeconds: {{ add .stopSeconds 15 }}
       # No service-link variables: services named craft-* would add unknown CRAFT_* settings.
       enableServiceLinks: false
       {{- if and $.Values.notebookRuns.enabled (has "interactive" (splitList "," .queues)) }}
