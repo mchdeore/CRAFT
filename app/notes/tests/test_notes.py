@@ -178,3 +178,37 @@ def test_mcp_reads_owned_notes_but_unapproved_writes_are_refused(chat):
             .all()
         )
     assert len(rows) == 4 and all(row["origin"] == "mcp" for row in rows)
+
+
+def test_notes_check_conversation_ownership_without_reading_history(chat):
+    """An archived owned conversation still takes notes; a missing or foreign one does not.
+    The check reads no history, so no nested read_conversation call is logged."""
+    from sqlalchemy import func
+
+    from app.notes.handlers import NoteList, WriteNote, list_notes, write_note
+
+    conversations = m.metadata.tables["conversations"]
+    with chat["owner"].begin() as connection:
+        connection.execute(
+            conversations.update()
+            .where(conversations.c.id == chat["thread"])
+            .values(archived_at=func.now())
+        )
+    caller, thread = chat["caller"], chat["thread"]
+    note = asyncio.run(
+        write_note(caller, WriteNote(title="Archived", body="", conversation_id=thread))
+    )
+    assert [row.id for row in list_notes(caller, NoteList(conversation_id=thread))] == [note.id]
+    for denied, conversation in [(caller, uuid4()), (replace(caller, user_id=uuid4()), thread)]:
+        with pytest.raises(NotFound):
+            list_notes(denied, NoteList(conversation_id=conversation))
+    logs = m.metadata.tables["call_log"]
+    with chat["owner"].connect() as connection:
+        nested = connection.execute(
+            select(func.count()).where(
+                logs.c.user_id == caller.user_id,
+                logs.c.name == "conversations.read_conversation",
+            )
+        ).scalar_one()
+    assert nested == 0
+    delete_note(caller, NoteRef(id=note.id))

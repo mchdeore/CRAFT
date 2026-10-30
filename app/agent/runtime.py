@@ -433,7 +433,7 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     version = hashlib.sha256(instructions.encode()).hexdigest()
     language = await run_in_threadpool(reply_language, caller)
     ref = conversations.ConversationRef(id=request.thread_id)
-    await run_in_threadpool(conversations.load_for_run, caller, ref)
+    await run_in_threadpool(conversations.require_owned, caller, ref.id, active=True)
     allowed = [
         operation.tool_name
         for operation in tool_operations(registry, agent=_read_only_query.get())

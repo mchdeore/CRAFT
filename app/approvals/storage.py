@@ -55,6 +55,20 @@ Index(
     unique=True,
     postgresql_where=text("kind in ('executed','failed')"),
 )
+# A request's newest event, which is its status.
+Index(
+    "ix_approval_events_request_id_at",
+    approval_events.c.request_id,
+    approval_events.c.at.desc(),
+    approval_events.c.id.desc(),
+)
+Index(
+    "ix_approval_requests_requested_by_created_at",
+    approval_requests.c.requested_by,
+    approval_requests.c.created_at.desc(),
+    approval_requests.c.id.desc(),
+)
+Index("ix_approval_requests_run_id", approval_requests.c.run_id)
 notebook_grants = Table(
     "notebook_grants",
     metadata,
@@ -76,11 +90,12 @@ Index(
     unique=True,
     postgresql_where=text("revoked_at IS NULL"),
 )
-APPROVAL_STATUS = text("SELECT request_id, kind, actor_id, at FROM approval_status")
 
 
 def status_expression():
-    from sqlalchemy import case, func, select
+    """A request's status: its newest event's kind, except that `requested` (or no event yet)
+    is `pending`."""
+    from sqlalchemy import func, select
 
     latest = (
         select(approval_events.c.kind)
@@ -90,7 +105,7 @@ def status_expression():
         .correlate(approval_requests)
         .scalar_subquery()
     )
-    return case((latest == "requested", "pending"), else_=func.coalesce(latest, "pending"))
+    return func.coalesce(func.nullif(latest, "requested"), "pending")
 
 
 def owned_statement(user):
@@ -230,16 +245,10 @@ def approved_call(session, user, run, conversation, operation, digest, tool_call
     """Find an unconsumed frozen action for the authenticated active run."""
     from uuid import UUID
 
-    from sqlalchemy import select
-
     runs = metadata.tables["agent_runs"]
     statement = owned_statement(user)
     if tool_call_id is not None:
-        sessions = metadata.tables["agent_sessions"]
-        state = session.execute(
-            select(sessions.c.state).where(sessions.c.conversation_id == conversation)
-        ).scalar_one_or_none()
-        pending = (state or {}).get("state", {}).get("craftApprovals", [])
+        pending = native_approvals(session, conversation)
         matching = [item.get("id") for item in pending if item.get("callId") == tool_call_id]
         if len(matching) != 1:
             return None
@@ -265,27 +274,28 @@ def approved_call(session, user, run, conversation, operation, digest, tool_call
     return rows[0] if len(rows) == 1 else None
 
 
-def native_tool_call_id(session, row):
-    """Read an unambiguous native call mapping after the request's ownership checks."""
+def native_approvals(session, conversation) -> list[dict]:
+    """The approvals the conversation's paused native session waits on, read from its stored
+    state without loading the thread snapshot beside them."""
     from sqlalchemy import select
 
     sessions = metadata.tables["agent_sessions"]
-    stored = session.execute(
-        select(sessions.c.state).where(sessions.c.conversation_id == row["conversation_id"])
+    pending = session.execute(
+        select(sessions.c.state["state"]["craftApprovals"]).where(
+            sessions.c.conversation_id == conversation
+        )
     ).scalar_one_or_none()
-    if not isinstance(stored, dict):
-        return None
-    state = stored.get("state")
-    if not isinstance(state, dict):
-        return None
-    pending = state.get("craftApprovals")
     if not isinstance(pending, list):
-        return None
+        return []
+    return [item for item in pending if isinstance(item, dict)]
+
+
+def native_tool_call_id(session, row):
+    """Read an unambiguous native call mapping after the request's ownership checks."""
     matching = [
         item
-        for item in pending
-        if isinstance(item, dict)
-        and item.get("id") == str(row["id"])
+        for item in native_approvals(session, row["conversation_id"])
+        if item.get("id") == str(row["id"])
         and isinstance(item.get("interrupt"), str)
         and row["interrupt_id"] == str(row["run_id"]) + ":" + item["interrupt"]
     ]

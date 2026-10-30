@@ -99,15 +99,14 @@ def request(caller, data):
 def list_owned(caller, status=None):
     with unit_of_work(_sessions(caller), read_only=True) as session:
         rows = storage.list_owned(session, caller.user_id, status)
-        values = [_summary(row, row["status"]) for row in rows]
-        return [row for row in values if status is None or row["status"] == status][:100]
+        return [_summary(row, row["status"]) for row in rows]
 
 
 def read(caller, identifier):
     with unit_of_work(_sessions(caller), read_only=True) as session:
         row = storage.owned(session, caller.user_id, identifier)
         events = storage.events(session, identifier)
-        return _summary(row, storage.status(session, identifier)) | {
+        return _summary(row, row["status"]) | {
             "arguments": row["arguments"],
             "evidence": row["evidence"],
             "reasoning": row["reasoning"],

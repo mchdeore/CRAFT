@@ -161,11 +161,8 @@ def principal(caller, digest):
         row = storage.principal(session, digest, datetime.now(UTC))
     if row is None:
         raise NotSignedIn()
-    state = row["state"]
-    context = state.get("craftTransport", {}) if isinstance(state, dict) else {}
-    if not isinstance(context, dict):
-        context = {}
-    if context.get("runId") != str(row["id"]):
+    context = row["transport"]
+    if not isinstance(context, dict) or context.get("runId") != str(row["id"]):
         context = {}
 
     def identifier(name):

@@ -245,6 +245,7 @@ def prepared_run(monkeypatch, tmp_path, *, configured="owned", failure=None):
 
     monkeypatch.setattr(runtime, "WorkspaceRunController", Controller)
     monkeypatch.setattr(approvals, "list_notebook_grants", lambda *_: [])
+    monkeypatch.setattr(runtime.conversations, "require_owned", lambda *_, **__: None)
     monkeypatch.setattr(
         runtime.conversations, "load_for_run", lambda *_: SimpleNamespace(messages=[])
     )

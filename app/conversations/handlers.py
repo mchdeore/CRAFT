@@ -33,6 +33,12 @@ def load_for_run(caller: Caller, request: ConversationRef) -> RuntimeConversatio
     return RuntimeConversation(id=request.id, messages=service.load(caller, request.id))
 
 
+def require_owned(caller: Caller, conversation: UUID, *, active: bool) -> None:
+    """Raise NotFound unless the caller owns the conversation; `active` also refuses an
+    archived one. Reads no history."""
+    service.require_owned(caller, conversation, active=active)
+
+
 @operation(SIGNED_IN)
 def append_for_run(caller: Caller, request: AppendMessages) -> None:
     """Append server-built messages to an owned conversation through a checked private entry."""

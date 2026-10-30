@@ -145,6 +145,38 @@ def active_run(session, identifier):
     ).first()
 
 
+def started_run(session, user, identifier, run):
+    """The user's run in this conversation, or None."""
+    runs = metadata.tables["agent_runs"]
+    return session.execute(
+        select(runs.c.id).where(
+            runs.c.id == run, runs.c.conversation_id == identifier, runs.c.started_by == user
+        )
+    ).first()
+
+
+def pending_approvals(session, identifiers) -> dict:
+    """Each conversation's count of undecided approvals that its paused run waits on.
+
+    Only a paused run's count: nothing closes the approvals of a run that ended instead."""
+    from app.approvals.handlers import approval_status_expression
+
+    runs = metadata.tables["agent_runs"]
+    requests = metadata.tables["approval_requests"]
+    counted = session.execute(
+        select(runs.c.conversation_id, func.count())
+        .select_from(requests)
+        .join(runs, runs.c.id == requests.c.run_id)
+        .where(
+            runs.c.conversation_id.in_(identifiers),
+            runs.c.status == "paused",
+            approval_status_expression() == "pending",
+        )
+        .group_by(runs.c.conversation_id)
+    )
+    return {conversation: count for conversation, count in counted}
+
+
 def update_conversation(session, identifier, values):
     return (
         session.execute(
@@ -158,11 +190,16 @@ def update_conversation(session, identifier, values):
     )
 
 
+def _listed(table):
+    """A file's columns without its content and digest: what a file list shows."""
+    return [column for column in table.c if column.name not in {"bytes", "sha256"}]
+
+
 def file_rows(session, identifier):
     table = metadata.tables["workspace_files"]
     return (
         session.execute(
-            select(table)
+            select(*_listed(table))
             .where(table.c.conversation_id == identifier)
             .order_by(table.c.created_at.desc(), table.c.id.desc())
         )
@@ -187,7 +224,10 @@ def file_state(session, identifier, state):
     table = metadata.tables["workspace_files"]
     return (
         session.execute(
-            table.update().where(table.c.id == identifier).values(state=state).returning(table)
+            table.update()
+            .where(table.c.id == identifier)
+            .values(state=state)
+            .returning(*_listed(table))
         )
         .mappings()
         .first()
