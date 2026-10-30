@@ -37,7 +37,7 @@ def _get(url: str) -> dict:
         response = http.get(url, timeout=5)
         response.raise_for_status()
         document = response.json()
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError):
         raise ApiError("The identity provider is not reachable.") from None
     if not isinstance(document, dict):
         raise ApiError("The identity provider is misconfigured.")
@@ -114,7 +114,7 @@ def finish(settings, flow: dict, state: str | None, code: str | None) -> dict:
             timeout=10,
         )
         token = response.json().get("id_token") if response.status_code == 200 else None
-    except (httpx.HTTPError, ValueError, AttributeError):
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError, AttributeError):
         token = None
     if not isinstance(token, str):
         raise SignInFailed()

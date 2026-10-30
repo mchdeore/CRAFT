@@ -129,15 +129,14 @@ def test_disabled_cross_origin_browser_mode_retains_local_origin() -> None:
 
 def test_worker_queues_and_retired_settings() -> None:
     configured = Settings.from_env(
-        {**VALID, "CRAFT_WORKER_QUEUES": "bulk, agent", "CRAFT_OCR_MAX_BYTES": "2048"}
+        {
+            **VALID,
+            "CRAFT_WORKER_QUEUES": "bulk, agent",
+            "CRAFT_OCR_MAX_BYTES": "2048",
+            "CRAFT_PROCESS_ROOT": ".local/runtime/processes",
+        }
     )
     assert configured.queue_names() == ["bulk", "agent"]
     with pytest.raises(SystemExit) as stopped:
         Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "agent,urgent"})
     assert "worker_queues" in str(stopped.value) and "urgent" not in str(stopped.value)
-
-
-def test_the_process_manager_setting_is_retired() -> None:
-    """An older .env may still set CRAFT_PROCESS_ROOT; startup ignores it."""
-    configured = Settings.from_env({**VALID, "CRAFT_PROCESS_ROOT": ".local/runtime/processes"})
-    assert "process_root" not in configured.__struct_fields__

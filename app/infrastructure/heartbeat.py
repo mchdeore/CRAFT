@@ -6,12 +6,12 @@ probes check it by running this file by path:
     python -I -S /app/app/infrastructure/heartbeat.py
 
 That starts a bare interpreter and imports nothing from `app`. `craft worker --check` would
-first import the `app` package (every handler, the model SDKs, FastAPI), which takes 10 s or
-more on a busy machine. Exec probes outlive their timeout, so slow probes pile up and add to
-the load that made them slow. `-I` keeps this file's folder off `sys.path`, so a sibling
-module such as `logging.py` here can't shadow the standard library, and `-S` skips `site` and
-the virtualenv's `.pth` files. Keep this module free of imports outside the standard library;
-a test checks that.
+first import FastAPI, SQLAlchemy and Procrastinate (through the `app` package and the queue),
+many times the cost of a bare interpreter, and far slower on a busy machine. Exec probes
+outlive their timeout, so slow probes pile up and add to the load that made them slow. `-I`
+keeps this file's folder off `sys.path`, so a sibling module such as `logging.py` here can't
+shadow the standard library, and `-S` skips `site` and the virtualenv's `.pth` files. Keep
+this module free of imports outside the standard library; a test checks that.
 """
 
 import os
