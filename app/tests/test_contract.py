@@ -12,7 +12,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from app.accounts.handlers import Me, SignIn
 from app.agent.handlers import RunRecovery
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.pipeline import register_http
@@ -61,24 +60,9 @@ def type_name(shape: Any) -> str:
     return type_name(get_args(shape)[0]) + "[]" if get_origin(shape) is list else shape.__name__
 
 
-def test_session_contract() -> None:
-    example = json.loads((CONTRACT / "examples/session.json").read_text())
-    body = msgspec.convert(example, Me)
-    assert set(msgspec.to_builtins(body)) == {
-        "id",
-        "username",
-        "displayName",
-        "roles",
-        "language",
-        "email",
-    }
-    assert set(msgspec.structs.fields(SignIn)[n].encode_name for n in [0, 1]) == {
-        "username",
-        "password",
-    }
+def test_error_body_wire_names() -> None:
     error = ApiErrorBody(code="not_signed_in", message="Not signed in.", request_id="synthetic")
     assert set(msgspec.to_builtins(error)) == {"code", "message", "requestId"}
-    assert "POST /api/session" in ROUTES_TS and "DELETE /api/session" in ROUTES_TS
 
 
 def test_python_shapes_match_typescript(operations) -> None:

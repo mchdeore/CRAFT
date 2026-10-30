@@ -35,7 +35,7 @@ export interface Mission { key: string; title: string; currentStage: string; ali
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }
 export interface FieldError { path: string; message: string }
-/** Every `code` the server sends, with its HTTP status. A chat stream's `RUN_ERROR` uses the same codes. */
+/** Every `code` the server sends, with its HTTP status. A chat stream's `RUN_ERROR` uses these codes, plus `run_cancelled` and `run_interrupted`. */
 export type ErrorCode =
   | "invalid_input"          // 400: `fields` lists each problem
   | "not_understood"         // 400: the calculation service couldn't read the expression; `fields` carries its reply
