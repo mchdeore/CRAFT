@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import DBAPIError
 
-from app.infrastructure.tests.test_grants import assert_grants
+from app.tests.support.grants import assert_grants
 
 
 @pytest.fixture

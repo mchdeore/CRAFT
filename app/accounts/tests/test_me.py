@@ -6,9 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.accounts import storage
-from app.accounts.tests.test_sessions import account as account
-from app.accounts.tests.test_sessions import login
 from app.infrastructure import access
+from app.tests.support.accounts import login
 from app.tests.support.contract import typescript_schema
 
 

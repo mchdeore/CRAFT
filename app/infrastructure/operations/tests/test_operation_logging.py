@@ -17,10 +17,10 @@ from app.infrastructure.errors import ApiError, InvalidInput
 from app.infrastructure.logging import configure_logging
 from app.infrastructure.operations import observe, operation
 from app.infrastructure.operations.registry import registry
-from app.infrastructure.operations.tests.test_operation import ProbeInput, rows, trusted
 from app.infrastructure.shapes import Shape
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.operations import ProbeInput, rows, trusted
 
 
 class SensitiveInput(Shape):
@@ -212,9 +212,9 @@ def test_native_mcp_logs_have_no_payload(chat, capsys, caplog) -> None:
 
     from app.agent import service
     from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
-    from app.agent.tests.test_chat_stream import request
     from app.infrastructure.database import metadata as m
-    from app.infrastructure.mcp.tests.test_mcp import session_stream
+    from app.tests.support.chat import request
+    from app.tests.support.mcp import session_stream
 
     data = request(chat)
     service.start(chat["caller"], data, "simulated")

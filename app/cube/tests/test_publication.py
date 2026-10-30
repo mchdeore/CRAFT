@@ -25,7 +25,6 @@ from app.cube.handlers import (
     prepare_values,
     submit_values,
 )
-from app.cube.tests.test_reads import cube as cube
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import Conflict, NotFound
 from app.infrastructure.operations.pipeline import ApprovalRequired

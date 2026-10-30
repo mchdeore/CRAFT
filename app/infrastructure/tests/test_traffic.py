@@ -19,16 +19,16 @@ from app import create_app
 from app.accounts import service, storage
 from app.agent import service as agent_service
 from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
-from app.agent.tests.test_chat_stream import request as run_request
 from app.infrastructure import traffic
 from app.infrastructure.logging import configure_logging
 from app.infrastructure.operations.storage import call_log
 from app.infrastructure.requests import RequestIdMiddleware
 from app.infrastructure.shapes import RawFile
-from app.infrastructure.tests.test_grants import assert_grants
 from app.infrastructure.traffic import TrafficMiddleware, traffic_log
 from app.tests.support.chat import chat as chat
+from app.tests.support.chat import request as run_request
 from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.grants import assert_grants
 
 PASSWORD = "synthetic-traffic-password"
 ORIGIN = "http://localhost:8000"

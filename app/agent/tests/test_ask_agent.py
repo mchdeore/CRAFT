@@ -6,12 +6,11 @@ from uuid import uuid4
 from agent_framework import ChatResponse, Content, Message
 from sqlalchemy import select
 
-from app.agent.tests.test_chat_stream import wait_for
 from app.infrastructure.database import metadata as m
 from app.infrastructure.mcp.client import client
 from app.infrastructure.operations.registry import registry
 from app.library.handlers import CitationCheck, check_citation
-from app.tests.support.chat import ask
+from app.tests.support.chat import ask, wait_for
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
@@ -55,7 +54,7 @@ def test_agent_not_offered_ask_agent(chat):
 
     from app.agent import service
     from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
-    from app.agent.tests.test_chat_stream import request
+    from app.tests.support.chat import request
 
     data = request(chat)
     service.start(chat["caller"], data, "synthetic")
@@ -74,7 +73,7 @@ def test_agent_not_offered_ask_agent(chat):
             }
         finally:
             await selected.close()
-        from app.infrastructure.mcp.tests.test_mcp import session_stream
+        from app.tests.support.mcp import session_stream
 
         async with session_stream(chat["settings"].mcp_url, raw) as session:
             refused = await session.call_tool("ask_agent", {"question": "Nested run"})

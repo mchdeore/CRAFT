@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import DBAPIError
 
+from app.tests.support.grants import assert_grants
+
 ACCOUNT_GRANTS = {
     "users": {"SELECT", "INSERT", "UPDATE"},
     "local_credentials": {"SELECT", "INSERT", "UPDATE"},
@@ -15,31 +17,6 @@ ACCOUNT_GRANTS = {
     "auth_sessions": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     "call_log": {"SELECT", "INSERT"},
 }
-
-
-def assert_grants(engine: Engine, expected: dict[str, set[str]]) -> None:
-    with engine.connect() as connection:
-        for table, rights in expected.items():
-            actual = {
-                right
-                for right in [
-                    "SELECT",
-                    "INSERT",
-                    "UPDATE",
-                    "DELETE",
-                    "TRUNCATE",
-                    "REFERENCES",
-                    "TRIGGER",
-                ]
-                if connection.execute(
-                    text("select has_table_privilege('craft_app', :table, :right)"),
-                    {"table": table, "right": right},
-                ).scalar()
-            }
-            assert actual == rights, table
-        assert not connection.execute(
-            text("select has_schema_privilege('craft_app', 'public', 'CREATE')")
-        ).scalar()
 
 
 def test_accounts_call_log_grants(app: FastAPI, owner_engine: Engine) -> None:

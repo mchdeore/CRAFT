@@ -14,7 +14,7 @@ from app.tests.support.chat import ask
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
-from app.tools.tests.test_capabilities import catalog as capabilities
+from app.tests.support.tools import catalog as capabilities
 
 
 def response(question, result=None):

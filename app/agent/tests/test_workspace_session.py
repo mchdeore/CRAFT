@@ -2,12 +2,9 @@
 
 import asyncio
 import hashlib
-import json
 import logging
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from time import perf_counter
-from types import SimpleNamespace
 from uuid import uuid4
 
 import msgspec
@@ -16,125 +13,14 @@ from agent_framework import FunctionInvocationContext, tool
 from agent_framework.exceptions import ToolExecutionException
 from anyio import ClosedResourceError
 from mcp.shared.exceptions import McpError
-from mcp.types import CallToolResult, ErrorData, ListToolsResult, TextContent, Tool, ToolAnnotations
+from mcp.types import ErrorData
 
 from app.agent import runtime
 from app.infrastructure.access import Caller
-from app.infrastructure.mcp.client import ToolCallMiddleware, client
 from app.infrastructure.operations.context import CallContext, current_call
 from app.library.handlers import LibraryHits
-from app.notes import handlers as notes
 from app.skills.handlers import Skill
-from app.skills.native import SavedSkillsProvider
-
-
-def result(value, *, failed=False, structured=True):
-    return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(value))],
-        structuredContent=value if structured else None,
-        isError=failed,
-    )
-
-
-def native_tools():
-    return [
-        Tool(
-            name="search",
-            inputSchema={
-                "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
-            },
-            outputSchema={"type": "object"},
-            _meta={"generated-catalog": "native"},
-        ),
-        Tool(
-            name="read_skill_version",
-            inputSchema={
-                "type": "object",
-                "properties": {"id": {"type": "string"}, "revision": {"type": "integer"}},
-                "required": ["id", "revision"],
-            },
-        ),
-        Tool(
-            name=notes.write_note.__operation__.tool_name,
-            inputSchema={"type": "object", "properties": {"title": {"type": "string"}}},
-            annotations=ToolAnnotations(readOnlyHint=False),
-            _meta={"generated-catalog": "gated-mutation"},
-        ),
-        Tool(name="unknown_tool", inputSchema={"type": "object"}),
-    ]
-
-
-class Remote:
-    """Only the network boundary is fake; no server or credentials are used."""
-
-    def __init__(self, reply, behavior=None):
-        tools = native_tools()
-        self.pages = [
-            ListToolsResult(tools=tools[:2], nextCursor="rest"),
-            ListToolsResult(tools=tools[2:]),
-        ]
-        self.reply, self.behavior = reply, behavior
-        self.calls, self.list_calls = [], []
-
-    async def list_tools(self, params=None):
-        cursor = params.cursor if params else None
-        self.list_calls.append(cursor)
-        return self.pages[1] if cursor == "rest" else self.pages[0]
-
-    async def call_tool(self, name, *, arguments, meta):
-        active = current_call.get()
-        self.calls.append(
-            (name, dict(arguments), dict(meta or {}), replace(active) if active else None)
-        )
-        if self.behavior is not None:
-            return await self.behavior(name, arguments, meta)
-        return self.reply
-
-
-@asynccontextmanager
-async def bound(*, reply=None, behavior=None, allowed=None, remaining=10):
-    from app.agent.workspace_session import RunBoundSession
-
-    evidence, trace = [], []
-    budget = {"calls": 0, "exceeded": False}
-    allowed = allowed if allowed is not None else [tool.name for tool in native_tools()]
-    skills = SavedSkillsProvider([], allowed)
-    transport = client("http://127.0.0.1:1/mcp", "generated-never-sent", evidence, allowed=allowed)
-    remote = Remote(reply if reply is not None else result({"hits": []}), behavior)
-    transport.session = remote
-    transport._ping_available = False
-    try:
-        await transport.load_tools()
-        transport.is_connected = True
-        caller = Caller(
-            user_id=uuid4(), conversation_id=uuid4(), run_id=uuid4(), auth_session_id=uuid4()
-        )
-        parent = CallContext(uuid4(), uuid4(), None, caller, perf_counter())
-        middleware = ToolCallMiddleware(
-            trace, budget, 20, skills.completed, external_tools={"workspace_read-file"}
-        )
-        session = RunBoundSession(
-            transport,
-            middleware,
-            context=parent,
-            deadline=asyncio.get_running_loop().time() + remaining,
-        )
-        yield SimpleNamespace(
-            session=session,
-            transport=transport,
-            remote=remote,
-            evidence=evidence,
-            trace=trace,
-            budget=budget,
-            skills=skills,
-            middleware=middleware,
-            parent=parent,
-        )
-    finally:
-        transport.session = None
-        await transport._local_http.aclose()
+from app.tests.support.workspace import Remote, bound, result
 
 
 @pytest.mark.parametrize("structured", [True, False])

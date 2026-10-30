@@ -15,12 +15,11 @@ from app.accounts.handlers import NewWorkspaceToken, create_token
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.unit_of_work import unit_of_work
-from app.infrastructure.mcp.tests.test_mcp_tokens import account as account
-from app.infrastructure.mcp.tests.test_mcp_tokens import call, logged
 from app.infrastructure.operations.storage import call_log
 from app.jobs.handlers import requested_job
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.mcp import call, logged
 from app.tests.support.model import ScriptedChatClient
 
 events = m.metadata.tables["agent_run_events"]
@@ -208,7 +207,7 @@ def test_get_answer_refuses_unknown_malformed_and_other_peoples_jobs(account, st
 def test_a_chat_turn_is_not_an_answer(account):
     """A browser chat turn is an agent run too, but get_answer reads only ask_agent's."""
     from app.agent import service
-    from app.agent.tests.test_chat_stream import request
+    from app.tests.support.chat import request
 
     _, job = service.queue_run(account["caller"], request(account), False)
     finished(account, job)

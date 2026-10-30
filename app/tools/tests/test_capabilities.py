@@ -1,10 +1,7 @@
 """Capability discovery must describe the actual agent transport allowlist."""
 
-import asyncio
 import inspect
-from collections.abc import Coroutine
 from dataclasses import replace
-from typing import Any, cast
 
 import msgspec
 import pytest
@@ -14,16 +11,7 @@ from app import create_app
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.errors import NotSignedIn
 from app.infrastructure.operations.registry import registry, tool_operations
-from app.tools import handlers
-
-
-def catalog(caller: Caller) -> handlers.CapabilityCatalog:
-    operation = getattr(handlers, "list_capabilities", None)
-    assert callable(operation), "Missing authenticated list_capabilities operation"
-    result = operation(caller)
-    if inspect.isawaitable(result):
-        result = asyncio.run(cast(Coroutine[Any, Any, handlers.CapabilityCatalog], result))
-    return cast(handlers.CapabilityCatalog, result)
+from app.tests.support.tools import catalog
 
 
 def test_capabilities_match_actual_agent_allowlist(chat):

@@ -1,22 +1,24 @@
 """Owned synthetic conversations shared by streaming and transport tests."""
 
+import asyncio
+import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from uuid import uuid4
 
+import msgspec
 import pytest
 from sqlalchemy import select, text
 
+from app.agent.handlers import AskAgent, RunAgentInput, ask_agent, get_answer, run_agent
 from app.infrastructure.database import metadata as m
+from app.infrastructure.mcp.tests.http_fixture import live_server
+from app.infrastructure.queue import worker_thread
+from app.jobs.handlers import JobRef
 
 
 def ask(caller, question, conversation=None, seconds=60):
     """Ask through ask_agent, then poll get_answer until the worker's cited answer is ready."""
-    import asyncio
-    import time
-
-    from app.agent.handlers import AskAgent, ask_agent, get_answer
-    from app.jobs.handlers import JobRef
-
     queued = asyncio.run(
         ask_agent(caller, AskAgent(question=question, conversation_id=conversation))
     )
@@ -35,8 +37,6 @@ class AgentWorker:
         self.stack = ExitStack()
 
     def start(self, settings):
-        from app.infrastructure.queue import worker_thread
-
         with self.owner.begin() as connection:
             # An agent job left queued by an earlier test would run with these settings.
             connection.execute(
@@ -75,9 +75,7 @@ def agent_worker(owner, settings):
 @pytest.fixture
 def chat(cube_source):
     """A conversation for the cube account, served by a live MCP server and an agent worker.
-    Teardown removes the conversations, notes and skills the account wrote."""
-    from app.infrastructure.mcp.tests.http_fixture import live_server
-
+    cube_source removes what the account wrote."""
     source = cube_source
     owner = source["caller"].user_id
     table = m.metadata.tables["conversations"]
@@ -96,18 +94,40 @@ def chat(cube_source):
                 "caller": replace(source["caller"], settings=configured),
                 "worker": worker,
             }
-    remove_owned(source["owner"], owner)
 
 
-def remove_owned(engine, owner):
-    conversations = m.metadata.tables["conversations"]
-    owned = select(conversations.c.id).where(conversations.c.owner_id == owner)
-    with engine.begin() as connection:
-        # Notes point at conversations, and skill revisions at skills.
-        connection.execute(m.notes.delete().where(m.notes.c.owner == owner))
-        connection.execute(m.skill_revisions.delete().where(m.skill_revisions.c.owner == owner))
-        connection.execute(m.skills.delete().where(m.skills.c.owner == owner))
-        for name in ["workspace_files", "messages", "agent_sessions", "agent_runs"]:
-            table = m.metadata.tables[name]
-            connection.execute(table.delete().where(table.c.conversation_id.in_(owned)))
-        connection.execute(conversations.delete().where(conversations.c.owner_id == owner))
+def request(chat, content="Peak power", identifier=None):
+    return RunAgentInput(
+        thread_id=chat["thread"],
+        run_id=identifier or uuid4(),
+        messages=[{"id": str(uuid4()), "role": "user", "content": content}],
+    )
+
+
+def collect(caller, data):
+    async def execute():
+        return [msgspec.to_builtins(event) async for event in run_agent(caller, data)]
+
+    return asyncio.run(execute())
+
+
+def row(chat, identifier):
+    with chat["owner"].connect() as connection:
+        return (
+            connection.execute(
+                select(m.metadata.tables["agent_runs"]).where(
+                    m.metadata.tables["agent_runs"].c.id == identifier
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+
+def wait_for(check, seconds=10.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(0.05)
+    raise AssertionError("condition not reached")

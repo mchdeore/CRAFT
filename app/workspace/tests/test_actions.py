@@ -16,10 +16,10 @@ from app.approvals.handlers import (
     read_approval,
     request_approval,
 )
-from app.approvals.tests.test_decisions import context as context
 from app.infrastructure import hub, workspaces
 from app.infrastructure.errors import ApiError, Forbidden, InvalidInput, NotFound
 from app.infrastructure.operations.pipeline import ApprovalRequired
+from app.tests.support.workspace import KERNEL
 from app.workspace.handlers import (
     EditNotebook,
     RunCode,
@@ -32,62 +32,6 @@ from app.workspace.handlers import (
     save_chart,
 )
 from app.workspace.handlers import write_file as write_file_operation
-
-KERNEL = "00000000-0000-4000-8000-000000000101"
-
-
-@pytest.fixture
-def workspace(monkeypatch, context):
-    """A generated owner workspace that records every dispatch instead of reaching Jupyter."""
-    calls = []
-    files = {}
-
-    async def ready(found, user_id):
-        assert user_id == context["caller"].user_id  # only the caller's own server
-        return "ready"
-
-    async def kernel(found, user_id):
-        return KERNEL
-
-    async def run(target, code, seconds=120):
-        calls.append(("run", target.kernel_id, code))
-        return {"status": "ok", "outputs": ["2\n"], "error": None, "truncated": False}
-
-    async def write(target, path, content):
-        calls.append(("write", path, content))
-        files[path] = content
-        return {}
-
-    async def read_nb(target, path):
-        if path == "outage.ipynb":
-            request = httpx.Request("GET", "http://jupyter/" + path)
-            raise httpx.HTTPStatusError("down", request=request, response=httpx.Response(503))
-        return files.get(path)
-
-    async def write_nb(target, path, notebook):
-        calls.append(("notebook", path, len(notebook["cells"])))
-        files[path] = notebook
-
-    monkeypatch.setattr(
-        hub, "from_settings", lambda _: hub.Hub("http://127.0.0.1:1", "", "generated")
-    )
-    monkeypatch.setattr(hub.Hub, "state", ready)
-    monkeypatch.setattr(hub.Hub, "kernel", kernel)
-    monkeypatch.setattr(workspaces, "run_in_kernel", run)
-    monkeypatch.setattr(workspaces, "write_text", write)
-    monkeypatch.setattr(workspaces, "read_notebook", read_nb)
-    monkeypatch.setattr(workspaces, "write_notebook", write_nb)
-    yield calls, files
-    # Workspace-origin audit rows would block a later downgrade below migration 0015.
-    from app.infrastructure.operations.storage import call_log
-
-    with context["owner"].begin() as connection:
-        connection.execute(
-            call_log.delete().where(
-                call_log.c.origin == "workspace",
-                call_log.c.user_id == context["caller"].user_id,
-            )
-        )
 
 
 def proposal(context, operation, value, approve: bool | None = True):

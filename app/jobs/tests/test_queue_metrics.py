@@ -10,7 +10,6 @@ from app.cli import main, parse_since
 from app.infrastructure import queue
 from app.infrastructure.database.engine import make_engine, make_sessions
 from app.jobs import service, storage
-from app.jobs.tests.test_jobs import jobs as jobs
 from app.tests.support import jobs as test_jobs
 
 

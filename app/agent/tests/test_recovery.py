@@ -14,20 +14,19 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.agent import handlers, model, storage
 from app.agent.service import RUN_LOCK
-from app.agent.tests.test_approval_resume import (
-    WriteClient,
-    clear_run_approvals,
-    events,
-    runtime_client,
-)
-from app.agent.tests.test_chat_stream import wait_for
 from app.approvals import service as approval_service
-from app.approvals.tests.test_decisions import context as context
-from app.approvals.tests.test_decisions import login
 from app.infrastructure.access import SIGNED_IN
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import NotFound
 from app.jobs.handlers import active_job
+from app.tests.support.approvals import (
+    WriteClient,
+    clear_run_approvals,
+    events,
+    login,
+    runtime_client,
+)
+from app.tests.support.chat import wait_for
 
 FIELDS = {
     "status",

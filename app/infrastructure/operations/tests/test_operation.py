@@ -15,7 +15,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app import create_app
 from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
@@ -25,12 +25,8 @@ from app.infrastructure.errors import ApiError, Forbidden, InvalidInput
 from app.infrastructure.operations import DATA, operation
 from app.infrastructure.operations.context import current_call
 from app.infrastructure.operations.registry import registry
-from app.infrastructure.operations.storage import call_log
 from app.infrastructure.shapes import Shape
-
-
-class ProbeInput(Shape):
-    value: int
+from app.tests.support.operations import ProbeInput, rows, trusted
 
 
 class ProbeOutput(Shape):
@@ -40,26 +36,6 @@ class ProbeOutput(Shape):
 
 class ProbeId(Shape):
     id: UUID
-
-
-def trusted(app: FastAPI, roles: frozenset[str] = frozenset({"member"})) -> Caller:
-    return Caller(
-        user_id=uuid4(), roles=roles, sessions=app.state.sessions, settings=app.state.settings
-    )
-
-
-def rows(app: FastAPI, name: str, after: int = 0):
-    """This test's call_log rows (ids above `after`) for one operation."""
-    with app.state.engine.connect() as connection:
-        return (
-            connection.execute(
-                select(call_log)
-                .where(call_log.c.name == name, call_log.c.id > after)
-                .order_by(call_log.c.id)
-            )
-            .mappings()
-            .all()
-        )
 
 
 def test_operation_python_http_same_function(settings: Settings, last_call_id: int) -> None:
