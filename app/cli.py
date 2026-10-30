@@ -73,11 +73,16 @@ def main(argv: list[str] | None = None) -> None:
 
         run(parser, args)
     elif args.command == "mcp":
+        from app import load_operations
         from app.infrastructure.mcp.stdio import run_stdio
 
+        load_operations()
         run_stdio(args.username)
     elif args.command == "operations":
+        from app import load_operations
         from app.infrastructure.operations.registry import registry
+
+        load_operations()
 
         for operation in registry.values():
             print(
@@ -144,8 +149,10 @@ def main(argv: list[str] | None = None) -> None:
 
             change_stage(settings, args.mission, args.stage)
         elif args.command == "worker":
+            from app import load_operations
             from app.infrastructure.queue import run_worker
 
+            load_operations()
             run_worker(settings)
         elif args.command == "provider":
             from app.infrastructure.provider import get_provider, source_provider
@@ -187,8 +194,10 @@ def main(argv: list[str] | None = None) -> None:
             import inspect
             from dataclasses import replace
 
+            from app import load_operations
             from app.infrastructure.mcp.stdio import local_caller
 
+            load_operations()
             caller = replace(
                 local_caller(args.actor if args.command == "users" else args.username, settings),
                 origin="python",
@@ -253,8 +262,16 @@ def main(argv: list[str] | None = None) -> None:
                     result = operation.function(caller)
                 else:
                     result = operation.function(caller, msgspec.json.decode(args.arguments))
-                if inspect.iscoroutine(result):
-                    result = asyncio.run(result)
-                print(msgspec.json.encode(result).decode())
+                if inspect.isasyncgen(result):
+                    # A stream operation: one JSON line per event, as each arrives.
+                    async def print_events(events) -> None:
+                        async for event in events:
+                            print(msgspec.json.encode(event).decode(), flush=True)
+
+                    asyncio.run(print_events(result))
+                else:
+                    if inspect.iscoroutine(result):
+                        result = asyncio.run(result)
+                    print(msgspec.json.encode(result).decode())
     else:
         parser.print_help()

@@ -129,7 +129,12 @@ def test_disabled_cross_origin_browser_mode_retains_local_origin() -> None:
 
 def test_worker_queues_and_retired_settings() -> None:
     configured = Settings.from_env(
-        {**VALID, "CRAFT_WORKER_QUEUES": "bulk, agent", "CRAFT_OCR_MAX_BYTES": "2048"}
+        {
+            **VALID,
+            "CRAFT_WORKER_QUEUES": "bulk, agent",
+            "CRAFT_OCR_MAX_BYTES": "2048",
+            "CRAFT_PROCESS_ROOT": ".local/runtime/processes",
+        }
     )
     assert configured.queue_names() == ["bulk", "agent"]
     with pytest.raises(SystemExit) as stopped:

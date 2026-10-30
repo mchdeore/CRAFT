@@ -91,3 +91,20 @@ def test_cli_call_awaits_async_operations(monkeypatch, capsys, arguments) -> Non
     monkeypatch.setattr(stdio, "local_caller", lambda *_: Caller(user_id=uuid4()))
     cli.main(["call", "generated.async", "--as", "generated", *arguments])
     assert json.loads(capsys.readouterr().out) == {"value": 4 if arguments else 1}
+
+
+def test_cli_call_prints_a_stream_as_json_lines(monkeypatch, capsys) -> None:
+    """A stream operation, such as agent.run_agent, prints one JSON line per event."""
+    from app import cli
+    from app.infrastructure.mcp import stdio
+    from app.infrastructure.operations.registry import registry
+
+    async def events(caller):
+        yield {"type": "RUN_STARTED"}
+        yield {"type": "RUN_FINISHED"}
+
+    monkeypatch.setitem(registry, "generated.stream", SimpleNamespace(function=events, input=None))
+    monkeypatch.setattr(stdio, "local_caller", lambda *_: Caller(user_id=uuid4()))
+    cli.main(["call", "generated.stream", "--as", "generated"])
+    printed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert printed == [{"type": "RUN_STARTED"}, {"type": "RUN_FINISHED"}]

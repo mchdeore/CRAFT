@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from importlib import import_module
 
 from fastapi import FastAPI
 from sqlalchemy import Engine
@@ -10,13 +11,6 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from app.accounts import handlers as account_handlers
-from app.agent import handlers as agent_handlers
-from app.agent import jobs as agent_jobs
-from app.approvals import handlers as approval_handlers
-from app.conversations import handlers as conversation_handlers
-from app.cube import handlers as cube_handlers
-from app.health.handlers import migration_head
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.engine import make_engine, make_sessions
 from app.infrastructure.errors import install_error_handlers
@@ -25,14 +19,31 @@ from app.infrastructure.operations.pipeline import register_http
 from app.infrastructure.paths import ROOT
 from app.infrastructure.requests import RequestIdMiddleware
 from app.infrastructure.traffic import TrafficMiddleware
-from app.jobs import handlers as job_handlers
-from app.library import handlers as library_handlers
-from app.notes import handlers as note_handlers
-from app.notifications import handlers as notification_handlers
-from app.skills import handlers as skill_handlers
-from app.summarize import handlers as summarize_handlers
-from app.tools import handlers as tool_handlers
-from app.workspace import handlers as workspace_handlers
+
+# Modules that declare operations: importing one registers its operations.
+OPERATION_MODULES = (
+    "app.accounts.handlers",
+    "app.agent.handlers",
+    "app.agent.jobs",
+    "app.approvals.handlers",
+    "app.conversations.handlers",
+    "app.cube.handlers",
+    "app.health.handlers",
+    "app.jobs.handlers",
+    "app.library.handlers",
+    "app.notes.handlers",
+    "app.notifications.handlers",
+    "app.skills.handlers",
+    "app.summarize.handlers",
+    "app.tools.handlers",
+    "app.workspace.handlers",
+)
+
+
+def load_operations() -> None:
+    """Fill the operation registry. Whatever reads it (the app, worker, CLI) calls this first."""
+    for module in OPERATION_MODULES:
+        import_module(module)
 
 
 class SummaryPage(StaticFiles):
@@ -61,62 +72,34 @@ class MountPathMiddleware:
         await self.app(scope, receive, send)
 
 
-def close_on_exit(
-    engine: Engine, mcp, settings: Settings
-) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+def close_on_exit(engine: Engine, mcp) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        from anyio import CancelScope, to_thread
-
-        from app.infrastructure.processes import open_processes
-
-        processes = None
         try:
-            processes = await to_thread.run_sync(open_processes, settings)
-            app.state.processes = processes
             async with mcp.run():
                 yield
         finally:
-            try:
-                if processes is not None:
-                    with CancelScope(shield=True):
-                        await to_thread.run_sync(processes.close)
-            finally:
-                engine.dispose()
+            engine.dispose()
 
     return lifespan
 
 
 def create_app(settings: Settings) -> FastAPI:
     """Build the app: logging, the pool, error bodies, health routes, request IDs."""
-    _ = (
-        library_handlers,
-        job_handlers,
-        account_handlers,
-        approval_handlers,
-        cube_handlers,
-        summarize_handlers,
-        agent_handlers,
-        agent_jobs,
-        conversation_handlers,
-        note_handlers,
-        notification_handlers,
-        skill_handlers,
-        tool_handlers,
-        workspace_handlers,
-    )
-    configure_logging(settings.log_level)
-    engine = make_engine(settings)
-    instrument_sql(engine)
+    load_operations()
+    from app.health.handlers import migration_head
     from app.infrastructure.mcp.server import HttpTransport
     from app.infrastructure.operations.registry import registry
 
+    configure_logging(settings.log_level)
+    engine = make_engine(settings)
+    instrument_sql(engine)
     mcp = HttpTransport(registry)
     app = FastAPI(
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
-        lifespan=close_on_exit(engine, mcp, settings),
+        lifespan=close_on_exit(engine, mcp),
     )
     app.state.settings = settings
     app.state.engine = engine

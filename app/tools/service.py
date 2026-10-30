@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
-import vl_convert
 from starlette.concurrency import run_in_threadpool
 
 from app.conversations.handlers import WorkspaceUpload, store_generated_file
@@ -103,6 +102,8 @@ def validate_chart(spec):
 
 @observe("tools.chart_render")
 def render(spec, kind):
+    import vl_convert  # a large native module; only chart rendering needs it
+
     validate_chart(spec)
     try:
         if kind == "svg":
