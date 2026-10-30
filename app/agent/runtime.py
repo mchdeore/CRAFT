@@ -141,8 +141,8 @@ async def _workspace_for_caller(caller):
         granted = []
     if granted:
         guidance += (
-            " Notebooks granted in this conversation (use edit_granted_notebook and "
-            "run_in_granted_notebook for these, without asking): "
+            " Notebooks granted in this conversation (edit_granted_notebook after an approved "
+            "edit, run_in_granted_notebook after an approved run, without asking): "
             + ", ".join(sorted({grant.path for grant in granted}))
             + "."
         )

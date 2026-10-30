@@ -241,19 +241,6 @@ def test_chunk_keyword_search(owner_engine: Engine) -> None:
         outer.rollback()
 
 
-def test_drafts_append_only(app: FastAPI) -> None:
-    with app.state.engine.connect() as connection, connection.begin() as outer:
-        user = connection.execute(
-            text("insert into users (username, display_name) values (:name,'Test') returning id"),
-            {"name": "test_" + uuid4().hex},
-        ).scalar_one()
-        connection.execute(m.drafts.insert().values(owner_id=user, title="Test", body="Synthetic"))
-        for sql in ["update drafts set title=title", "delete from drafts"]:
-            with pytest.raises(DBAPIError, match="permission denied"), connection.begin_nested():
-                connection.execute(text(sql))
-        outer.rollback()
-
-
 def test_workspace_file_checks(owner_engine: Engine) -> None:
     with owner_engine.connect() as connection, connection.begin() as outer:
         user = connection.execute(

@@ -137,7 +137,7 @@ def test_mcp_reads_owned_notes_but_unapproved_writes_are_refused(chat):
         args=["run", "craft", "mcp", "--as", fields["username"]],
         env=os.environ
         | {
-            "CRAFT_DATABASE_NAME": "craft_test",
+            "CRAFT_DATABASE_NAME": chat["settings"].database_name,
             "CRAFT_PROVIDER_ROOT": chat["settings"].provider_root,
             "CRAFT_MCP_URL": chat["settings"].mcp_url,
         },

@@ -44,6 +44,7 @@ def register_tables() -> None:
         "app.infrastructure.operations.storage",
         "app.conversations.storage",
         "app.agent.storage",
+        "app.agent.usage",
         "app.approvals.storage",
         "app.jobs.storage",
         "app.identity.storage",
@@ -187,18 +188,6 @@ mission_grants = Table(
     timestamp("granted_at"),
     UniqueConstraint("user_id", "mission_key", "silo", postgresql_nulls_not_distinct=True),
 )
-drafts = Table(
-    "drafts",
-    metadata,
-    identifier(),
-    Column("owner_id", UUID, ForeignKey("users.id"), nullable=False),
-    Column("title", Text, nullable=False),
-    Column("body", Text, nullable=False),
-    Column("based_on", UUID, ForeignKey("drafts.id")),
-    Column("approval_request_id", UUID, ForeignKey("approval_requests.id")),
-    timestamp("created_at"),
-)
-Index("ix_drafts_owner_id_created_at", drafts.c.owner_id, drafts.c.created_at.desc())
 # CRAFT's own revisions: immutable full copies pointing at their source version (0025).
 document_revisions = Table(
     "document_revisions",

@@ -16,6 +16,7 @@ from mcp.types import TextContent
 from sqlalchemy import Engine, select, text
 
 from app.infrastructure.access import Caller
+from app.infrastructure.config.settings import Settings
 from app.infrastructure.logging import configure_logging
 from app.infrastructure.mcp.server import build_server
 from app.infrastructure.mcp.tests.fixtures import fixture_registry
@@ -132,10 +133,10 @@ def test_no_content_in_logs(app: FastAPI) -> None:
 
 
 @pytest.mark.slow
-def test_cli_unknown_account() -> None:
+def test_cli_unknown_account(settings: Settings) -> None:
     result = subprocess.run(
         ["uv", "run", "craft", "mcp", "--as", "nobody"],
-        env=os.environ | {"CRAFT_DATABASE_NAME": "craft_test"},
+        env=os.environ | {"CRAFT_DATABASE_NAME": settings.database_name},
         input="",
         capture_output=True,
         text=True,
@@ -145,7 +146,7 @@ def test_cli_unknown_account() -> None:
 
 
 @pytest.mark.slow
-def test_cli_lists_real_registry(owner_engine: Engine) -> None:
+def test_cli_lists_real_registry(owner_engine: Engine, settings: Settings) -> None:
     with owner_engine.begin() as connection:
         user = connection.execute(
             text(
@@ -160,7 +161,7 @@ def test_cli_lists_real_registry(owner_engine: Engine) -> None:
         parameters = StdioServerParameters(
             command="uv",
             args=["run", "craft", "mcp", "--as", "mcp-test"],
-            env=os.environ | {"CRAFT_DATABASE_NAME": "craft_test"},
+            env=os.environ | {"CRAFT_DATABASE_NAME": settings.database_name},
         )
         async with (
             stdio_client(parameters) as (incoming, outgoing),

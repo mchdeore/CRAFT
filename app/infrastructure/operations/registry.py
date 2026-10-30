@@ -50,9 +50,11 @@ class Operation:
     # The checked function a worker runs; the declared function queues it.
     run: Any = None
     # Notebook grants: approving a `grants` call grants the notebook its argument names, for
-    # that conversation; a `granted` call on a granted notebook then runs without asking.
+    # that conversation; a `granted` call on a granted notebook then runs without asking, but
+    # only on a grant that approving its `granted_by` operation made.
     grants: str | None = None
     granted: str | None = None
+    granted_by: str | None = None
 
     @property
     def tool_name(self) -> str:
