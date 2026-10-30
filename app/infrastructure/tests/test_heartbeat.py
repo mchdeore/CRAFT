@@ -143,6 +143,22 @@ def test_chart_runs_craft_id_beside_the_api_which_outlives_its_workers(values):
     assert ("Deployment", "craft-id") not in rendered
 
 
+def test_workspaces_reach_the_api_pod_but_not_craft_id_beside_it():
+    # H8, with craft-id in the API pod: a notebook reaches the API (8000) and the run bridge
+    # (an ephemeral port), never craft-id's sign-in form (8100).
+    hub = yaml.safe_load((ROOT / "deploy/jupyterhub/values.yaml").read_text())
+    (rule,) = [
+        rule
+        for rule in hub["singleuser"]["networkPolicy"]["egress"]
+        if rule["to"] == [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "api"}}}]
+    ]
+    ranges = [(port["port"], port.get("endPort", port["port"])) for port in rule["ports"]]
+    reaches = [
+        any(low <= port <= high for low, high in ranges) for port in (8000, 32768, 60999, 8100)
+    ]
+    assert reaches == [True, True, True, False]
+
+
 @needs_helm
 @pytest.mark.parametrize("values", [LOCAL, ()], ids=["local", "defaults"])
 def test_chart_pods_outlast_their_workers_grace_and_request_cpu(values):
