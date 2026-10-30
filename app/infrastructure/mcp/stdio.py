@@ -4,43 +4,27 @@ import asyncio
 import sys
 
 from mcp.server.stdio import stdio_server
-from sqlalchemy import select
 
 from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.engine import make_engine, make_sessions
-from app.infrastructure.database.metadata import metadata
-from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.logging import configure_logging, instrument_sql
 from app.infrastructure.mcp.server import build_server
 from app.infrastructure.operations.registry import registry
 
 
 def local_caller(username: str, settings: Settings) -> Caller:
+    """The enabled account `username` with its current roles; exit 2 when there is none."""
+    from app.accounts.handlers import resolve_account
+
     engine = make_engine(settings)
     instrument_sql(engine)
-    sessions = make_sessions(engine)
-    users = metadata.tables["users"]
-    roles = metadata.tables["user_roles"]
-    with unit_of_work(sessions, read_only=True) as session:
-        user = (
-            session.execute(
-                select(users).where(
-                    users.c.username == username.lower(), users.c.disabled_at.is_(None)
-                )
-            )
-            .mappings()
-            .first()
-        )
-        if user is None:
-            engine.dispose()
-            raise SystemExit(2)
-        assigned = frozenset(
-            session.execute(select(roles.c.role).where(roles.c.user_id == user["id"])).scalars()
-        )
-    return Caller(
-        user_id=user["id"], roles=assigned, sessions=sessions, settings=settings, origin="mcp"
-    )
+    anonymous = Caller(sessions=make_sessions(engine), settings=settings, origin="mcp")
+    caller = resolve_account(anonymous, username)
+    if caller.user_id is None:
+        engine.dispose()
+        raise SystemExit(2)
+    return caller
 
 
 async def serve(caller: Caller) -> None:

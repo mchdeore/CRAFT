@@ -1,6 +1,6 @@
-"""Account entry points: sign-in, the signed-in account, administration, mission grants, and
-personal tokens (`workspace` for /api, `mcp` for /mcp; a Hub workspace swaps its server's Hub
-token for a `workspace` one)."""
+"""Account entry points: sign-in, browser sessions, the signed-in account, administration,
+mission grants, and personal tokens (`workspace` for /api, `mcp` for /mcp; a Hub workspace swaps
+its server's Hub token for a `workspace` one)."""
 
 from typing import Annotated, Literal
 from uuid import UUID
@@ -151,26 +151,7 @@ def reply_language(caller: Caller) -> str:
 
 
 def current(caller: Caller) -> Me:
-    from sqlalchemy import select
-
-    from app.accounts import storage
-    from app.infrastructure.database.unit_of_work import unit_of_work
-    from app.infrastructure.errors import NotSignedIn
-
-    if caller.sessions is None:
-        raise NotSignedIn()
-    with unit_of_work(caller.sessions, read_only=True) as session:
-        row = (
-            session.execute(
-                select(storage.users).where(
-                    storage.users.c.id == caller.user_id, storage.users.c.disabled_at.is_(None)
-                )
-            )
-            .mappings()
-            .first()
-        )
-    if row is None:
-        raise NotSignedIn()
+    row = service.signed_in_account(caller)
     return msgspec.convert(
         {
             "id": row["id"],
@@ -202,17 +183,17 @@ def list_users(caller: Caller) -> list[Me]:
 
 @operation("accounts.manage")
 def promote(caller: Caller, request: UserRef) -> None:
-    service.manage(caller, request, "promote")
+    service.promote(caller, request.username)
 
 
 @operation("accounts.manage")
 def reset(caller: Caller, request: ResetPassword) -> None:
-    service.manage(caller, request, "reset")
+    service.reset_password(caller, request.username, request.password)
 
 
 @operation("accounts.manage")
 def disable(caller: Caller, request: UserRef) -> None:
-    service.manage(caller, request, "disable")
+    service.disable(caller, request.username)
 
 
 TokenKind = Literal["workspace", "mcp"]
@@ -251,6 +232,21 @@ def resolve_token(
     Takes the SHA-256 digest of the token, never the token. Returns the caller unchanged when
     no live token of this kind matches, or with `username`, when it is another account's."""
     return service.resolve_token(caller, digest, kind, username)
+
+
+def resolve_session(caller: Caller, digest: bytes) -> Caller:
+    """The caller a browser session cookie signs in as, with the account's current roles.
+
+    Takes the SHA-256 digest of the cookie's 32 bytes, never the cookie. Returns the caller
+    unchanged when no live session matches. Like `resolve_token`, a plain function rather than
+    an operation: it runs on every request, so it writes no call log row."""
+    return service.resolve_session(caller, digest)
+
+
+def resolve_account(caller: Caller, username: str) -> Caller:
+    """The caller an enabled account acts as from this machine's command line and stdio MCP,
+    with its current roles; the caller unchanged when the account is unknown or disabled."""
+    return service.resolve_account(caller, username)
 
 
 @operation(SIGNED_IN, post="/me/tokens")

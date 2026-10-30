@@ -193,6 +193,35 @@ def test_sign_out_and_password_reset_revoke_sessions(account, owner_engine) -> N
         )
 
 
+def test_resolve_account_finds_only_an_enabled_account(app, settings, owner_engine) -> None:
+    username = "local_" + uuid4().hex
+    with owner_engine.begin() as connection:
+        user = connection.execute(
+            storage.users.insert()
+            .values(username=username, display_name="Test")
+            .returning(storage.users.c.id)
+        ).scalar_one()
+        connection.execute(storage.user_roles.insert().values(user_id=user, role="member"))
+    anonymous = Caller(sessions=app.state.sessions, settings=settings, origin="mcp")
+    try:
+        found = service.resolve_account(anonymous, username.upper())
+        assert (found.user_id, found.roles, found.origin) == (user, frozenset({"member"}), "mcp")
+        assert service.resolve_account(anonymous, "unknown_" + uuid4().hex) == anonymous
+        with owner_engine.begin() as connection:
+            connection.execute(
+                storage.users.update()
+                .where(storage.users.c.id == user)
+                .values(disabled_at=access.now())
+            )
+        assert service.resolve_account(anonymous, username) == anonymous
+    finally:
+        with owner_engine.begin() as connection:
+            connection.execute(
+                storage.user_roles.delete().where(storage.user_roles.c.user_id == user)
+            )
+            connection.execute(storage.users.delete().where(storage.users.c.id == user))
+
+
 def test_cross_origin_write_is_refused(account) -> None:
     called = []
     snapshot = registry.copy()
