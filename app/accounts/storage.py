@@ -247,6 +247,57 @@ def touch_token(session, token, at, every) -> None:
     )
 
 
+def live_session(session, digest: bytes, at):
+    """The browser session with this digest, unless revoked, expired, idle too long or of a
+    disabled account."""
+    from sqlalchemy import select
+
+    return (
+        session.execute(
+            select(
+                auth_sessions.c.id,
+                auth_sessions.c.user_id,
+                auth_sessions.c.last_seen_at,
+                auth_sessions.c.expires_at,
+            )
+            .join(users, users.c.id == auth_sessions.c.user_id)
+            .where(
+                auth_sessions.c.token_sha256 == digest,
+                auth_sessions.c.revoked_at.is_(None),
+                auth_sessions.c.idle_expires_at > at,
+                auth_sessions.c.expires_at > at,
+                users.c.disabled_at.is_(None),
+            )
+        )
+        .mappings()
+        .first()
+    )
+
+
+def touch_session(session, auth_session, at, every, idle_until) -> None:
+    """Record the session's use and extend its idle expiry, at most once per `every`."""
+    session.execute(
+        auth_sessions.update()
+        .where(
+            auth_sessions.c.id == auth_session,
+            auth_sessions.c.last_seen_at <= at - every,
+            auth_sessions.c.revoked_at.is_(None),
+        )
+        .values(last_seen_at=at, idle_expires_at=idle_until)
+    )
+
+
+def enabled_user(session, user):
+    """The account with this ID, unless it is disabled."""
+    from sqlalchemy import select
+
+    return (
+        session.execute(select(users).where(users.c.id == user, users.c.disabled_at.is_(None)))
+        .mappings()
+        .first()
+    )
+
+
 def revoke_sessions(session, user, at, reason: str, only=None) -> None:
     statement = auth_sessions.update().where(
         auth_sessions.c.user_id == user, auth_sessions.c.revoked_at.is_(None)

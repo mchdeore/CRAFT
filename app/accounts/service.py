@@ -1,10 +1,9 @@
-"""Short transactions for account administration, sign-in, and personal tokens (issue, list,
-revoke, and resolve a token's digest to its account)."""
+"""Short transactions for account administration, sign-in, browser sessions (resolve a cookie's
+digest to its account) and personal tokens (issue, list, revoke, and resolve a token's digest to
+its account)."""
 
-import base64
 import hashlib
 import logging
-import secrets
 from collections import defaultdict, deque
 from dataclasses import replace
 from datetime import timedelta
@@ -14,6 +13,7 @@ from threading import Lock
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.accounts import storage
 from app.infrastructure import access
@@ -32,6 +32,7 @@ from app.infrastructure.grants import insert_grant, remove_grant
 from app.infrastructure.operations.context import current_call, session_cookie, signin_cookie
 from app.infrastructure.provider.simulated import SILOS
 from app.infrastructure.shapes import FieldError
+from app.infrastructure.tokens import new_token, read_token
 
 logger = logging.getLogger("craft.accounts")
 
@@ -120,8 +121,7 @@ def open_session(caller: Caller, session, user) -> list:
     """A new browser session for `user` in the caller's transaction; the cookie is set on reply."""
     assert caller.settings is not None
     at = access.now()
-    raw = secrets.token_bytes(32)
-    cookie = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    raw, cookie = new_token()
     identifier = session.execute(
         storage.auth_sessions.insert()
         .values(
@@ -137,8 +137,6 @@ def open_session(caller: Caller, session, user) -> list:
     assigned = storage.roles_for(session, user)
     context = current_call.get()
     if context is not None:
-        from dataclasses import replace
-
         context.caller = replace(
             caller, user_id=user, roles=frozenset(assigned), auth_session_id=identifier
         )
@@ -181,7 +179,7 @@ def start_sign_in(caller: Caller, return_to: str | None) -> str | None:
     except ApiError as error:
         logger.warning("sign-in failed", extra={"fields": {"error_type": type(error).__name__}})
         return None
-    raw = secrets.token_bytes(32)
+    raw, flow_cookie = new_token()
     at = access.now()
     with unit_of_work(caller.sessions) as session:
         session.execute(
@@ -195,7 +193,7 @@ def start_sign_in(caller: Caller, return_to: str | None) -> str | None:
                 expires_at=at + FLOW_LIFETIME,
             )
         )
-    signin_cookie(base64.urlsafe_b64encode(raw).decode().rstrip("="), FLOW_LIFETIME)
+    signin_cookie(flow_cookie, FLOW_LIFETIME)
     return url
 
 
@@ -211,10 +209,9 @@ def finish_sign_in(caller: Caller, cookie: str | None, state, code) -> tuple[str
     if caller.sessions is None or settings is None or not settings.oidc_authority:
         raise NotFound()
     signin_cookie("", timedelta(0))
-    try:
-        raw = base64.urlsafe_b64decode((cookie or "") + "=" * (-len(cookie or "") % 4))
-    except ValueError:
-        raw = b""
+    raw = read_token(cookie or "")
+    if raw is None:
+        return "/", "failed"
     with unit_of_work(caller.sessions) as session:
         row = (
             session.execute(
@@ -225,7 +222,7 @@ def finish_sign_in(caller: Caller, cookie: str | None, state, code) -> tuple[str
             .mappings()
             .first()
         )
-    if row is None or len(raw) != 32 or row["expires_at"] <= access.now():
+    if row is None or row["expires_at"] <= access.now():
         return "/", "failed"
     target = row["return_to"]
     try:
@@ -278,6 +275,17 @@ def language(caller: Caller) -> str:
         return "en"
     with unit_of_work(caller.sessions, read_only=True) as session:
         return storage.language(session, caller.user_id) or "en"
+
+
+def signed_in_account(caller: Caller):
+    """The caller's own account row; NotSignedIn when it is gone or disabled."""
+    if caller.sessions is None:
+        raise NotSignedIn()
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        row = storage.enabled_user(session, caller.user_id)
+    if row is None:
+        raise NotSignedIn()
+    return row
 
 
 def sign_out(caller: Caller) -> None:
@@ -385,47 +393,56 @@ def list_users(caller: Caller):
         ]
 
 
-def manage(caller: Caller, request, action: str) -> None:
+def _locked_account(session, username: str):
+    """The account's ID, its row locked for this transaction; NotFound when there is none."""
+    user = storage.account(session, username.lower(), lock=True)
+    if user is None:
+        raise NotFound()
+    return user["id"]
+
+
+def promote(caller: Caller, username: str) -> None:
     if caller.sessions is None:
         raise NotFound()
-    password_hash = None
-    if action == "reset":
-        if caller.settings is None or len(request.password) < caller.settings.password_min_length:
-            raise InvalidInput()
-        password_hash = PASSWORDS.hash(request.password)
     with unit_of_work(caller.sessions) as session:
-        user = storage.account(session, request.username.lower(), lock=True)
-        if user is None:
-            raise NotFound()
+        user = _locked_account(session, username)
+        session.execute(
+            insert(storage.user_roles).values(user_id=user, role="admin").on_conflict_do_nothing()
+        )
+
+
+def reset_password(caller: Caller, username: str, password: str) -> None:
+    """Set a local password and end the account's sessions."""
+    if caller.sessions is None:
+        raise NotFound()
+    if caller.settings is None or len(password) < caller.settings.password_min_length:
+        raise InvalidInput()
+    password_hash = PASSWORDS.hash(password)
+    with unit_of_work(caller.sessions) as session:
+        user = _locked_account(session, username)
         at = access.now()
-        if action == "promote":
-            from sqlalchemy.dialects.postgresql import insert
+        session.execute(
+            insert(storage.local_credentials)
+            .values(user_id=user, password_hash=password_hash)
+            .on_conflict_do_update(
+                index_elements=[storage.local_credentials.c.user_id],
+                set_={"password_hash": password_hash, "updated_at": at},
+            )
+        )
+        storage.revoke_sessions(session, user, at, "password_reset")
 
-            session.execute(
-                insert(storage.user_roles)
-                .values(user_id=user["id"], role="admin")
-                .on_conflict_do_nothing()
-            )
-        elif action == "reset":
-            from sqlalchemy.dialects.postgresql import insert
 
-            statement = insert(storage.local_credentials).values(
-                user_id=user["id"], password_hash=password_hash
-            )
-            session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[storage.local_credentials.c.user_id],
-                    set_={"password_hash": password_hash, "updated_at": at},
-                )
-            )
-            storage.revoke_sessions(session, user["id"], at, "password_reset")
-        elif action == "disable":
-            session.execute(
-                storage.users.update()
-                .where(storage.users.c.id == user["id"])
-                .values(disabled_at=at)
-            )
-            storage.revoke_sessions(session, user["id"], at, "disabled")
+def disable(caller: Caller, username: str) -> None:
+    """Stop the account signing in and end its sessions."""
+    if caller.sessions is None:
+        raise NotFound()
+    with unit_of_work(caller.sessions) as session:
+        user = _locked_account(session, username)
+        at = access.now()
+        session.execute(
+            storage.users.update().where(storage.users.c.id == user).values(disabled_at=at)
+        )
+        storage.revoke_sessions(session, user, at, "disabled")
 
 
 WORKSPACE_TOKEN_ORIGINS = frozenset({"http", "python"})
@@ -464,6 +481,41 @@ def resolve_token(caller: Caller, digest: bytes, kind: str, username: str | None
     return replace(
         caller, user_id=row["user_id"], roles=roles, origin=kind, workspace_token_id=row["id"]
     )
+
+
+def resolve_session(caller: Caller, digest: bytes) -> Caller:
+    """The caller a browser session signs in as, with the account's current roles; the caller
+    unchanged when no live session matches. Use extends the idle expiry, written at most once a
+    minute and never past the absolute expiry."""
+    if caller.sessions is None or caller.settings is None:
+        return caller
+    at = access.now()
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        row = storage.live_session(session, digest, at)
+        if row is None:
+            return caller
+        roles = frozenset(storage.roles_for(session, row["user_id"]))
+    every = timedelta(seconds=60)
+    if at - row["last_seen_at"] >= every:
+        idle_until = min(
+            at + timedelta(hours=caller.settings.session_idle_hours), row["expires_at"]
+        )
+        with unit_of_work(caller.sessions) as session:
+            storage.touch_session(session, row["id"], at, every, idle_until)
+    return replace(caller, user_id=row["user_id"], roles=roles, auth_session_id=row["id"])
+
+
+def resolve_account(caller: Caller, username: str) -> Caller:
+    """The caller an enabled account acts as on this machine, with its current roles; the
+    caller unchanged when the account is unknown or disabled."""
+    if caller.sessions is None:
+        return caller
+    with unit_of_work(caller.sessions, read_only=True) as session:
+        user = storage.account(session, username.lower())
+        if user is None or user["disabled_at"] is not None:
+            return caller
+        roles = frozenset(storage.roles_for(session, user["id"]))
+    return replace(caller, user_id=user["id"], roles=roles)
 
 
 def _token_owner(caller: Caller):
@@ -535,7 +587,7 @@ def _issue_workspace_token(sessions, user_id, kind: str, label: str, hours: int)
     """A new personal token of ``kind`` for an enabled account, shown once; None when the
     account can't sign in."""
     at = access.now()
-    raw = secrets.token_bytes(32)
+    raw, token = new_token()
     with unit_of_work(sessions) as session:
         enabled = session.execute(
             select(storage.users.c.id).where(
@@ -560,7 +612,7 @@ def _issue_workspace_token(sessions, user_id, kind: str, label: str, hours: int)
             .mappings()
             .one()
         )
-    return {**_token_row(row), "token": base64.urlsafe_b64encode(raw).decode().rstrip("=")}
+    return {**_token_row(row), "token": token}
 
 
 def list_workspace_tokens(caller: Caller) -> list[dict]:

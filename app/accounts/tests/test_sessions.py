@@ -193,6 +193,28 @@ def test_sign_out_and_password_reset_revoke_sessions(account, owner_engine) -> N
         )
 
 
+def test_infrastructure_resolves_accounts_through_its_interface() -> None:
+    """Cookies, workspace tokens and local accounts resolve through `accounts.handlers`."""
+    import re
+
+    from app.infrastructure.paths import ROOT
+
+    accounts_tables = {
+        table.name
+        for table in [
+            storage.users,
+            storage.user_roles,
+            storage.auth_sessions,
+            storage.workspace_tokens,
+            storage.local_credentials,
+        ]
+    }
+    for path in ["app/infrastructure/access.py", "app/infrastructure/mcp/stdio.py"]:
+        source = (ROOT / path).read_text()
+        assert "metadata" not in source, path
+        assert not set(re.findall(r'"(\w+)"', source)) & accounts_tables, path
+
+
 def test_cross_origin_write_is_refused(account) -> None:
     called = []
     snapshot = registry.copy()
