@@ -18,10 +18,9 @@ from agent_framework.exceptions import ToolExecutionException
 from mcp.types import CallToolResult, ListToolsResult, Tool
 from websockets.exceptions import ConnectionClosedError
 
-from app.agent.tests.test_workspace_agent import prepared_run
-from app.agent.tests.test_workspace_session import bound
 from app.infrastructure.access import Caller
 from app.infrastructure.operations.context import current_call
+from app.tests.support.workspace import bound, prepared_run
 
 KERNEL = "00000000-0000-4000-8000-000000000001"
 NOTEBOOK = "notebooks/analysis.ipynb"

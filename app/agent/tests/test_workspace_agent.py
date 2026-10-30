@@ -6,77 +6,24 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from time import perf_counter
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from typing import cast
 from uuid import uuid4
 
 import httpx
 import pytest
 from agent_framework import FunctionInvocationContext, tool
-from agent_framework.exceptions import ToolException
-from mcp.types import ListToolsResult, Tool
 from websockets.exceptions import ConnectionClosedError
 
 from app.agent import runtime
 from app.agent.handlers import RunAgentInput
 from app.agent.workspace import WorkspaceEndpoint, WorkspaceToolsets
-from app.approvals import handlers as approvals
 from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.errors import ApiError
-from app.infrastructure.mcp.client import LocalHTTPTool, ToolCallMiddleware
+from app.infrastructure.mcp.client import ToolCallMiddleware
 from app.infrastructure.operations.context import CallContext, current_call
 from app.infrastructure.operations.registry import registry, tool_named
-from app.workspace import handlers as workspace_handlers
-
-HUB = {"CRAFT_HUB_URL": "http://127.0.0.1:1", "CRAFT_HUB_TOKEN": "generated-hub-token"}
-KERNEL = "00000000-0000-4000-8000-000000000101"
-
-
-def generated_hub(monkeypatch, *, ready=True):
-    """A generated Hub: records each person it is asked about and never opens a connection."""
-    reached = []
-
-    async def state(hub, user_id):
-        reached.append(("state", user_id))
-        return "stopped"
-
-    async def wait_ready(hub, user_id, seconds=90):
-        reached.append(("wait", user_id))
-        return ready
-
-    async def kernel(hub, user_id):
-        reached.append(("kernel", user_id))
-        return KERNEL
-
-    async def start_workspace(caller):
-        reached.append(("start", caller.user_id))
-
-    monkeypatch.setattr(workspace_handlers, "start_workspace", start_workspace)
-    monkeypatch.setattr(runtime.hub.Hub, "state", state)
-    monkeypatch.setattr(runtime.hub.Hub, "wait_ready", wait_ready)
-    monkeypatch.setattr(runtime.hub.Hub, "kernel", kernel)
-    return reached
-
-
-async def discover(selected):
-    """Use real framework name normalization and allowlist filtering on generated tools."""
-    selected._ping_available = False
-    selected.session = SimpleNamespace(
-        list_tools=AsyncMock(
-            return_value=ListToolsResult(
-                tools=[
-                    Tool(
-                        name="read_notebook",
-                        inputSchema={"type": "object", "properties": {"path": {"type": "string"}}},
-                    ),
-                    Tool(name="execute code", inputSchema={"type": "object"}),
-                    Tool(name="search", inputSchema={"type": "object"}),
-                ]
-            )
-        )
-    )
-    await selected.load_tools()
+from app.tests.support.workspace import HUB, KERNEL, discover, generated_hub, prepared_run
 
 
 def operation_context(caller):
@@ -210,111 +157,6 @@ def test_native_and_external_calls_share_limit_and_native_completion():
         }
 
     asyncio.run(execute())
-
-
-def prepared_run(monkeypatch, tmp_path, *, configured="owned", failure=None):
-    """Replace only database/model/network boundaries; run the real controller and factory."""
-    hub = {} if configured == "none" else HUB
-    settings = Settings.from_env({"CRAFT_APP_DB_PASSWORD": "generated-never-sent", **hub})
-    caller = Caller(user_id=uuid4(), settings=settings)
-    request = RunAgentInput(
-        thread_id=uuid4(),
-        run_id=uuid4(),
-        messages=[{"role": "user", "content": "Use my workspace"}],
-    )
-    recorded: dict[str, Any] = {
-        "connected": [],
-        "closed": [],
-        "agents": [],
-        "inputs": [],
-        "finished": [],
-        "revoked": [],
-        "controllers": [],
-    }
-    generated_hub(monkeypatch, ready=configured != "not-ready")
-
-    class Controller:
-        def __init__(self, session, target):
-            recorded["controllers"].append(target)
-
-        async def start(self):
-            return ""
-
-        async def close(self):
-            recorded["controllers"].append("closed")
-
-    monkeypatch.setattr(runtime, "WorkspaceRunController", Controller)
-    monkeypatch.setattr(approvals, "list_notebook_grants", lambda *_: [])
-    monkeypatch.setattr(runtime.conversations, "require_owned", lambda *_, **__: None)
-    monkeypatch.setattr(
-        runtime.conversations, "load_for_run", lambda *_: SimpleNamespace(messages=[])
-    )
-    monkeypatch.setattr(runtime.conversations, "append_for_run", lambda *_: None)
-    monkeypatch.setattr(runtime.service, "start", lambda *_: {})
-    monkeypatch.setattr(
-        runtime.service,
-        "finish",
-        lambda *args, **kwargs: recorded["finished"].append((args, kwargs)),
-    )
-    monkeypatch.setattr(
-        runtime, "issue_run_token", lambda *_: SimpleNamespace(token="generated-never-sent")
-    )
-    monkeypatch.setattr(runtime, "revoke_run_token", lambda *args: recorded["revoked"].append(args))
-    original_close = LocalHTTPTool.close
-
-    async def connect(selected):
-        recorded["connected"].append(selected)
-        if selected.name == "user_workspace" and failure == "connect":
-            raise ToolException("generated")  # how the MCP tool reports a failed connection
-        if selected.name == "user_workspace" and failure == "timeout":
-            await asyncio.Event().wait()
-        await discover(selected)
-
-    async def close(selected):
-        try:
-            await original_close(selected)
-        finally:
-            recorded["closed"].append(selected)
-
-    monkeypatch.setattr(LocalHTTPTool, "connect", connect)
-    monkeypatch.setattr(LocalHTTPTool, "close", close)
-
-    class SelectedModel:
-        closed = False
-
-        async def close(self):
-            self.closed = True
-
-    selected_model = SelectedModel()
-    recorded["model"] = selected_model
-
-    def select_model(_):
-        if failure == "model":
-            raise ApiError()
-        return selected_model
-
-    monkeypatch.setattr(runtime.model, "client", select_model)
-
-    class PreparedAgent:
-        def __init__(self, *args, saved, **kwargs):
-            self.saved, self.options = saved, kwargs
-            recorded["agents"].append(self)
-
-    class PreparedAdapter:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def run(self, data):
-            recorded["inputs"].append(data)
-            if failure == "execute":
-                raise ApiError()
-            if failure == "cancel":
-                raise asyncio.CancelledError()
-            yield SimpleNamespace(model_dump=lambda **_: {"type": "RUN_FINISHED"})
-
-    monkeypatch.setattr(runtime, "StatefulAgent", PreparedAgent)
-    monkeypatch.setattr(runtime, "DurableApprovalAgent", PreparedAdapter)
-    return caller, request, recorded
 
 
 @pytest.mark.parametrize("failure", [None, "connect", "model", "execute", "timeout", "cancel"])

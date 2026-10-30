@@ -17,7 +17,6 @@ from app.approvals.handlers import (
     read_approval,
     request_approval,
 )
-from app.approvals.tests.test_decisions import context as context
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.pipeline import ApprovalRequired

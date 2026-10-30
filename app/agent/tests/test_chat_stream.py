@@ -17,7 +17,6 @@ from sqlalchemy import select
 from app import create_app
 from app.agent import runtime, service
 from app.agent.handlers import (
-    RunAgentInput,
     RunEventsRef,
     RunRef,
     cancel_run,
@@ -30,37 +29,10 @@ from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_engine
 from app.infrastructure.errors import Conflict, NotFound, RateLimited
 from app.tests.support.chat import chat as chat
+from app.tests.support.chat import collect, request, row, wait_for
 from app.tests.support.contract import validate_chat_events
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
-
-
-def request(chat, content="Peak power", identifier=None):
-    return RunAgentInput(
-        thread_id=chat["thread"],
-        run_id=identifier or uuid4(),
-        messages=[{"id": str(uuid4()), "role": "user", "content": content}],
-    )
-
-
-def collect(caller, data):
-    async def execute():
-        return [msgspec.to_builtins(event) async for event in run_agent(caller, data)]
-
-    return asyncio.run(execute())
-
-
-def row(chat, identifier):
-    with chat["owner"].connect() as connection:
-        return (
-            connection.execute(
-                select(m.metadata.tables["agent_runs"]).where(
-                    m.metadata.tables["agent_runs"].c.id == identifier
-                )
-            )
-            .mappings()
-            .one()
-        )
 
 
 @pytest.mark.slow
@@ -239,15 +211,6 @@ def test_chat_stream_owner_and_run_limits(chat):
                 .delete()
                 .where(m.metadata.tables["conversations"].c.id == second)
             )
-
-
-def wait_for(check, seconds=10.0):
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if check():
-            return
-        time.sleep(0.05)
-    raise AssertionError("condition not reached")
 
 
 def test_closed_stream_keeps_the_run_and_cancel_stops_it(chat, monkeypatch):

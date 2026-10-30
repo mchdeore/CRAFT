@@ -3,7 +3,6 @@
 import asyncio
 import base64
 import hashlib
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -13,14 +12,11 @@ import msgspec
 import pytest
 from agent_framework import MCPStreamableHTTPTool
 from fastapi.testclient import TestClient
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import select
 
 from app import create_app
 from app.agent import service
 from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
-from app.agent.tests.test_chat_stream import collect, request, row, wait_for
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import NotFound
@@ -30,7 +26,9 @@ from app.infrastructure.operations.registry import registry
 from app.infrastructure.shapes import Shape
 from app.library.handlers import DocumentRef, get_document
 from app.tests.support.chat import chat as chat
+from app.tests.support.chat import collect, request, row, wait_for
 from app.tests.support.cube import cube_source as cube_source
+from app.tests.support.mcp import session_stream
 
 
 @pytest.fixture
@@ -42,17 +40,6 @@ def token(chat):
     yield chat | {"data": data, "trusted": caller, "token": raw}
     revoke_run_token(caller, RunRef(run=data.run_id))
     service.finish(caller, data, "cancelled", {})
-
-
-@asynccontextmanager
-async def session_stream(url, raw):
-    async with httpx.AsyncClient(
-        headers={"Authorization": "Bearer " + raw}, trust_env=False, follow_redirects=True
-    ) as client:
-        async with streamable_http_client(url, http_client=client) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield session
 
 
 def rpc(token, header=None, cookie=None):

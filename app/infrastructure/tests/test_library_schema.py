@@ -8,7 +8,7 @@ from sqlalchemy import Connection, Engine, inspect, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.infrastructure.database import metadata as m
-from app.infrastructure.tests.test_grants import assert_grants
+from app.tests.support.grants import assert_grants
 
 LIBRARY = {"provider_items", "doc_versions", "chunks", "vectors", "version_diffs", "index_cursor"}
 

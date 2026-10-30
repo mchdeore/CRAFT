@@ -125,16 +125,9 @@ def test_mcp_reads_owned_notes_but_unapproved_writes_are_refused(chat):
     note = asyncio.run(
         write_note(chat["caller"], WriteNote(title="MCP memo", body="Synthetic body"))
     )
-    fields = dict(
-        zip(
-            chat["sign_in"].__code__.co_freevars,
-            (c.cell_contents for c in chat["sign_in"].__closure__),
-            strict=True,
-        )
-    )
     params = StdioServerParameters(
         command="uv",
-        args=["run", "craft", "mcp", "--as", fields["username"]],
+        args=["run", "craft", "mcp", "--as", chat["username"]],
         env=os.environ
         | {
             "CRAFT_DATABASE_NAME": chat["settings"].database_name,

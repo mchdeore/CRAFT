@@ -1,76 +1,22 @@
 """Real HTTP auth, persisted framework pauses and native MCP approved writes."""
 
-import json
-from contextlib import contextmanager
 from uuid import uuid4
 
 import pytest
 from agent_framework import ChatResponse, Content, Message
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app import create_app
 from app.agent import model
-from app.approvals.tests.test_decisions import context as context
-from app.approvals.tests.test_decisions import decision_call, latest_auth_session, login
 from app.infrastructure.database.metadata import metadata
-from app.infrastructure.mcp.tests.http_fixture import live_server
-from app.tests.support.model import ScriptedChatClient
-
-
-class WriteClient(ScriptedChatClient):
-    def reply(self, messages):
-        results = [
-            content
-            for message in messages
-            for content in message.contents
-            if content.type == "function_result"
-        ]
-        content = (
-            Content.from_text("Generated write decision processed.")
-            if results
-            else (
-                Content.from_function_call(
-                    call_id="generated-note-call",
-                    name="write_note",
-                    arguments={"title": "Generated approved scratchpad", "body": "12"},
-                )
-            )
-        )
-        return ChatResponse(messages=[Message(role="assistant", contents=[content])])
-
-
-def events(response):
-    assert response.status_code == 200
-    return [
-        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
-    ]
-
-
-@contextmanager
-def runtime_client(context):
-    app = create_app(context["settings"])
-    try:
-        with live_server(app), TestClient(app, base_url="https://testserver") as http:
-            http.headers["Origin"] = "https://testserver"
-            login(http, context)
-            # Runs execute on the agent worker, which calls this app's MCP endpoint.
-            with context["worker"].using(app.state.settings):
-                yield http
-    finally:
-        app.state.engine.dispose()
-
-
-def clear_run_approvals(context, identifier):
-    with context["owner"].begin() as connection:
-        requests = metadata.tables["approval_requests"]
-        ids = select(requests.c.id).where(requests.c.run_id == identifier)
-        connection.execute(
-            metadata.tables["approval_events"]
-            .delete()
-            .where(metadata.tables["approval_events"].c.request_id.in_(ids))
-        )
-        connection.execute(requests.delete().where(requests.c.run_id == identifier))
+from app.tests.support.approvals import (
+    WriteClient,
+    clear_run_approvals,
+    decision_call,
+    events,
+    latest_auth_session,
+    login,
+    runtime_client,
+)
 
 
 @pytest.mark.parametrize(

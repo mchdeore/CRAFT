@@ -14,8 +14,8 @@ from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.errors import ApiError, InvalidInput
 from app.infrastructure.operations import operation
 from app.infrastructure.operations.context import current_call
-from app.infrastructure.operations.tests.test_operation import rows, trusted
 from app.infrastructure.shapes import Shape
+from app.tests.support.operations import rows, trusted
 
 
 class StreamInput(Shape):

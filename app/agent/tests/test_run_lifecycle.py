@@ -17,15 +17,13 @@ from app import create_app
 from app.agent import runs, runtime, service, storage
 from app.agent.handlers import AGUIEvent, RunAgentInput
 from app.agent.jobs import AgentRunJob, agent_run, prune_run_events
-from app.agent.tests.test_task_mode import add_run
-from app.agent.tests.test_task_mode import person as person
 from app.approvals.handlers import ApprovalRef, read_approval, request_approval
-from app.approvals.tests.test_decisions import context as context
-from app.approvals.tests.test_decisions import login
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import Conflict
 from app.infrastructure.operations.jobs import SCHEDULED, enqueue, runner
 from app.jobs.handlers import active_job, cancel_queued_job
+from app.tests.support.approvals import login
+from app.tests.support.runs import add_run
 
 agent_runs, inputs = metadata.tables["agent_runs"], metadata.tables["agent_run_inputs"]
 events, call_log = metadata.tables["agent_run_events"], metadata.tables["call_log"]

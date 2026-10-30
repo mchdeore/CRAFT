@@ -13,12 +13,10 @@ from uuid import uuid4
 
 import pytest
 
-from app.approvals.tests.test_decisions import context as context
 from app.infrastructure import notebook_jobs, notebook_sandbox, workspaces
 from app.infrastructure.notebook_runs import NotebookRunner, RunError
 from app.workspace import service
 from app.workspace.handlers import RunNotebook, run_notebook
-from app.workspace.tests.test_actions import workspace as workspace
 
 NOTEBOOK = {
     "cells": [{"cell_type": "code", "metadata": {}, "source": "1", "outputs": []}],

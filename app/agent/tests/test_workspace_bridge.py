@@ -13,7 +13,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
 from mcp.types import LATEST_PROTOCOL_VERSION, CallToolResult, TextContent
 
-from app.agent.tests.test_workspace_session import bound, native_tools
+from app.tests.support.workspace import bound, native_tools
 
 BASE = "http://127.0.0.1:54321"
 HTTP_HEADERS = {
