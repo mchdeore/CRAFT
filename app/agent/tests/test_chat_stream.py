@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-import subprocess
 import threading
 import time
 from dataclasses import replace
@@ -31,6 +30,7 @@ from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_engine
 from app.infrastructure.errors import Conflict, NotFound, RateLimited
 from app.tests.support.chat import chat as chat
+from app.tests.support.contract import validate_chat_events
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
 
@@ -48,16 +48,6 @@ def collect(caller, data):
         return [msgspec.to_builtins(event) async for event in run_agent(caller, data)]
 
     return asyncio.run(execute())
-
-
-def valid_events(events):
-    output = subprocess.run(
-        ["node", "app/contract/validate-stream.mjs"],
-        input=json.dumps(events),
-        capture_output=True,
-        text=True,
-    )
-    return output.returncode == 0 and json.loads(output.stdout)["valid"]
 
 
 def row(chat, identifier):
@@ -96,9 +86,7 @@ def test_chat_stream_valid_events_in_order(chat):
         < types.index("TOOL_CALL_RESULT")
         < types.index("TEXT_MESSAGE_CONTENT")
     )
-    from app.tests.test_contract import validate_chat_events
-
-    assert valid_events(events) and validate_chat_events(events)
+    assert validate_chat_events(events)
     answer = next(event for event in events if event["type"] == "ACTIVITY_SNAPSHOT")["content"]
     supported = (
         bool(answer["citations"]) and answer["citations"][0]["handle"]["item"] == chat["item"]
@@ -136,7 +124,7 @@ def test_chat_stream_valid_events_in_order(chat):
         streamed = [
             json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
         ]
-        assert response.status_code == 200 and valid_events(streamed)
+        assert response.status_code == 200 and validate_chat_events(streamed)
         assert client.get("/api/tools").status_code == 200
 
 
@@ -169,7 +157,7 @@ def test_encrypted_reasoning_stream_keeps_opaque_value_and_message_reference(cha
     assert encrypted["entityId"] == reasoning["messageId"]
     assert encrypted["encryptedValue"] == "opaque-generated-fixture"
     assert all("opaque-generated-fixture" not in event.get("delta", "") for event in events)
-    assert valid_events(events) and row(chat, data.run_id)["status"] == "finished"
+    assert validate_chat_events(events) and row(chat, data.run_id)["status"] == "finished"
 
 
 def test_browser_cannot_inject_history(chat, monkeypatch):

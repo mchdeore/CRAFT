@@ -1,204 +1,120 @@
-"""Implemented account response forms match the adopted wire contract."""
+"""The handlers, app/contract and the wiki's route and tool tables describe the same API."""
 
+import importlib
+import inspect
 import json
-import subprocess
-from pathlib import Path
+import re
+from typing import Any, get_args, get_origin
 
+import jsonschema
 import msgspec
 import pytest
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
-from app.accounts.handlers import (
-    IssuedWorkspaceToken,
-    Me,
-    NewWorkspaceToken,
-    SignIn,
-    WorkspaceToken,
-)
-from app.agent.handlers import RunRecovery, RunRecoveryRef
-from app.cube.handlers import MissionRef, ValueRef
-from app.health.handlers import QueueCounts, QueueHealth
+from app.agent.handlers import RunRecovery
+from app.infrastructure.errors import ApiError
+from app.infrastructure.operations.pipeline import register_http
+from app.infrastructure.operations.registry import Operation, registry, stream_output
 from app.infrastructure.paths import ROOT
-from app.infrastructure.shapes import ApiErrorBody
-from app.jobs.handlers import Job, JobPage, JobPageRequest, JobProgress
-from app.library.handlers import (
-    CatalogDocument,
-    DocumentCatalog,
-    DocumentList,
-    Graph,
-    GraphEdge,
-    GraphGroup,
-    GraphNode,
-    RelationsRequest,
+from app.infrastructure.shapes import ApiErrorBody, Shape
+from app.tests.support.contract import (
+    CONTRACT,
+    typescript_definitions,
+    typescript_schema,
+    validate_chat_events,
 )
-from app.notifications.handlers import Notification, NotificationPageRequest
-from app.skills.handlers import (
-    SaveSkill,
-    Skill,
-    SkillCatalog,
-    SkillList,
-    SkillRef,
-    SkillSummary,
-    SkillVersionRef,
-)
-from app.tools.handlers import Capability, CapabilityCatalog
-from app.workspace.handlers import Workspace
+
+ROUTES_TS = (CONTRACT / "routes.ts").read_text()
 
 
-def test_session_contract() -> None:
-    example = json.loads(Path("app/contract/examples/session.json").read_text())
-    body = msgspec.convert(example, Me)
-    assert set(msgspec.to_builtins(body)) == {
-        "id",
-        "username",
-        "displayName",
-        "roles",
-        "language",
-        "email",
-    }
-    assert set(msgspec.structs.fields(SignIn)[n].encode_name for n in [0, 1]) == {
-        "username",
-        "password",
-    }
+@pytest.fixture(scope="session")
+def operations() -> dict[str, Operation]:
+    importlib.import_module("app")  # importing the app declares every operation
+    return registry
+
+
+@pytest.fixture(scope="session")
+def http_routes(operations) -> dict[str, Operation]:
+    """Each operation by its "METHOD /path/:param" key, with the path register_http gives it."""
+    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    register_http(app)
+    routes = {}
+    for route in app.routes:
+        assert isinstance(route, APIRoute)
+        path = re.sub(r"\{([^}]+)\}", r":\1", route.path)
+        for method in route.methods or ():
+            routes[f"{method} {path}"] = route.endpoint.__dict__["__operation__"]
+    return routes
+
+
+def shapes_in(shape: Any) -> list[type[Shape]]:
+    if stream_output(shape) is not None:
+        return shapes_in(stream_output(shape))
+    if get_origin(shape) is list:
+        return shapes_in(get_args(shape)[0])
+    return [shape] if inspect.isclass(shape) and issubclass(shape, Shape) else []
+
+
+def type_name(shape: Any) -> str:
+    return type_name(get_args(shape)[0]) + "[]" if get_origin(shape) is list else shape.__name__
+
+
+def test_error_body_wire_names() -> None:
     error = ApiErrorBody(code="not_signed_in", message="Not signed in.", request_id="synthetic")
     assert set(msgspec.to_builtins(error)) == {"code", "message", "requestId"}
-    declarations = Path("app/contract/routes.ts").read_text()
-    assert "POST /api/session" in declarations and "DELETE /api/session" in declarations
 
 
-def typescript_schema(name: str) -> dict:
-    executable = ROOT / "app/contract/node_modules/.bin/ts-json-schema-generator"
-    if not executable.exists():
-        subprocess.run(
-            [
-                "npm",
-                "ci",
-                "--prefix",
-                str(ROOT / "app/contract"),
-                "--ignore-scripts",
-                "--no-audit",
-                "--no-fund",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    output = subprocess.check_output(
-        [str(executable), "--path", str(ROOT / "app/contract/types.ts"), "--type", name], text=True
+def test_python_shapes_match_typescript(operations) -> None:
+    """Every operation's shapes, and the shapes inside them, against types.ts by name."""
+    definitions = typescript_definitions()
+    # Each shape with the path parameters that fill its fields; types.ts may leave those out.
+    shapes: dict[type[Shape], set[str]] = {}
+    for operation in operations.values():
+        for shape in shapes_in(operation.input):
+            filled = set(re.findall(r"\{(\w+)\}", operation.path or ""))
+            shapes[shape] = shapes.get(shape, set()) | filled
+        for shape in shapes_in(operation.output):
+            shapes.setdefault(shape, set())
+    path_fields = {shape.__name__: filled for shape, filled in shapes.items()}
+    _, components = msgspec.json.schema_components(shapes)
+    checked = [name for name in components if name in definitions]
+    assert "Me" in checked and "SubmitValues" in checked
+    for name in checked:
+        declared, python = definitions[name], components[name]
+        left_out = path_fields.get(name, set()) - set(declared["properties"])
+        assert set(declared["properties"]) == set(python["properties"]) - left_out, name
+        assert set(declared.get("required", [])) == set(python.get("required", [])) - left_out, name
+    declared, python = definitions["CapabilityCatalog"], components["CapabilityCatalog"]
+    assert declared["properties"]["skills"]["items"]["type"] == "string"
+    assert python["properties"]["skills"]["items"]["type"] == "string"
+    assert set(declared["properties"]["skillsStatus"]["enum"]) == set(
+        python["properties"]["skillsStatus"]["enum"]
     )
-    return json.loads(output)
 
 
-def root_schema(schema: dict) -> dict:
-    if "$ref" not in schema:
-        return schema
-    collection, key = schema["$ref"].split("/")[-2:]
-    return schema[collection][key]
+def test_error_codes_match_typescript(operations) -> None:
+    # Importing the app doesn't import these two, which declare errors of their own.
+    importlib.import_module("app.accounts.oidc")
+    importlib.import_module("app.agent.runtime")
+    emitted, pending = set(), [ApiError]
+    while pending:
+        error = pending.pop()
+        if ".tests." not in error.__module__:
+            emitted.add(error.code)
+        pending += error.__subclasses__()
+    assert set(typescript_definitions()["ErrorCode"]["enum"]) == emitted
 
 
-@pytest.mark.slow
-def test_python_shapes_match_compiled_typescript() -> None:
-    import jsonschema
-
-    for shape in [
-        Me,
-        SignIn,
-        NewWorkspaceToken,
-        WorkspaceToken,
-        IssuedWorkspaceToken,
-        MissionRef,
-        ValueRef,
-        Capability,
-        CapabilityCatalog,
-        DocumentList,
-        CatalogDocument,
-        DocumentCatalog,
-        RelationsRequest,
-        GraphNode,
-        GraphEdge,
-        GraphGroup,
-        Graph,
-        Job,
-        JobPage,
-        JobPageRequest,
-        JobProgress,
-        Notification,
-        NotificationPageRequest,
-        QueueCounts,
-        QueueHealth,
-        RunRecoveryRef,
-        RunRecovery,
-        SaveSkill,
-        Skill,
-        SkillCatalog,
-        SkillList,
-        SkillRef,
-        SkillSummary,
-        SkillVersionRef,
-        Workspace,
-    ]:
-        compiled = typescript_schema(shape.__name__)
-        declared = root_schema(compiled)
-        python = root_schema(msgspec.json.schema(shape))
-        assert set(declared["properties"]) == set(python["properties"])
-        assert set(declared.get("required", [])) == set(python.get("required", []))
-        if shape is CapabilityCatalog:
-            assert declared["properties"]["skills"]["items"]["type"] == "string"
-            assert python["properties"]["skills"]["items"]["type"] == "string"
-            assert set(declared["properties"]["skillsStatus"]["enum"]) == set(
-                python["properties"]["skillsStatus"]["enum"]
-            )
-        if shape is Me:
-            jsonschema.validate(
-                json.loads((ROOT / "app/contract/examples/session.json").read_text()), compiled
-            )
-
-
-def test_route_keys_match_running_registry(settings) -> None:
-    import re
-
-    from app import create_app
-
-    app = create_app(settings)
-    actual = {
-        method + " " + re.sub(r"\{([^}]+)\}", r":\1", getattr(route, "path", ""))
-        for route in app.routes
-        for method in (getattr(route, "methods", None) or [])
-    }
-    declared = set(
-        re.findall(
-            r'"((?:GET|POST|PUT|PATCH|DELETE) /[^" ]+)"',
-            (ROOT / "app/contract/routes.ts").read_text(),
-        )
-    )
-    assert actual == declared
-
-
-def validate_chat_events(events) -> bool:
-    import jsonschema
-
-    checked = subprocess.run(
-        ["node", str(ROOT / "app/contract/validate-stream.mjs")],
-        input=json.dumps(events),
-        text=True,
-        capture_output=True,
-    )
-    if checked.returncode != 0:
-        return False
-    shapes = {"craft.answer": "AnswerMeta", "craft.originals": "AnswerOriginals"}
-    validators = {
-        kind: jsonschema.Draft7Validator(typescript_schema(shape)) for kind, shape in shapes.items()
-    }
-    return all(
-        validators[event["activityType"]].is_valid(event["content"])
-        for event in events
-        if event.get("activityType") in validators
-    )
+def test_route_keys_match_registry(http_routes) -> None:
+    declared = set(re.findall(r'"((?:GET|POST|PUT|PATCH|DELETE) /[^" ]+)"', ROUTES_TS))
+    assert set(http_routes) == declared
 
 
 def test_chat_stream_example_matches_browser_contract() -> None:
     events = [
         json.loads(line[6:])
-        for line in (ROOT / "app/contract/examples/chat-answer.sse").read_text().splitlines()
+        for line in (CONTRACT / "examples/chat-answer.sse").read_text().splitlines()
         if line.startswith("data: ")
     ]
     assert events and validate_chat_events(events)
@@ -207,8 +123,6 @@ def test_chat_stream_example_matches_browser_contract() -> None:
 
 
 def contract_section(text: str, heading: str) -> str:
-    import re
-
     matched = re.search(
         r"^" + re.escape(heading) + r"\n(.*?)(?=^#{2,3} |\Z)", text, flags=re.M | re.S
     )
@@ -216,90 +130,63 @@ def contract_section(text: str, heading: str) -> str:
     return matched[1]
 
 
-def test_contract_routes_match_app(settings) -> None:
-    import re
-
-    from app import create_app
-
+def test_contract_routes_match_app(http_routes) -> None:
     document = (ROOT / ".public/wiki/api-contract.md").read_text()
     table = contract_section(document, "### 5.1 Built")
-    rows = re.findall(r"^\| `((?:GET|POST|PUT|PATCH|DELETE)) ([^`]+)` \|", table, re.M)
-    declared = {
-        (method, re.sub(r":([A-Za-z][A-Za-z0-9_]*)", r"{\1}", path)) for method, path in rows
-    }
-    app = create_app(settings)
-    try:
-        actual = {
-            (method, getattr(route, "path", ""))
-            for route in app.routes
-            for method in (getattr(route, "methods", None) or [])
-            if method not in {"HEAD", "OPTIONS"}
-        }
-        assert declared == actual
-        assert len(rows) == len(declared), "Duplicate built route"
-    finally:
-        app.state.engine.dispose()
+    rows = re.findall(r"^\| `((?:GET|POST|PUT|PATCH|DELETE) [^`]+)` \|", table, re.M)
+    assert set(rows) == set(http_routes)
+    assert len(rows) == len(set(rows)), "Duplicate built route"
 
 
-def test_contract_tools_match_registry(settings) -> None:
-    import re
-
-    from app import create_app
-    from app.infrastructure.operations.registry import registry
-
-    app = create_app(settings)
-    try:
-        document = (ROOT / ".public/wiki/api-contract.md").read_text()
-        section = contract_section(document, "## 6. Agent tools")
-        rows = re.findall(r"^\| `([a-z0-9_]+)` \|", section, re.M)
-        expected = {op.tool_name for op in registry.values() if op.tool}
-        assert set(rows) == expected
-        assert len(rows) == len(expected), "Duplicate tool name"
-    finally:
-        app.state.engine.dispose()
-
-
-@pytest.mark.slow
-def test_contract_json_examples() -> None:
-    import re
-
-    import jsonschema
-
+def test_contract_tools_match_registry(operations) -> None:
     document = (ROOT / ".public/wiki/api-contract.md").read_text()
-    section = contract_section(document, "## 15. Examples")
-    rows = re.findall(
-        r"^\| `([A-Z]+ /[^`]+)` \| `([A-Za-z]+(?:\[\])?)` \| `([^`]+)` \|", section, re.M
+    section = contract_section(document, "## 6. Agent tools")
+    rows = re.findall(r"^\| `([a-z0-9_]+)` \|", section, re.M)
+    expected = {op.tool_name for op in operations.values() if op.tool}
+    assert set(rows) == expected
+    assert len(rows) == len(expected), "Duplicate tool name"
+
+
+def json_responses() -> dict[str, str]:
+    """Each JSON route in routes.ts with its response type, such as "Job" or "Job[]"."""
+    return dict(
+        re.findall(r'"([A-Z]+ /[^"]+)": [^\n]*?response: T\.([A-Za-z]+(?:\[\])?)', ROUTES_TS)
     )
-    expected = {
-        route: shape
-        for route, shape in re.findall(
-            r'"([A-Z]+ /[^"]+)": [^\n]*?response: T\.([A-Za-z]+(?:\[\])?)',
-            (ROOT / "app/contract/routes.ts").read_text(),
-        )
-    }
-    assert {route: shape for route, shape, _ in rows} == expected
-    assert len(rows) == len(expected), "Duplicate response example"
-    schemas = {}
-    for _, shape, path in rows:
-        name = shape.removesuffix("[]")
-        if name not in schemas:
-            schemas[name] = typescript_schema(name)
-        schema = schemas[name]
+
+
+def route_examples() -> dict[str, str]:
+    """The example file each routes.ts line names in its trailing comment."""
+    return dict(
+        re.findall(r'^\s*"([A-Z]+ /[^"]+)":.*//.*\bexample: ([\w-]+\.json)$', ROUTES_TS, re.M)
+    )
+
+
+def test_examples_convert_to_route_outputs(http_routes) -> None:
+    examples, responses = route_examples(), json_responses()
+    assert set(examples) == set(responses), "Each JSON route names its example"
+    for route, file_name in examples.items():
+        output = http_routes[route].output
+        assert type_name(output) == responses[route], route
+        msgspec.convert(json.loads((CONTRACT / "examples" / file_name).read_text()), output)
+
+
+def test_examples_match_typescript() -> None:
+    responses = json_responses()
+    for route, file_name in route_examples().items():
+        shape = responses[route]
+        schema = typescript_schema(shape.removesuffix("[]"))
         if shape.endswith("[]"):
             schema = {
                 "type": "array",
                 "items": {"$ref": schema["$ref"]},
                 "definitions": schema["definitions"],
             }
-        example = ROOT / path
-        assert example.parent == ROOT / "app/contract/examples" and example.is_file()
-        assert jsonschema.Draft7Validator(schema).is_valid(json.loads(example.read_text()))
+        example = json.loads((CONTRACT / "examples" / file_name).read_text())
+        assert jsonschema.Draft7Validator(schema).is_valid(example), file_name
 
 
 def test_run_recovery_example_wire_shape() -> None:
-    import jsonschema
-
-    example = json.loads((ROOT / "app/contract/examples/run-recovery.json").read_text())
+    example = json.loads((CONTRACT / "examples/run-recovery.json").read_text())
     parsed = msgspec.convert(example, RunRecovery)
     assert msgspec.to_builtins(parsed) == example
     assert parsed.status == "paused" and parsed.approval_status == "pending"
