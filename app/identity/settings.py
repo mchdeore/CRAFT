@@ -8,16 +8,6 @@ import msgspec
 
 from app.infrastructure.config.env import read_env
 
-FIELDS = {
-    "database_host",
-    "database_port",
-    "database_name",
-    "id_db_password",
-    "id_signing_key",
-    "id_public_url",
-    "log_level",
-}
-
 
 class IdentitySettings(msgspec.Struct, frozen=True, kw_only=True):
     database_host: str = "localhost"
@@ -36,7 +26,8 @@ class IdentitySettings(msgspec.Struct, frozen=True, kw_only=True):
         raw = {
             name: value
             for key, value in source.items()
-            if key.startswith("CRAFT_") and (name := key.removeprefix("CRAFT_").lower()) in FIELDS
+            if key.startswith("CRAFT_")
+            and (name := key.removeprefix("CRAFT_").lower()) in cls.__struct_fields__
         }
         try:
             settings = msgspec.convert(raw, cls, strict=False)
