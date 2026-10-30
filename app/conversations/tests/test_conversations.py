@@ -282,7 +282,6 @@ def test_file_list_reads_no_file_bytes(chat):
     assert files and not any("workspace_files.bytes" in s for s in files)
 
 
-
 def test_require_owned_refuses_an_archived_conversation_only_when_active(chat):
     from sqlalchemy import func
 
