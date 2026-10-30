@@ -173,7 +173,7 @@ def test_a_run_credential_outlives_the_longest_run(owner_engine, person):
         expires = connection.execute(
             select(runs.c.token_expires_at).where(runs.c.id == run)
         ).scalar_one()
-    assert expires > datetime.now(UTC) + timedelta(seconds=900)
+    assert expires > datetime.now(UTC) + timedelta(seconds=storage.RUN_SECONDS)
 
 
 def test_a_lost_worker_ends_its_run_through_a_logged_operation(owner_engine, person):
