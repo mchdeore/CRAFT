@@ -114,3 +114,23 @@ def test_feature_calls_use_handlers() -> None:
             for line, module in forbidden_imports(path.read_text(), feature, package)
         )
     assert not violations, "\n".join(violations)
+
+
+def test_infrastructure_resolves_accounts_through_its_interface() -> None:
+    """`access.py` and `mcp/stdio.py` name no accounts table and don't use metadata."""
+    from app.accounts import storage
+
+    accounts_tables = {
+        table.name
+        for table in [
+            storage.users,
+            storage.user_roles,
+            storage.auth_sessions,
+            storage.workspace_tokens,
+            storage.local_credentials,
+        ]
+    }
+    for path in ["app/infrastructure/access.py", "app/infrastructure/mcp/stdio.py"]:
+        source = (ROOT / path).read_text()
+        assert "metadata" not in source, path
+        assert not set(re.findall(r'"(\w+)"', source)) & accounts_tables, path

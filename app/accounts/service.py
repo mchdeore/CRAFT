@@ -393,7 +393,7 @@ def list_users(caller: Caller):
         ]
 
 
-def _locked_account(session, username: str):
+def _locked_user_id(session, username: str):
     """The account's ID, its row locked for this transaction; NotFound when there is none."""
     user = storage.account(session, username.lower(), lock=True)
     if user is None:
@@ -405,9 +405,11 @@ def promote(caller: Caller, username: str) -> None:
     if caller.sessions is None:
         raise NotFound()
     with unit_of_work(caller.sessions) as session:
-        user = _locked_account(session, username)
+        user_id = _locked_user_id(session, username)
         session.execute(
-            insert(storage.user_roles).values(user_id=user, role="admin").on_conflict_do_nothing()
+            insert(storage.user_roles)
+            .values(user_id=user_id, role="admin")
+            .on_conflict_do_nothing()
         )
 
 
@@ -419,17 +421,17 @@ def reset_password(caller: Caller, username: str, password: str) -> None:
         raise InvalidInput()
     password_hash = PASSWORDS.hash(password)
     with unit_of_work(caller.sessions) as session:
-        user = _locked_account(session, username)
+        user_id = _locked_user_id(session, username)
         at = access.now()
         session.execute(
             insert(storage.local_credentials)
-            .values(user_id=user, password_hash=password_hash)
+            .values(user_id=user_id, password_hash=password_hash)
             .on_conflict_do_update(
                 index_elements=[storage.local_credentials.c.user_id],
                 set_={"password_hash": password_hash, "updated_at": at},
             )
         )
-        storage.revoke_sessions(session, user, at, "password_reset")
+        storage.revoke_sessions(session, user_id, at, "password_reset")
 
 
 def disable(caller: Caller, username: str) -> None:
@@ -437,12 +439,12 @@ def disable(caller: Caller, username: str) -> None:
     if caller.sessions is None:
         raise NotFound()
     with unit_of_work(caller.sessions) as session:
-        user = _locked_account(session, username)
+        user_id = _locked_user_id(session, username)
         at = access.now()
         session.execute(
-            storage.users.update().where(storage.users.c.id == user).values(disabled_at=at)
+            storage.users.update().where(storage.users.c.id == user_id).values(disabled_at=at)
         )
-        storage.revoke_sessions(session, user, at, "disabled")
+        storage.revoke_sessions(session, user_id, at, "disabled")
 
 
 WORKSPACE_TOKEN_ORIGINS = frozenset({"http", "python"})

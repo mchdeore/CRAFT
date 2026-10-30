@@ -193,26 +193,33 @@ def test_sign_out_and_password_reset_revoke_sessions(account, owner_engine) -> N
         )
 
 
-def test_infrastructure_resolves_accounts_through_its_interface() -> None:
-    """Cookies, workspace tokens and local accounts resolve through `accounts.handlers`."""
-    import re
-
-    from app.infrastructure.paths import ROOT
-
-    accounts_tables = {
-        table.name
-        for table in [
-            storage.users,
-            storage.user_roles,
-            storage.auth_sessions,
-            storage.workspace_tokens,
-            storage.local_credentials,
-        ]
-    }
-    for path in ["app/infrastructure/access.py", "app/infrastructure/mcp/stdio.py"]:
-        source = (ROOT / path).read_text()
-        assert "metadata" not in source, path
-        assert not set(re.findall(r'"(\w+)"', source)) & accounts_tables, path
+def test_resolve_account_finds_only_an_enabled_account(app, settings, owner_engine) -> None:
+    username = "local_" + uuid4().hex
+    with owner_engine.begin() as connection:
+        user = connection.execute(
+            storage.users.insert()
+            .values(username=username, display_name="Test")
+            .returning(storage.users.c.id)
+        ).scalar_one()
+        connection.execute(storage.user_roles.insert().values(user_id=user, role="member"))
+    anonymous = Caller(sessions=app.state.sessions, settings=settings, origin="mcp")
+    try:
+        found = service.resolve_account(anonymous, username.upper())
+        assert (found.user_id, found.roles, found.origin) == (user, frozenset({"member"}), "mcp")
+        assert service.resolve_account(anonymous, "unknown_" + uuid4().hex) == anonymous
+        with owner_engine.begin() as connection:
+            connection.execute(
+                storage.users.update()
+                .where(storage.users.c.id == user)
+                .values(disabled_at=access.now())
+            )
+        assert service.resolve_account(anonymous, username) == anonymous
+    finally:
+        with owner_engine.begin() as connection:
+            connection.execute(
+                storage.user_roles.delete().where(storage.user_roles.c.user_id == user)
+            )
+            connection.execute(storage.users.delete().where(storage.users.c.id == user))
 
 
 def test_cross_origin_write_is_refused(account) -> None:
