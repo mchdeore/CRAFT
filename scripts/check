@@ -45,7 +45,8 @@ lock_db() { # one run at a time checks and starts the container; a dead owner's 
   until mkdir "$LOCK" 2>/dev/null; do
     pid= worktree=
     read -r pid worktree 2>/dev/null <"$LOCK/owner" || true
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then rm -rf "$LOCK"; continue; fi
+    if [ -z "$pid" ]; then sleep 1; continue; fi # its owner is still writing it
+    if ! kill -0 "$pid" 2>/dev/null; then rm -rf "$LOCK"; continue; fi
     [ -n "$waiting" ] || echo "waiting for another scripts/check (pid $pid, worktree $worktree)"
     waiting=1; sleep 5
   done
