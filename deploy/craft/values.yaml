@@ -54,7 +54,7 @@ workers:
     queues: agent,bulk
     concurrency: { agent: 20, bulk: 2 }
     memory: 1Gi
-    stopSeconds: 900         # a chat turn's ceiling
+    stopSeconds: 900         # a chat turn's ceiling (app.agent.storage.RUN_SECONDS)
     inApiPod: true
   - name: worker-interactive
     queues: interactive

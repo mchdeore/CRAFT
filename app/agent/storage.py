@@ -183,25 +183,51 @@ def last_event(session: Session, run):
 
 
 def interrupt(session: Session, run):
-    """A dead worker's run ends failed; it is never re-run by itself. Returns the run's owner
-    and mode, or None when it was not running."""
+    """A run that can't end by itself (its worker died, or its finish failed) ends failed; it
+    is never re-run by itself. Returns the run's owner and mode, or None when it was not
+    running."""
     return session.execute(
         agent_runs.update()
         .where(agent_runs.c.id == run, agent_runs.c.status == "running")
-        .values(status="failed", ended_at=func.now(), token_sha256=None, token_expires_at=None)
+        .values(
+            status="failed",
+            end_reason="failed",
+            ended_at=func.now(),
+            token_sha256=None,
+            token_expires_at=None,
+        )
         .returning(agent_runs.c.started_by, agent_runs.c.mode)
     ).first()
 
 
+def cancel_paused(session: Session, user, run) -> bool:
+    """End an owned paused run as cancelled; False for any other run."""
+    cancelled = session.execute(
+        agent_runs.update()
+        .where(
+            agent_runs.c.id == run,
+            agent_runs.c.started_by == user,
+            agent_runs.c.status == "paused",
+        )
+        .values(status="cancelled", end_reason="cancelled", ended_at=func.now())
+        .returning(agent_runs.c.id)
+    ).first()
+    return cancelled is not None
+
+
 def prune_events(session: Session, hours: int) -> None:
-    """Events and inputs go a day after their run ends; messages stay the lasting record."""
+    """Events and inputs go a day after their run ends; messages stay the lasting record. A
+    running or paused run keeps them all, so a resume still finds its input."""
+    live = select(agent_runs.c.id).where(agent_runs.c.status.in_(["running", "paused"]))
     ended = select(agent_runs.c.id).where(
         agent_runs.c.ended_at < func.now() - func.make_interval(0, 0, 0, 0, hours)
     )
     orphaned = agent_run_inputs.c.created_at < func.now() - func.make_interval(
         0, 0, 0, 0, hours * 2
     )
-    stale = select(agent_run_inputs.c.run_id).where(agent_run_inputs.c.run_id.in_(ended) | orphaned)
+    stale = select(agent_run_inputs.c.run_id).where(
+        agent_run_inputs.c.run_id.in_(ended) | orphaned, agent_run_inputs.c.run_id.not_in(live)
+    )
     session.execute(agent_run_events.delete().where(agent_run_events.c.run_id.in_(stale)))
     session.execute(agent_run_inputs.delete().where(agent_run_inputs.c.run_id.in_(stale)))
 
@@ -213,23 +239,39 @@ def _lock_account(session: Session, user) -> None:
     )
 
 
-# Longer than any run segment can take (runtime.RUN_SECONDS plus its wait for a worker).
-SEGMENT_SECONDS = 900 + 300
+# The longest a run segment may run. settings.agent_run_seconds, queue.GRACE and the chart's
+# worker stopSeconds repeat it, since infrastructure doesn't import agent.
+RUN_SECONDS = 900
+# Longer than any run segment can take (RUN_SECONDS plus its wait for a worker).
+SEGMENT_SECONDS = RUN_SECONDS + 300
+
+
+def _recent():
+    """Runs with a segment queued within SEGMENT_SECONDS: only these can still be running."""
+    return select(agent_run_inputs.c.run_id).where(
+        agent_run_inputs.c.created_at
+        > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, SEGMENT_SECONDS)
+    )
+
+
+def stalled(session: Session) -> list:
+    """Runs left "running" past any segment's time: their finish failed, unless a job still
+    holds them (service.end_stalled checks)."""
+    running = select(agent_runs.c.id).where(
+        agent_runs.c.status == "running", agent_runs.c.id.not_in(_recent())
+    )
+    return list(session.execute(running).scalars())
 
 
 def _refuse_second_task(session: Session, user) -> None:
     """One running task-mode run per person, so a few people can't fill the agent worker.
     A run counts only while its newest segment is recent: a row left "running" by a lost
     database connection must not lock its owner out of task mode."""
-    recent = select(agent_run_inputs.c.run_id).where(
-        agent_run_inputs.c.created_at
-        > func.now() - func.make_interval(0, 0, 0, 0, 0, 0, SEGMENT_SECONDS)
-    )
     running = select(agent_runs.c.id).where(
         agent_runs.c.started_by == user,
         agent_runs.c.mode == "task",
         agent_runs.c.status == "running",
-        agent_runs.c.id.in_(recent),
+        agent_runs.c.id.in_(_recent()),
     )
     if session.execute(running.limit(1)).first() is not None:
         raise RateLimited()

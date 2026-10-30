@@ -65,6 +65,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     model_endpoint: str = ""
     model_key: str = ""
     model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=16000)] = 4000
+    # At most app.agent.storage.RUN_SECONDS (infrastructure doesn't import agent).
     agent_run_seconds: Annotated[int, msgspec.Meta(ge=30, le=900)] = 120
     wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"

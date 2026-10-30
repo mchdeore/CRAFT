@@ -213,6 +213,16 @@ def status(session, identifier):
     ).scalar_one()
 
 
+def pending(session, run):
+    """The run's undecided requests."""
+    from sqlalchemy import select
+
+    undecided = select(approval_requests.c.id).where(
+        approval_requests.c.run_id == run, status_expression() == "pending"
+    )
+    return list(session.execute(undecided).scalars())
+
+
 def approved_call(session, user, run, conversation, operation, digest, tool_call_id=None):
     """Find an unconsumed frozen action for the authenticated active run."""
     from uuid import UUID

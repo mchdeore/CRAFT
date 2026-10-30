@@ -256,7 +256,8 @@ async def run_events(caller: Caller, request: RunEventsRef) -> AsyncIterator[AGU
 
 @operation(SIGNED_IN, post="/agent/runs/{run}/cancel")
 def cancel_run(caller: Caller, request: RunRef) -> None:
-    """Stop an owned queued or running run; its stream ends with RUN_ERROR run_cancelled."""
+    """Stop an owned queued, running or paused run; its stream ends with RUN_ERROR
+    run_cancelled. A paused run's pending approval is rejected."""
     from app.agent import service
 
     service.cancel_run(caller, request.run)

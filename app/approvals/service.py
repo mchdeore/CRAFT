@@ -393,3 +393,8 @@ def revoke_grant(caller, identifier):
 def status_expression():
     """Return the existing append-only event status expression without reading data."""
     return storage.status_expression()
+
+
+def reject_pending(session, user, run):
+    for identifier in storage.pending(session, run):
+        storage.append_event(session, identifier, "rejected", user, None)
