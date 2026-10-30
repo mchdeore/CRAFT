@@ -50,6 +50,16 @@ class TooLarge(ApiError):
     status, code, message = 413, "too_large", "The file is too large."
 
 
+class WorkspaceUnavailable(ApiError):
+    """The Hub or the person's server failed, can't be reached, or refused CRAFT's token."""
+
+    status, code, message = 503, "workspace_unavailable", "The workspace is unavailable."
+
+
+class RunTimeout(ApiError):
+    status, code, message = 504, "run_timeout", "The code did not finish in time."
+
+
 def error_response(error: ApiError) -> Response:
     body = ApiErrorBody(
         code=error.code, message=error.message, request_id=current_request_id(), fields=error.fields

@@ -35,6 +35,7 @@ export interface Mission { key: string; title: string; currentStage: string; ali
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }
 export interface FieldError { path: string; message: string }
+/** `code` also takes `workspace_unavailable` (503: the Hub or the workspace failed), `run_timeout` (504: code ran past its limit and was interrupted) and `not_understood` (400: the calculation service couldn't read the expression; `fields` carries its reply). */
 export interface ApiError { code: string; message: string; requestId: string; fields?: FieldError[] }
 export type Classification = "unclassified" | "protected-a" | "protected-b";
 export interface CitationHandle { item: string; version: number; block: number; locator: string; quoteSha256: string; simulated: boolean }
