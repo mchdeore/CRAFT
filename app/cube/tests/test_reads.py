@@ -1,4 +1,7 @@
-"""Find, get, compare and similar missions read only what the caller's grants reach."""
+"""Find, get, compare and similar missions read only what the caller's grants reach.
+
+The access test at the end pins each read's answer for four kinds of caller, library reads too.
+"""
 
 import hashlib
 from dataclasses import replace
@@ -15,15 +18,27 @@ from app.cube.handlers import (
     Condition,
     FindMissions,
     MissionRef,
+    PrepareValues,
     SimilarMissions,
     compare_missions,
     find_missions,
     get_mission,
+    prepare_values,
     similar_missions,
 )
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import NotFound
 from app.library.convert import convert
+from app.library.handlers import (
+    ChunkRange,
+    DocumentList,
+    LibrarySearch,
+    RelationsRequest,
+    list_documents,
+    read_chunks,
+    relations,
+    search,
+)
 from app.tests.support import rows
 from app.tests.support.cube import cube_source as cube_source
 
@@ -34,7 +49,8 @@ BUDGET = b"# 1 Budget\n\n| Parameter | Value | Unit |\n|---|---|---|\n| Peak pow
 def cube(cube_source):
     """cube_source with a second mission, power in W and kW, and callers with chosen grants.
 
-    `value` and `facet` add rows to either mission, citing that mission's budget document.
+    `value` and `facet` add rows to either mission, citing that mission's budget document unless
+    `facet` is given other sources.
     """
     source, owner, provider = cube_source, cube_source["owner"], cube_source["provider"]
     users, roles = m.metadata.tables["users"], m.metadata.tables["user_roles"]
@@ -115,7 +131,7 @@ def cube(cube_source):
                 .returning(m.cube_values.c.id)
             ).scalar_one()
 
-    def facet(mission, name, vector):
+    def facet(mission, name, vector, sources=None):
         with owner.begin() as connection:
             text = connection.execute(
                 m.facet_texts.insert()
@@ -123,7 +139,7 @@ def cube(cube_source):
                     mission_key=mission,
                     facet=name,
                     text="Generated " + name,
-                    sources=[documents[mission]],
+                    sources=sources or [documents[mission]],
                     model="scripted",
                 )
                 .returning(m.facet_texts.c.id)
@@ -137,6 +153,7 @@ def cube(cube_source):
                     embedding=vector + [0.0] * (1536 - len(vector)),
                 )
             )
+        return text
 
     yield source | {
         "other": other,
@@ -245,3 +262,146 @@ def test_similar_missions_score_readable_facet_evidence(cube):
 
     with pytest.raises(NotFound):
         similar_missions(reader, SimilarMissions(key="msn-unknown"))
+
+
+# Today's answers, kept on purpose (X4, agreed 2026-10-29). The document rule reads every document
+# to an admin and a document outside every mission to everyone; the cube rule and the mission
+# listing need a grant, for admins too. Relations use the document rule for documents and the cube
+# rule for values.
+EXPECTED = {
+    "admin": {
+        "catalog": ["a-budget", "a-engineering", "b-engineering", "handbook"],
+        "search": ["a-budget", "a-engineering", "b-engineering", "handbook"],
+        "find": {},
+        "similar": "not found",
+        # Without a readable mission, intake goes on with the mission unresolved.
+        "intake": {"budget silo": (None, 2), "no silo": "not found"},
+        "relations": [
+            "a-budget",
+            "a-budget@1",
+            "a-engineering",
+            "a-engineering@1",
+            "facet:facet-a",
+            "mission:a",
+        ],
+    },
+    "mission-wide": {
+        "catalog": ["a-budget", "a-engineering", "b-engineering", "handbook"],
+        "search": ["a-budget", "a-engineering", "b-engineering", "handbook"],
+        "find": {"a": ["value-a-budget"], "b": ["value-b-engineering"]},
+        "similar": [("b", {"design": 1.0, "operations": 1.0})],
+        "intake": {"budget silo": ("a", 2), "no silo": ("a", 2)},
+        "relations": [
+            "a-budget",
+            "a-budget@1",
+            "a-engineering",
+            "a-engineering@1",
+            "facet:facet-a",
+            "mission:a",
+            "value:value-a-budget",
+            "value:value-a-engineering",
+        ],
+    },
+    "silo-limited": {
+        "catalog": ["a-engineering", "b-engineering", "handbook"],
+        "search": ["a-engineering", "b-engineering", "handbook"],
+        "find": {"a": ["value-a-engineering"], "b": ["value-b-engineering"]},
+        # The operations facet cites the budget document only, which the silo grant can't read.
+        "similar": [("b", {"design": 1.0, "operations": None})],
+        "intake": {"budget silo": "not found", "no silo": ("a", 2)},
+        "relations": [
+            "a-engineering",
+            "a-engineering@1",
+            "facet:facet-a",
+            "mission:a",
+            "value:value-a-engineering",
+        ],
+    },
+    "no grant": {
+        "catalog": ["handbook"],
+        "search": ["handbook"],
+        "find": {},
+        "similar": "not found",
+        "intake": {"budget silo": "not found", "no silo": "not found"},
+        "relations": "not found",
+    },
+}
+
+
+@pytest.mark.parametrize("who", list(EXPECTED))
+def test_each_caller_reads_what_the_grant_rules_give_it(cube, who):
+    a, b, provider = cube["mission"], cube["other"], cube["provider"]
+    plan = f"missions/{a}/budget/st3-design/plan.md"
+    provider.write_content(plan, b"# Plan\n\nPeak power budget.\n")
+    provider.write_content("library/handbook.md", BUDGET.replace(b"350", b"500"))
+    rows.load(cube["owner"], provider)
+    paths = {record["path"]: key for key, record in provider.items().items()}
+    names = {
+        a: "a",
+        b: "b",
+        cube["documents"][a]: "a-engineering",
+        paths[plan]: "a-budget",
+        cube["documents"][b]: "b-engineering",
+        paths["library/handbook.md"]: "handbook",
+        cube["value"](a, "engineering", 400): "value-a-engineering",
+        cube["value"](a, "budget", 900): "value-a-budget",
+        cube["value"](b, "engineering", 350): "value-b-engineering",
+        cube["facet"](a, "design", [1.0]): "facet-a",
+        cube["facet"](b, "design", [1.0]): "facet-b",
+        cube["facet"](a, "operations", [0.0, 1.0], [paths[plan]]): "facet-a-operations",
+        cube["facet"](b, "operations", [0.0, 1.0]): "facet-b-operations",
+    }
+    names = {str(key): name for key, name in names.items()}
+    caller = {
+        "admin": lambda: replace(cube["caller"], user_id=uuid4(), roles=frozenset({"admin"})),
+        "mission-wide": lambda: cube["member"]((a, None), (b, None)),
+        "silo-limited": lambda: cube["member"]((a, "engineering"), (b, "engineering")),
+        "no grant": lambda: cube["member"](),
+    }[who]()
+
+    def named(keys):
+        return sorted(names[str(key)] for key in keys if str(key) in names)
+
+    def node(identifier):
+        for key, name in names.items():
+            identifier = identifier.replace(key, name)
+        return identifier
+
+    def answer(read):
+        try:
+            return read()
+        except NotFound:
+            return "not found"
+
+    def table(item):
+        page = ChunkRange(item=item, version=1, from_block=1, to_block=1)
+        return read_chunks(cube["caller"], page).chunks[0].handle
+
+    def intake(request):
+        result = prepare_values(caller, request)
+        mission = names[result.mission] if result.mission else None
+        return mission, len(result.candidates)
+
+    # With a silo, intake needs the cube rule for it; without one, the mission listing decides.
+    in_budget = PrepareValues(handle=table(cube["documents"][a]), silo="budget")
+    no_silo = PrepareValues(handle=table(paths["library/handbook.md"]), mission=a)
+    catalog = list_documents(caller, DocumentList(limit=50)).documents
+    hits = search(caller, LibrarySearch(query="peak power", kinds=["chunk"])).hits
+    similar = SimilarMissions(key=a, facets=["design", "operations"])
+    graph = RelationsRequest(item=cube["documents"][a])
+    assert {
+        "catalog": named(document.item for document in catalog),
+        "search": named({hit.handle.item for hit in hits}),
+        "find": {names[key]: named(ids) for key, ids in found(caller, above(300)).items()},
+        "similar": answer(
+            lambda: [
+                (names[row.mission.key], row.facet_scores)
+                for row in similar_missions(caller, similar).missions
+            ]
+        ),
+        "intake": {
+            "budget silo": answer(lambda: intake(in_budget)),
+            "no silo": answer(lambda: intake(no_silo)),
+        },
+        "relations": answer(lambda: sorted(node(n.id) for n in relations(caller, graph).nodes)),
+    } == EXPECTED[who]

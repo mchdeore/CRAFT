@@ -2,18 +2,20 @@
 
 from uuid import UUID
 
-from sqlalchemy import and_, column, func, or_, select, table, text, tuple_
+from sqlalchemy import and_, column, func, select, table, text, tuple_
 from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
-from app.infrastructure.grants import readable
+from app.infrastructure.grants import document_readable
 
 
 def item(session: Session, caller: Caller, key: str):
     return (
         session.execute(
-            select(m.provider_items).where(m.provider_items.c.item == key, readable(caller))
+            select(m.provider_items).where(
+                m.provider_items.c.item == key, document_readable(caller)
+            )
         )
         .mappings()
         .first()
@@ -28,17 +30,28 @@ def catalog_items(session: Session, caller: Caller):
     return list(
         session.execute(
             select(m.provider_items.c.item)
-            .where(readable(caller), m.provider_items.c.deleted_at.is_(None), indexed)
+            .where(document_readable(caller), m.provider_items.c.deleted_at.is_(None), indexed)
             .order_by(m.provider_items.c.item)
             .limit(201)
         ).scalars()
     )
 
 
+# What reads use from a version and a block: not the summary, OCR text or search vectors.
+VERSION_COLUMNS = [
+    m.doc_versions.c[name]
+    for name in ["id", "item", "version", "sha256", "media_type", "indexed_at"]
+]
+BLOCK_COLUMNS = [
+    m.chunks.c[name]
+    for name in ["id", "block", "kind", "heading_path", "locator", "text", "text_sha256"]
+]
+
+
 def versions(session: Session, key: str):
     return (
         session.execute(
-            select(m.doc_versions)
+            select(*VERSION_COLUMNS)
             .where(m.doc_versions.c.item == key)
             .order_by(m.doc_versions.c.version)
         )
@@ -50,7 +63,7 @@ def versions(session: Session, key: str):
 def blocks(session: Session, version_id, first: int = 1, last: int = 2147483647):
     return (
         session.execute(
-            select(m.chunks)
+            select(*BLOCK_COLUMNS)
             .where(m.chunks.c.doc_version_id == version_id, m.chunks.c.block.between(first, last))
             .order_by(m.chunks.c.block)
         )
@@ -77,22 +90,29 @@ def differences(session: Session, before, after):
     )
 
 
-def provider_readable(session: Session, caller: Caller, record) -> bool:
-    mission = record["mission_key"]
-    if mission is None or "admin" in caller.roles:
-        return True
+def summary(session: Session, version_id):
     return (
         session.execute(
-            select(m.mission_grants.c.user_id)
-            .where(
-                m.mission_grants.c.user_id == caller.user_id,
-                m.mission_grants.c.mission_key == mission,
-                or_(m.mission_grants.c.silo.is_(None), m.mission_grants.c.silo == record["silo"]),
+            select(m.doc_versions.c.summary, m.doc_versions.c.summary_kind).where(
+                m.doc_versions.c.id == version_id
             )
-            .limit(1)
-        ).first()
-        is not None
+        )
+        .mappings()
+        .one()
     )
+
+
+def latest_versions(session: Session, items) -> dict:
+    """Each item's latest indexed version, as {item: (version, sha256)}."""
+    return {
+        row.item: (row.version, bytes(row.sha256))
+        for row in session.execute(
+            select(m.doc_versions.c.item, m.doc_versions.c.version, m.doc_versions.c.sha256)
+            .where(m.doc_versions.c.item.in_(items))
+            .distinct(m.doc_versions.c.item)
+            .order_by(m.doc_versions.c.item, m.doc_versions.c.version.desc())
+        )
+    }
 
 
 def facet_records(session: Session, missions, facets):
@@ -156,7 +176,7 @@ def candidates(session: Session, caller: Caller, request, query_vector, model, *
         latest,
         and_(m.doc_versions.c.item == latest.c.item, m.doc_versions.c.version == latest.c.version),
     )
-    filters = [readable(caller), m.provider_items.c.deleted_at.is_(None)]
+    filters = [document_readable(caller), m.provider_items.c.deleted_at.is_(None)]
     if items is not None:
         filters.append(m.provider_items.c.item.in_(items))
     for field, values in [
@@ -174,7 +194,7 @@ def candidates(session: Session, caller: Caller, request, query_vector, model, *
             continue
         if kind == "chunk":
             source = base.join(m.chunks, m.chunks.c.doc_version_id == m.doc_versions.c.id)
-            fields = [*common, m.chunks]
+            fields = [*common, *BLOCK_COLUMNS]
             tsv = m.chunks.c.tsv
             owner = m.chunks.c.id
         else:
@@ -287,7 +307,7 @@ def relation_documents(session: Session, caller: Caller, items=None, mission=Non
     """Readable, not deleted documents, by item and/or mission."""
     query = select(
         m.provider_items.c.item, m.provider_items.c.title, m.provider_items.c.mission_key
-    ).where(readable(caller), m.provider_items.c.deleted_at.is_(None))
+    ).where(document_readable(caller), m.provider_items.c.deleted_at.is_(None))
     if items is not None:
         query = query.where(m.provider_items.c.item.in_(list(items)))
     if mission is not None:
