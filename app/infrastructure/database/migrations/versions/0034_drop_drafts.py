@@ -2,8 +2,8 @@
 
 from alembic import op
 
-revision: str = "0032"
-down_revision: str | None = "0031"
+revision: str = "0034"
+down_revision: str | None = "0033"
 branch_labels = None
 depends_on = None
 
