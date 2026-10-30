@@ -13,7 +13,7 @@ from starlette.responses import Response
 from app.infrastructure.access import Caller
 from app.infrastructure.database.unit_of_work import has_ambient_transaction, unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
-from app.infrastructure.grants import document_access
+from app.infrastructure.grants import DocumentAccess, document_access
 from app.infrastructure.operations import observe
 from app.infrastructure.operations.context import current_call
 from app.infrastructure.provider import source_provider as configured_provider
@@ -323,17 +323,22 @@ def source_content(provider, key: str, version: int):
         raise NotFound() from None
 
 
+def source_matches(access: DocumentAccess, source, version: int, sha256: bytes) -> bool:
+    """The live source is not withdrawn, is readable, and holds this version unchanged."""
+    original = next((row for row in source["versions"] if row["version"] == version), None)
+    return (
+        source["deleted_at"] is None
+        and access.readable(source)
+        and original is not None
+        and original.get("sha256") == sha256.hex()
+    )
+
+
 def readable_source_version(session, caller: Caller, key: str, version: int | None, source):
     item, selected, versions = readable_version(session, caller, key, version)
-    original = next(
-        (row for row in source["versions"] if row["version"] == selected["version"]), None
-    )
-    if (
-        item["deleted_at"] is not None
-        or source["deleted_at"] is not None
-        or not document_access(session, caller).readable(source)
-        or original is None
-        or original.get("sha256") != bytes(selected["sha256"]).hex()
+    access = document_access(session, caller)
+    if item["deleted_at"] is not None or not source_matches(
+        access, source, selected["version"], bytes(selected["sha256"])
     ):
         raise NotFound()
     return item, selected, versions
@@ -353,17 +358,9 @@ def documents(caller: Caller, request):
         # Listed when the latest indexed version is the source's latest, unchanged and readable.
         live = sources.get(key)
         version, sha256 = latest[key]
-        original = (
-            next((row for row in live["versions"] if row["version"] == version), None)
-            if live is not None
-            else None
-        )
         if (
             live is None
-            or live["deleted_at"] is not None
-            or not access.readable(live)
-            or original is None
-            or original.get("sha256") != sha256.hex()
+            or not source_matches(access, live, version, sha256)
             or max(row["version"] for row in live["versions"]) != version
         ):
             continue
