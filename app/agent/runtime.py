@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 import re
 from collections.abc import AsyncGenerator
 from contextlib import contextmanager, suppress
@@ -62,6 +63,7 @@ WORKSPACE_FAILURES = (
     RuntimeError,
 )
 _read_only_query = ContextVar("read_only_query", default=False)
+logger = logging.getLogger("craft.workspace")
 
 
 @contextmanager
@@ -524,8 +526,14 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
                         jupyter,
                     )
                     workspace_instructions += await workspace_controller.start()
-            except WORKSPACE_FAILURES:
+            except WORKSPACE_FAILURES as error:
                 # The answer goes on without its workspace tools; what was opened closes now.
+                logger.warning(
+                    "workspace unavailable for a run",
+                    extra={
+                        "fields": {"run_id": request.run_id, "error_type": type(error).__name__}
+                    },
+                )
                 for opened in (workspace_controller, workspace_transport):
                     if opened is not None:
                         with suppress(Exception):

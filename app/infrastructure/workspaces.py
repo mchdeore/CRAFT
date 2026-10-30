@@ -20,7 +20,7 @@ from uuid import UUID
 import httpx
 
 from app.infrastructure import hub
-from app.infrastructure.errors import ApiError, RunTimeout
+from app.infrastructure.errors import ApiError, RunTimeout, WorkspaceUnavailable
 
 RUN_SECONDS = 100  # below the agent's 120 s MCP request timeout, so it hears run_timeout
 OUTPUT_LIMIT = 64 * 1024
@@ -106,13 +106,15 @@ async def run_in_kernel(
 ) -> dict[str, Any]:
     """Execute code once in the owner's selected kernel and collect its visible outputs.
 
-    Code still running after ``seconds`` is interrupted, as JupyterLab's stop button does, and
-    the call answers ``RunTimeout``.
+    After ``seconds`` the call answers ``RunTimeout``. Code the kernel has started is
+    interrupted, as JupyterLab's stop button does; a request still queued behind the owner's own
+    cell leaves that cell running.
     """
     if not target.kernel_id:
         raise ValueError("No kernel is selected")
     from jupyter_client.session import Session
     from websockets.asyncio.client import connect as open_channel
+    from websockets.exceptions import WebSocketException
 
     session = Session(username="craft-workspace")
     message = session.msg(
@@ -129,6 +131,7 @@ async def run_in_kernel(
     message["channel"] = "shell"
     identifier = message["header"]["msg_id"]
     collected = KernelOutputs()
+    sent = started = False
     try:
         async with asyncio.timeout(seconds):
             async with open_channel(
@@ -141,11 +144,13 @@ async def run_in_kernel(
                 max_size=8 * 1024 * 1024,
             ) as channel:
                 await channel.send(session.pack(message).decode())
+                sent = True
                 replied = idle = False
                 while not (replied and idle):
                     reply = json.loads(await channel.recv())
                     if reply.get("parent_header", {}).get("msg_id") != identifier:
                         continue
+                    started = True  # the kernel answers this request only once it runs it
                     kind = reply.get("header", {}).get("msg_type")
                     content = reply.get("content", {})
                     if kind == "status" and content.get("execution_state") == "idle":
@@ -154,8 +159,13 @@ async def run_in_kernel(
                         replied = True
                     collected.add(kind, content)
     except TimeoutError:
-        await _interrupt(target)
+        if not sent:
+            raise WorkspaceUnavailable() from None  # the kernel's channel didn't open in time
+        if started:
+            await _interrupt(target)
         raise RunTimeout() from None
+    except (OSError, WebSocketException):
+        raise WorkspaceUnavailable() from None
     return await collected.result()
 
 
@@ -169,8 +179,8 @@ async def _interrupt(target: JupyterTarget) -> None:
 class KernelOutputs:
     """Visible text (64 KB), up to two images (1 MB each) and a bounded traceback.
 
-    An SVG is kept as it came and becomes a PNG in ``result``, after the receive loop and off
-    the event loop.
+    An SVG is kept as it came and becomes a PNG in ``result``, in a thread once the channel is
+    closed. vl_convert holds the GIL while it renders, so the event loop still waits for it.
     """
 
     def __init__(self):

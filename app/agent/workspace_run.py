@@ -23,6 +23,11 @@ _owners: set[str] = set()
 _owners_lock = Lock()
 _channel_logger = logging.Logger("craft.kernel-provision", level=logging.CRITICAL + 1)
 logger = logging.getLogger("craft.workspace")
+# The kernel takes one binding; run_code reaches it over its own channel.
+SDK_BUSY = (
+    "\nNative SDK access (`craft.native()`) is busy in another of the owner's runs, so it is "
+    "unavailable in this one. run_code still executes in the kernel after approval."
+)
 
 
 class WorkspaceToolCallMiddleware(ToolCallMiddleware):
@@ -214,12 +219,7 @@ class WorkspaceRunController:
             if not busy:
                 _owners.add(self._owner)
         if busy:
-            # The kernel takes one binding; run_code reaches it over its own channel.
-            return (
-                "\nNative SDK access (`craft.native()`) is busy in another of the owner's runs, "
-                "so it is unavailable in this one. run_code still executes in the kernel after "
-                "approval."
-            )
+            return SDK_BUSY
         self._resources.callback(self._release_owner)
         async with asyncio.timeout_at(self._session._deadline):
             self._session._check_open()
@@ -265,16 +265,21 @@ class WorkspaceRunController:
             expires = time.time() + self._session._deadline - asyncio.get_running_loop().time()
             async with self._kernel_channel() as channel:
                 self._provision_attempted = True
-                await self._execute(
-                    channel,
-                    "_craft_binding_ok = False\ntry:\n"
-                    "    __import__('craft.client', fromlist=['_bind_run'])._bind_run("
-                    f"{f'http://{self._target.bridge_host}:{port}/mcp'!r}, "
-                    f"{bearer.get_secret_value()!r}, {self._run_id!r}, "
-                    f"{expires!r} - __import__('time').time(), binding_id={self._binding_id!r})\n"
-                    "    _craft_binding_ok = True\nexcept BaseException:\n    pass\n",
-                    self._session._deadline,
-                )
+                try:
+                    await self._execute(
+                        channel,
+                        "_craft_binding_ok = False\ntry:\n"
+                        "    __import__('craft.client', fromlist=['_bind_run'])._bind_run("
+                        f"{f'http://{self._target.bridge_host}:{port}/mcp'!r}, "
+                        f"{bearer.get_secret_value()!r}, {self._run_id!r}, "
+                        f"{expires!r} - __import__('time').time(), "
+                        f"binding_id={self._binding_id!r})\n"
+                        "    _craft_binding_ok = True\nexcept BaseException:\n    pass\n",
+                        self._session._deadline,
+                    )
+                except RuntimeError:
+                    # Refused: another run's binding is still in the kernel, as after a restart.
+                    return SDK_BUSY
             return (
                 f"\nNative Python SDK access is active only in notebook {json.dumps(notebook)} "
                 f"and kernel {self._target.kernel_id} during this run. "
@@ -298,12 +303,13 @@ class WorkspaceRunController:
                 if self._provision_attempted:
                     deadline = asyncio.get_running_loop().time() + 5
                     async with asyncio.timeout_at(deadline), self._kernel_channel() as channel:
+                        # Another run's binding is left alone, and is no failure of this one.
                         await self._execute(
                             channel,
                             "_craft_binding_ok = False\ntry:\n"
-                            "    _craft_binding_ok = __import__('craft.client', "
-                            "fromlist=['_unbind_run'])._unbind_run("
-                            f"{self._binding_id!r})\nexcept BaseException:\n    pass\n",
+                            "    __import__('craft.client', fromlist=['_unbind_run'])._unbind_run("
+                            f"{self._binding_id!r})\n"
+                            "    _craft_binding_ok = True\nexcept BaseException:\n    pass\n",
                             deadline,
                         )
             except Exception as error:

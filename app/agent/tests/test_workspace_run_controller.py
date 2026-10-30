@@ -480,9 +480,12 @@ def test_partial_provisioning_releases_bridge_socket_and_owner_lease(monkeypatch
         async with bound() as run:
             controller, session, _ = owned_controller(lifecycle, run)
             try:
-                error = asyncio.CancelledError if failure == "cancel" else RuntimeError
-                with pytest.raises(error):
-                    await controller.start()
+                if failure == "binding":  # refused, as when another run's binding is still there
+                    assert await controller.start() == lifecycle.SDK_BUSY
+                else:
+                    error = asyncio.CancelledError if failure == "cancel" else RuntimeError
+                    with pytest.raises(error):
+                        await controller.start()
             finally:
                 recorded.failure = None
                 await controller.close()

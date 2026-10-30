@@ -318,7 +318,7 @@ def test_kernel_outputs_keep_two_images_and_the_last_traceback_lines():
     assert "<Figure>" not in "".join(result["outputs"])
 
 
-def test_svg_outputs_render_after_the_receive_loop_off_the_event_loop(monkeypatch):
+def test_svg_outputs_render_after_the_receive_loop_in_a_worker_thread(monkeypatch):
     import threading
 
     import vl_convert
@@ -346,27 +346,41 @@ def test_svg_outputs_render_after_the_receive_loop_off_the_event_loop(monkeypatc
     assert result["truncated"]
 
 
-def test_code_past_its_time_is_interrupted_and_answers_run_timeout(monkeypatch):
+@pytest.mark.parametrize("kernel", ["running", "queued", "unreachable", "refused"])
+def test_code_past_its_time_answers_run_timeout_and_only_its_own_run_is_interrupted(
+    monkeypatch, kernel
+):
+    import json
     from contextlib import asynccontextmanager
 
     import websockets.asyncio.client
 
-    from app.infrastructure.errors import RunTimeout
+    from app.infrastructure.errors import RunTimeout, WorkspaceUnavailable
 
     posted = []
 
-    class Silent:
-        """A kernel channel that takes the request and never answers."""
+    class Channel:
+        """The kernel never finishes: it starts the request, or leaves it queued behind a cell."""
+
+        def __init__(self):
+            self.replies = asyncio.Queue()
 
         async def send(self, payload):
-            pass
+            if kernel == "running":
+                header = json.loads(payload)["header"]
+                busy = {"header": {"msg_type": "status"}, "content": {"execution_state": "busy"}}
+                self.replies.put_nowait(json.dumps(busy | {"parent_header": header}))
 
         async def recv(self):
-            await asyncio.Event().wait()
+            return await self.replies.get()
 
     @asynccontextmanager
     async def open_channel(url, **kwargs):
-        yield Silent()
+        if kernel == "unreachable":
+            await asyncio.Event().wait()  # the handshake never completes
+        if kernel == "refused":
+            raise ConnectionRefusedError("generated")
+        yield Channel()
 
     def jupyter(request):
         posted.append((request.method, request.url.path))
@@ -383,10 +397,12 @@ def test_code_past_its_time_is_interrupted_and_answers_run_timeout(monkeypatch):
     monkeypatch.setattr(websockets.asyncio.client, "connect", open_channel)
     monkeypatch.setattr(hub, "client", client)
     target = workspaces.JupyterTarget("http://jupyter/user/x/", "generated-never-sent", KERNEL)
-    with pytest.raises(RunTimeout) as stopped:
+    error = WorkspaceUnavailable if kernel in {"unreachable", "refused"} else RunTimeout
+    with pytest.raises(error):
         asyncio.run(workspaces.run_in_kernel(target, "while True: pass", seconds=0.1))
-    assert stopped.value.status == 504 and stopped.value.code == "run_timeout"
-    assert posted == [("POST", f"/user/x/api/kernels/{KERNEL}/interrupt")]
+    interrupt = [("POST", f"/user/x/api/kernels/{KERNEL}/interrupt")]
+    assert posted == (interrupt if kernel == "running" else [])
+    assert RunTimeout.status == 504 and RunTimeout.code == "run_timeout"
     assert workspaces.RUN_SECONDS < 120  # the agent's MCP request timeout
 
 
