@@ -6,26 +6,23 @@ import logging
 import socket
 import time
 from contextlib import AsyncExitStack, contextmanager
-from http.cookiejar import CookieJar, DefaultCookiePolicy
 from threading import Lock
-from urllib.parse import urlsplit
 from uuid import uuid4
 
-import httpx
 import uvicorn
 from agent_framework.exceptions import ToolExecutionException
 from uvicorn.protocols.http.h11_impl import H11Protocol
-from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as open_channel
 
 from app.agent.workspace_bridge import WorkspaceRunBridge
 from app.agent.workspace_session import RunBoundSession
 from app.infrastructure.mcp.client import ToolCallMiddleware
-from app.infrastructure.workspaces import JupyterTarget
+from app.infrastructure.workspaces import JupyterTarget, channels_url, jupyter_http
 
 _owners: set[str] = set()
 _owners_lock = Lock()
 _channel_logger = logging.Logger("craft.kernel-provision", level=logging.CRITICAL + 1)
+logger = logging.getLogger("craft.workspace")
 
 
 class WorkspaceToolCallMiddleware(ToolCallMiddleware):
@@ -103,7 +100,6 @@ class WorkspaceRunController:
         self._run_id = str(session._context.caller.run_id)
         self._binding_id = str(uuid4())
         self._resources = AsyncExitStack()
-        self._channel: ClientConnection | None = None
         self._server: _BridgeServer | None = None
         self._server_task: asyncio.Task[None] | None = None
         self._started = self._closed = self._provision_attempted = False
@@ -145,12 +141,25 @@ class WorkspaceRunController:
             raise RuntimeError("The selected notebook must have an owned relative path.")
         return path
 
-    async def _execute(self, code, deadline):
+    def _kernel_channel(self):
+        """A channel to the selected kernel for one bind or unbind, closed right after it.
+
+        Kept open, it would take every broadcast of the kernel, and one large frame could close
+        it before the unbind.
+        """
+        return open_channel(
+            channels_url(self._target),
+            additional_headers={"Authorization": "token " + self._target.token},
+            proxy=None,
+            logger=_channel_logger,
+            open_timeout=10,
+            close_timeout=2,
+            max_size=8 * 1024 * 1024,
+        )
+
+    async def _execute(self, channel, code, deadline):
         from jupyter_client.session import Session
 
-        channel = self._channel
-        if channel is None:
-            raise RuntimeError("The selected kernel channel is unavailable.")
         session = Session(username="craft-controller")
         message = session.msg(
             "execute_request",
@@ -201,22 +210,20 @@ class WorkspaceRunController:
             raise RuntimeError("The workspace run lifecycle is single-use.")
         self._started = True
         with _owners_lock:
-            if self._owner in _owners:
-                raise RuntimeError("This owner already has an active workspace run.")
-            _owners.add(self._owner)
+            busy = self._owner in _owners
+            if not busy:
+                _owners.add(self._owner)
+        if busy:
+            # The kernel takes one binding; run_code reaches it over its own channel.
+            return (
+                "\nNative SDK access (`craft.native()`) is busy in another of the owner's runs, "
+                "so it is unavailable in this one. run_code still executes in the kernel after "
+                "approval."
+            )
         self._resources.callback(self._release_owner)
         async with asyncio.timeout_at(self._session._deadline):
             self._session._check_open()
-            http = await self._resources.enter_async_context(
-                httpx.AsyncClient(
-                    base_url=self._target.url,
-                    headers={"Authorization": "token " + self._target.token},
-                    cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
-                    trust_env=False,
-                    follow_redirects=False,
-                    timeout=120,
-                )
-            )
+            http = await self._resources.enter_async_context(jupyter_http(self._target))
             notebook = await self._select_notebook(http)
             self._middleware.pin_notebook(notebook)
             await self._resources.enter_async_context(self._bridge.run())
@@ -252,35 +259,22 @@ class WorkspaceRunController:
             await self._server.ready.wait()
             if not self._server.started or self._server_task.done():
                 raise RuntimeError("The workspace run bridge could not start.")
-            target = urlsplit(self._target.url)
-            channels = self._target.url + f"api/kernels/{self._target.kernel_id}/channels"
-            channels = ("wss" if target.scheme == "https" else "ws") + channels[
-                len(target.scheme) :
-            ]
-            self._channel = await self._resources.enter_async_context(
-                open_channel(
-                    channels,
-                    additional_headers={"Authorization": "token " + self._target.token},
-                    proxy=None,
-                    logger=_channel_logger,
-                    open_timeout=10,
-                    close_timeout=2,
-                )
-            )
-            self._provision_attempted = True
             bearer = self._bridge.bearer
             if bearer is None:
                 raise RuntimeError("The workspace run bridge is unavailable.")
             expires = time.time() + self._session._deadline - asyncio.get_running_loop().time()
-            await self._execute(
-                "_craft_binding_ok = False\ntry:\n"
-                "    __import__('craft.client', fromlist=['_bind_run'])._bind_run("
-                f"{f'http://{self._target.bridge_host}:{port}/mcp'!r}, "
-                f"{bearer.get_secret_value()!r}, {self._run_id!r}, "
-                f"{expires!r} - __import__('time').time(), binding_id={self._binding_id!r})\n"
-                "    _craft_binding_ok = True\nexcept BaseException:\n    pass\n",
-                self._session._deadline,
-            )
+            async with self._kernel_channel() as channel:
+                self._provision_attempted = True
+                await self._execute(
+                    channel,
+                    "_craft_binding_ok = False\ntry:\n"
+                    "    __import__('craft.client', fromlist=['_bind_run'])._bind_run("
+                    f"{f'http://{self._target.bridge_host}:{port}/mcp'!r}, "
+                    f"{bearer.get_secret_value()!r}, {self._run_id!r}, "
+                    f"{expires!r} - __import__('time').time(), binding_id={self._binding_id!r})\n"
+                    "    _craft_binding_ok = True\nexcept BaseException:\n    pass\n",
+                    self._session._deadline,
+                )
             return (
                 f"\nNative Python SDK access is active only in notebook {json.dumps(notebook)} "
                 f"and kernel {self._target.kernel_id} during this run. "
@@ -301,18 +295,23 @@ class WorkspaceRunController:
             await self._bridge.close()
         finally:
             try:
-                if self._channel is not None and self._provision_attempted:
-                    await self._execute(
-                        "_craft_binding_ok = False\ntry:\n"
-                        "    _craft_binding_ok = __import__('craft.client', "
-                        "fromlist=['_unbind_run'])._unbind_run("
-                        f"{self._binding_id!r})\nexcept BaseException:\n    pass\n",
-                        asyncio.get_running_loop().time() + 5,
-                    )
-            except Exception:
-                # A lost kernel connection cannot retain a usable bridge capability;
-                # the memory binding also clears itself at the original run deadline.
-                pass
+                if self._provision_attempted:
+                    deadline = asyncio.get_running_loop().time() + 5
+                    async with asyncio.timeout_at(deadline), self._kernel_channel() as channel:
+                        await self._execute(
+                            channel,
+                            "_craft_binding_ok = False\ntry:\n"
+                            "    _craft_binding_ok = __import__('craft.client', "
+                            "fromlist=['_unbind_run'])._unbind_run("
+                            f"{self._binding_id!r})\nexcept BaseException:\n    pass\n",
+                            deadline,
+                        )
+            except Exception as error:
+                # The bridge is already withdrawn, so a binding left behind can't reach it, and
+                # it clears itself at the original run deadline.
+                logger.warning(
+                    "workspace unbind failed",
+                    extra={"fields": {"run_id": self._run_id, "error_type": type(error).__name__}},
+                )
             finally:
                 await self._resources.aclose()
-                self._channel = None

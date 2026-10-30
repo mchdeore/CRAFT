@@ -1,6 +1,7 @@
 """Owned external tools share native limits without inheriting native skill behavior."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from time import perf_counter
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from agent_framework import FunctionInvocationContext, tool
 from mcp.types import ListToolsResult, Tool
@@ -333,8 +335,17 @@ def test_owned_workspace_lifecycle_is_closed_on_all_run_paths(monkeypatch, tmp_p
     assert all(selected._local_http.is_closed for selected in recorded["closed"])
     assert len(recorded["finished"]) == len(recorded["revoked"]) == 1
     assert recorded["finished"][0][0][2] == (
-        "finished" if failure is None else "cancelled" if failure == "cancel" else "failed"
+        "finished"
+        if failure in {None, "connect"}
+        else "cancelled"
+        if failure == "cancel"
+        else "failed"
     )
+    if failure == "connect":  # the answer goes on without its workspace tools
+        options = recorded["agents"][0].options
+        assert [selected.name for selected in options["tools"]] == ["craft"]
+        assert "workspace tools are unavailable for this answer" in options["instructions"]
+        assert events[-1].type == "RUN_FINISHED"
     if failure is None:
         options = recorded["agents"][0].options
         assert [selected.name for selected in options["tools"]] == ["craft", "user_workspace"]
@@ -350,6 +361,39 @@ def test_owned_workspace_lifecycle_is_closed_on_all_run_paths(monkeypatch, tmp_p
             and target.url == HUB["CRAFT_HUB_URL"] + "/user/" + str(caller.user_id) + "/"
         )
         assert recorded["controllers"][-1] == "closed"
+
+
+@pytest.mark.parametrize("outage", ["503", "unreachable"])
+def test_a_failing_hub_costs_the_answer_only_its_workspace_tools(monkeypatch, tmp_path, outage):
+    state = runtime.hub.Hub.state  # the real client, before prepared_run stands in for it
+    caller, request, recorded = prepared_run(monkeypatch, tmp_path)
+    monkeypatch.setattr(runtime.hub.Hub, "state", state)
+
+    def answer(request):
+        if outage == "unreachable":
+            raise httpx.ConnectError("generated", request=request)
+        return httpx.Response(503)
+
+    original = runtime.hub.client
+
+    @asynccontextmanager
+    async def failing(base, token, timeout=30):
+        async with original(base, token, timeout) as http:
+            http._transport = httpx.MockTransport(answer)
+            yield http
+
+    monkeypatch.setattr(runtime.hub, "client", failing)
+
+    async def execute():
+        return [event async for event in runtime._run(caller, request)]
+
+    events = asyncio.run(execute())
+    options = recorded["agents"][0].options
+    assert [selected.name for selected in options["tools"]] == ["craft"]
+    assert "workspace tools are unavailable for this answer" in options["instructions"]
+    assert events[-1].type == "RUN_FINISHED"
+    assert recorded["finished"][0][0][2] == "finished"
+    assert not recorded["controllers"]
 
 
 @pytest.mark.parametrize(

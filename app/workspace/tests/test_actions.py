@@ -309,13 +309,85 @@ def test_kernel_outputs_keep_two_images_and_the_last_traceback_lines():
     outputs.add("display_data", {"data": {"image/png": png}})
     trace = ["\x1b[31mTraceback\x1b[0m"] + [f"line {n}" for n in range(30)]
     outputs.add("error", {"ename": "ValueError", "evalue": "bad", "traceback": ["\n".join(trace)]})
-    result = outputs.result()
+    result = asyncio.run(outputs.result())
     assert [image["media_type"] for image in result["images"]] == ["image/png", "image/png"]
     assert base64.b64decode(result["images"][1]["data_base64"]).startswith(b"\x89PNG")
     assert result["truncated"] and result["status"] == "error"
     assert result["error"] == "ValueError: bad"
     assert result["traceback"] == [f"line {n}" for n in range(10, 30)]
     assert "<Figure>" not in "".join(result["outputs"])
+
+
+def test_svg_outputs_render_after_the_receive_loop_off_the_event_loop(monkeypatch):
+    import threading
+
+    import vl_convert
+
+    rendered = []
+    original = vl_convert.svg_to_png
+
+    def svg_to_png(svg):
+        rendered.append(threading.current_thread() is threading.main_thread())
+        return original(svg)
+
+    monkeypatch.setattr(vl_convert, "svg_to_png", svg_to_png)
+    small = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4">'
+        '<rect width="4" height="4"/></svg>'
+    )
+    large = small.replace("</svg>", " " * workspaces.SVG_LIMIT + "</svg>")
+    outputs = workspaces.KernelOutputs()
+    outputs.add("display_data", {"data": {"image/svg+xml": large}})
+    outputs.add("display_data", {"data": {"image/svg+xml": small}})
+    assert not rendered  # nothing is rendered while outputs arrive
+    result = asyncio.run(outputs.result())
+    assert rendered == [False]  # the small one, once, in a worker thread
+    assert [image["media_type"] for image in result["images"]] == ["image/png"]
+    assert result["truncated"]
+
+
+def test_code_past_its_time_is_interrupted_and_answers_run_timeout(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    import websockets.asyncio.client
+
+    from app.infrastructure.errors import RunTimeout
+
+    posted = []
+
+    class Silent:
+        """A kernel channel that takes the request and never answers."""
+
+        async def send(self, payload):
+            pass
+
+        async def recv(self):
+            await asyncio.Event().wait()
+
+    @asynccontextmanager
+    async def open_channel(url, **kwargs):
+        yield Silent()
+
+    def jupyter(request):
+        posted.append((request.method, request.url.path))
+        return httpx.Response(204)
+
+    original = hub.client
+
+    @asynccontextmanager
+    async def client(base, token, timeout=30):
+        async with original(base, token, timeout) as http:
+            http._transport = httpx.MockTransport(jupyter)
+            yield http
+
+    monkeypatch.setattr(websockets.asyncio.client, "connect", open_channel)
+    monkeypatch.setattr(hub, "client", client)
+    target = workspaces.JupyterTarget("http://jupyter/user/x/", "generated-never-sent", KERNEL)
+    with pytest.raises(RunTimeout) as stopped:
+        asyncio.run(workspaces.run_in_kernel(target, "while True: pass", seconds=0.1))
+    assert stopped.value.status == 504 and stopped.value.code == "run_timeout"
+    assert posted == [("POST", f"/user/x/api/kernels/{KERNEL}/interrupt")]
+    assert workspaces.RUN_SECONDS < 120  # the agent's MCP request timeout
 
 
 def test_kernel_images_reach_the_model_as_image_content():

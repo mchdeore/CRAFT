@@ -4,20 +4,23 @@ import asyncio
 import hashlib
 import re
 from collections.abc import AsyncGenerator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import asdict, replace
 from typing import Any
 from uuid import uuid4, uuid5
 
 import anyio
+import httpx
 import msgspec
 from agent_framework import (
     Agent,
     AgentSession,
 )
+from agent_framework.exceptions import ToolException
 from agent_framework_ag_ui import AGUIThreadSnapshot
 from starlette.concurrency import run_in_threadpool
+from websockets.exceptions import WebSocketException
 
 from app.accounts.handlers import reply_language
 from app.agent import model, service
@@ -48,6 +51,16 @@ RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
 TASK_TOOL_LIMIT = 60  # a task-mode run's limits: 60 tool calls in RUN_SECONDS
 WORKSPACE_READY_SECONDS = 90  # a stopped workspace starts with the run; wait this long for it
+# What reaching the owner's workspace raises when the Hub, Jupyter or the kernel fails; the MCP
+# tool reports a failed connection as ToolException.
+WORKSPACE_FAILURES = (
+    ApiError,
+    httpx.HTTPError,
+    ToolException,
+    WebSocketException,
+    OSError,
+    RuntimeError,
+)
 _read_only_query = ContextVar("read_only_query", default=False)
 
 
@@ -479,39 +492,53 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         )
         async with asyncio.timeout_at(deadline):
             await transport.connect()
-            workspace_transport, workspace_instructions, jupyter = await _workspace_for_caller(
-                trusted
-            )
-            if workspace_transport is not None:
-                await workspace_transport.connect()
-        external_tools = (
-            frozenset(function.name for function in workspace_transport.functions)
-            if workspace_transport is not None
-            else frozenset()
-        )
+            try:
+                workspace_transport, workspace_instructions, jupyter = await _workspace_for_caller(
+                    trusted
+                )
+                if workspace_transport is not None:
+                    await workspace_transport.connect()
+                external_tools = (
+                    frozenset(function.name for function in workspace_transport.functions)
+                    if workspace_transport is not None
+                    else frozenset()
+                )
+                middleware = (
+                    WorkspaceToolCallMiddleware(
+                        trace,
+                        budget,
+                        tool_limit,
+                        skills.completed,
+                        external_tools=external_tools,
+                        kernel_id=jupyter.kernel_id,
+                    )
+                    if jupyter is not None
+                    else ToolCallMiddleware(
+                        trace, budget, tool_limit, skills.completed, external_tools=external_tools
+                    )
+                )
+                if jupyter is not None:
+                    assert parent is not None  # the run is always a logged call
+                    workspace_controller = WorkspaceRunController(
+                        RunBoundSession(transport, middleware, context=parent, deadline=deadline),
+                        jupyter,
+                    )
+                    workspace_instructions += await workspace_controller.start()
+            except WORKSPACE_FAILURES:
+                # The answer goes on without its workspace tools; what was opened closes now.
+                for opened in (workspace_controller, workspace_transport):
+                    if opened is not None:
+                        with suppress(Exception):
+                            await opened.close()
+                workspace_controller = workspace_transport = jupyter = None
+                external_tools = frozenset()
+                middleware = ToolCallMiddleware(trace, budget, tool_limit, skills.completed)
+                workspace_instructions = (
+                    "\nThe owner's workspace could not be reached; workspace tools are unavailable "
+                    "for this answer. Say so and suggest trying again shortly."
+                )
         if any(tool_named(registry, name) is not None for name in external_tools):
             raise ApiError()
-        middleware = (
-            WorkspaceToolCallMiddleware(
-                trace,
-                budget,
-                tool_limit,
-                skills.completed,
-                external_tools=external_tools,
-                kernel_id=jupyter.kernel_id,
-            )
-            if jupyter is not None
-            else ToolCallMiddleware(
-                trace, budget, tool_limit, skills.completed, external_tools=external_tools
-            )
-        )
-        if jupyter is not None:
-            if parent is None:
-                raise ApiError()
-            workspace_controller = WorkspaceRunController(
-                RunBoundSession(transport, middleware, context=parent, deadline=deadline), jupyter
-            )
-            workspace_instructions += await workspace_controller.start()
         selected = model.client(caller.settings)
         agent = StatefulAgent(
             selected,
