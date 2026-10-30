@@ -3,6 +3,7 @@
 import getpass
 import json
 import sys
+from argparse import ArgumentParser
 
 
 def engine(settings):
@@ -22,7 +23,7 @@ def engine(settings):
     )
 
 
-def run(parser, args) -> None:
+def run(parser: ArgumentParser, args) -> None:
     from sqlalchemy.orm import sessionmaker
 
     from app.identity import service
@@ -52,15 +53,21 @@ def run(parser, args) -> None:
         if not args.name:
             parser.error("users add needs a username")
         password = getpass.getpass("Password: ")
-        oid = service.add_account(
-            sessions, args.name, args.display_name or args.name, args.email, password
-        )
+        try:
+            oid = service.add_account(
+                sessions, args.name, args.display_name or args.name, args.email, password
+            )
+        except ValueError as error:  # too short
+            parser.error(str(error))
         print(json.dumps({"oid": str(oid), "tid": str(service.TENANT)}))
     elif args.action == "users" and args.verb == "reset-password":
-        if not args.name or not service.set_password(
-            sessions, args.name, getpass.getpass("Password: ")
-        ):
-            parser.error("unknown account")
+        try:
+            if not args.name or not service.set_password(
+                sessions, args.name, getpass.getpass("Password: ")
+            ):
+                parser.error("unknown account")
+        except ValueError as error:  # too short
+            parser.error(str(error))
     elif args.action == "users" and args.verb == "disable":
         if not args.name or not service.disable_account(sessions, args.name):
             parser.error("unknown account")
