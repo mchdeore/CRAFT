@@ -7,14 +7,13 @@ from uuid import uuid4
 import msgspec
 import pytest
 from argon2 import PasswordHasher
-from sqlalchemy import select
+from sqlalchemy import Connection, and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app import create_app
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.provider.simulated import SimulatedProvider
-from app.library import storage
 from app.library.convert import convert
 from app.tests.support import rows
 
@@ -154,7 +153,7 @@ def cube_source(settings, owner_engine, tmp_path):
         connection.execute(m.mission_grants.delete().where(m.mission_grants.c.user_id == user))
         connection.execute(m.missions.delete().where(m.missions.c.key == mission))
         items = list(provider.items())
-        storage.clear_index(connection, items)
+        clear_index(connection, items)
         connection.execute(m.provider_items.delete().where(m.provider_items.c.item.in_(items)))
         inputs, events = (
             m.metadata.tables["agent_run_inputs"],
@@ -174,3 +173,30 @@ def cube_source(settings, owner_engine, tmp_path):
                 m.unit_conversions.delete().where(m.unit_conversions.c.parameter == "power_peak")
             )
             connection.execute(m.parameters.delete().where(m.parameters.c.key == "power_peak"))
+
+
+def clear_index(connection: Connection, items: list[str]) -> None:
+    """Remove what was indexed from these source items, and the facet texts that cite them."""
+    documents = select(m.doc_versions.c.id).where(m.doc_versions.c.item.in_(items))
+    chunks = select(m.chunks.c.id).where(m.chunks.c.doc_version_id.in_(documents))
+    facets = select(m.facet_texts.c.id).where(m.facet_texts.c.sources.overlap(items))
+    connection.execute(
+        m.vectors.delete().where(
+            or_(
+                and_(m.vectors.c.owner_kind == "doc_version", m.vectors.c.owner_id.in_(documents)),
+                and_(m.vectors.c.owner_kind == "chunk", m.vectors.c.owner_id.in_(chunks)),
+                and_(m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets)),
+            )
+        )
+    )
+    connection.execute(m.facet_texts.delete().where(m.facet_texts.c.id.in_(facets)))
+    connection.execute(
+        m.version_diffs.delete().where(
+            or_(
+                m.version_diffs.c.from_version.in_(documents),
+                m.version_diffs.c.to_version.in_(documents),
+            )
+        )
+    )
+    connection.execute(m.chunks.delete().where(m.chunks.c.id.in_(chunks)))
+    connection.execute(m.doc_versions.delete().where(m.doc_versions.c.id.in_(documents)))
