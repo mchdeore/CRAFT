@@ -68,13 +68,11 @@ spec:
             - { name: CRAFT_ID_PUBLIC_URL, value: {{ .Values.id.publicUrl | quote }} }
           ports: [{ name: id, containerPort: {{ .Values.id.port }} }]
           volumeMounts: [{ name: tmp-id, mountPath: /tmp }]
+          # No readiness probe: the pod is ready when the API is, and Service craft-id
+          # doesn't wait for that.
           livenessProbe:
             httpGet: { path: /health/live, port: id }
             periodSeconds: 10
-            timeoutSeconds: 5
-          readinessProbe:
-            httpGet: { path: /health/live, port: id }
-            periodSeconds: 5
             timeoutSeconds: 5
           resources:
             limits: { memory: {{ .Values.id.memory }} }
@@ -110,6 +108,8 @@ metadata:
   name: {{ .Release.Name }}-id
 spec:
   type: {{ .Values.id.service.type }}
+  # The Hub's token requests reach craft-id while the API is not ready, such as before a migration.
+  publishNotReadyAddresses: true
   selector: { app.kubernetes.io/name: api, app.kubernetes.io/instance: {{ .Release.Name }} }
   ports: [{ name: http, port: {{ .Values.id.port }}, targetPort: {{ .Values.id.port }} }]
 {{- end }}

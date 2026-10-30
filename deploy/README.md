@@ -11,7 +11,7 @@ CRAFT on Colima's built-in Kubernetes (k3s), with one Helm chart: the API, the w
 
 ## Start
 
-Run these from the repository root. `.env` needs `CRAFT_ID_DB_PASSWORD` for craft-id.
+Run these from the repository root. `.env` needs `CRAFT_ID_DB_PASSWORD` for craft-id; without it craft-id can't start, and the API's pod, which it shares, never becomes ready.
 
 ```bash
 colima start --kubernetes
