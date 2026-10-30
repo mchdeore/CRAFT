@@ -1,4 +1,4 @@
-"""Test setup: every test uses the craft_test database, never craft_dev."""
+"""Test setup: every test uses the test database, never craft_dev."""
 
 from collections.abc import Iterator
 
@@ -16,7 +16,8 @@ from app.infrastructure.config.settings import Settings
 from app.infrastructure.paths import ROOT
 from app.tests.support import model as scripted_model
 
-TEST_DATABASE = "craft_test"
+# scripts/check gives each worktree its own; a plain pytest uses craft_test.
+TEST_DATABASE = read_env().get("CRAFT_TEST_DATABASE") or "craft_test"
 
 
 @pytest.fixture(scope="session")
@@ -37,7 +38,7 @@ def scripted() -> Iterator[None]:
 
 @pytest.fixture(scope="session", autouse=True)
 def migrated(settings: Settings) -> None:
-    """Upgrade craft_test to head once per session (no revisions until S1)."""
+    """Upgrade the test database to head once per session (no revisions until S1)."""
     config = Config(toml_file=str(ROOT / "pyproject.toml"))
     config.attributes["database_name"] = TEST_DATABASE
     command.upgrade(config, "head")
@@ -56,7 +57,7 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 @pytest.fixture(scope="session")
 def owner_engine(settings: Settings) -> Iterator[Engine]:
-    """craft_owner on craft_test: sets up tables a test needs (S0 has no migrations)."""
+    """craft_owner on the test database: sets up tables a test needs (S0 has no migrations)."""
     url = URL.create(
         "postgresql+psycopg",
         username="craft_owner",

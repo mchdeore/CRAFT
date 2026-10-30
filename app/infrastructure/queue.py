@@ -39,6 +39,7 @@ logger = logging.getLogger("craft.jobs")
 KIND_MODULES = ("app.agent.jobs", "app.maintenance.jobs", "app.workspace.jobs")
 # Waits between automatic retries (transient errors only) and the SIGTERM grace per queue.
 WAITS = {"agent": (), "interactive": (5, 30, 120), "bulk": (60, 300, 1800)}
+# The agent grace is a run's ceiling, app.agent.storage.RUN_SECONDS.
 GRACE = {"agent": 900.0, "interactive": 120.0, "bulk": 120.0}
 HEARTBEAT_SECONDS = 10.0
 # LISTEN/NOTIFY wakes a worker for new jobs; this poll finds retries whose wait has passed.
@@ -329,18 +330,30 @@ async def recover(app: App, settings: Settings, sessions: sessionmaker[Session])
         kind = KINDS.get(job.task_name)
         waits = WAITS[kind.queue] if kind and kind.retry else ()
         assert job.id is not None
+        retried = job.attempts < len(waits)
         try:
-            if job.attempts < len(waits):
+            if retried:
                 await app.job_manager.retry_job(job)
             else:
                 await app.job_manager.finish_job(job, status=Status.FAILED, delete_job=False)
-                if kind and kind.interrupted:
-                    await asyncio.to_thread(kind.interrupted, sessions, dict(job.task_kwargs))
-                if kind and kind.notify:
-                    await asyncio.to_thread(_ended, settings, sessions, job, failed=True)
         except Exception:
             # Another worker recovered it first.
             continue
+        if kind and not retried:
+            # Only the worker whose finish_job succeeded runs the hooks. One that fails is
+            # logged, and the lost worker is still recorded below.
+            try:
+                if kind.interrupted:
+                    await asyncio.to_thread(kind.interrupted, sessions, dict(job.task_kwargs))
+                if kind.notify:
+                    await asyncio.to_thread(_ended, settings, sessions, job, failed=True)
+            except Exception as error:
+                fields = {
+                    "kind": job.task_name,
+                    "job_id": job.id,
+                    "error_type": type(error).__name__,
+                }
+                logger.warning("job recovery hook failed", extra={"fields": fields})
         await asyncio.to_thread(_record_failure, settings, job.id, job.attempts + 1, WorkerLost())
         logger.warning(
             "job recovered",
@@ -348,14 +361,6 @@ async def recover(app: App, settings: Settings, sessions: sessionmaker[Session])
         )
         count += 1
     return count
-
-
-MAINTENANCE: list[Callable[[sessionmaker[Session]], None]] = []
-
-
-def register_maintenance(func: Callable[[sessionmaker[Session]], None]) -> None:
-    """Run func(sessions) in every worker every RECOVER_SECONDS (cleanup; idempotent)."""
-    MAINTENANCE.append(func)
 
 
 def _sample_queues(sessions: sessionmaker[Session], queues: list[str], concurrency: int) -> None:
@@ -386,8 +391,6 @@ async def _maintain(
         heartbeat.FILE.touch()
         # Each step logs its own failure, so one failing step doesn't skip the others.
         await _step("recover", recover(app, settings, sessions))
-        for func in MAINTENANCE:
-            await _step(func.__name__, asyncio.to_thread(func, sessions))
         now = time.monotonic()
         if now >= next_sample:
             await _step(

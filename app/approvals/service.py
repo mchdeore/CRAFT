@@ -138,7 +138,9 @@ def decide(caller, data):
         declared = registry.get(row["operation"])
         path = row["arguments"].get(declared.grants) if declared and declared.grants else None
         if data.approve and isinstance(path, str):
-            storage.add_grant(session, data.id, caller.user_id, row["conversation_id"], path)
+            storage.add_grant(
+                session, data.id, caller.user_id, row["conversation_id"], path, row["operation"]
+            )
         result = _summary(row, kind)
     context = current_call.get()
     if context is not None:
@@ -344,7 +346,8 @@ def claim_external_approved(caller, operation, value) -> UUID:
 
 
 def claim_granted(caller, operation, value) -> UUID:
-    """Allow a granted call when its notebook was granted in this conversation.
+    """Allow a granted call when approving its `granted_by` operation granted its notebook in
+    this conversation: an edit grant never covers a run, nor a run grant an edit.
 
     The call log records each one; the grant's approval keeps its own single execution.
     """
@@ -364,7 +367,9 @@ def claim_granted(caller, operation, value) -> UUID:
         raise ApprovalRequired()
     with unit_of_work(_sessions(caller)) as session:
         storage.require_run(session, caller.user_id, caller.run_id, caller.conversation_id)
-        approval = storage.grant_for(session, caller.user_id, caller.conversation_id, path)
+        approval = storage.grant_for(
+            session, caller.user_id, caller.conversation_id, path, operation.granted_by
+        )
     if approval is None:
         raise ApprovalRequired()
     return approval
@@ -393,3 +398,8 @@ def revoke_grant(caller, identifier):
 def status_expression():
     """Return the existing append-only event status expression without reading data."""
     return storage.status_expression()
+
+
+def reject_pending(session, user, run):
+    for identifier in storage.pending(session, run):
+        storage.append_event(session, identifier, "rejected", user, None)

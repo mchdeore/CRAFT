@@ -11,17 +11,22 @@ import ipaddress
 import json
 import logging
 import re
+from contextlib import AbstractAsyncContextManager, suppress
 from dataclasses import dataclass, field
-from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
 import httpx
 
+from app.infrastructure import hub
+from app.infrastructure.errors import ApiError, RunTimeout, WorkspaceUnavailable
+
+RUN_SECONDS = 100  # below the agent's 120 s MCP request timeout, so it hears run_timeout
 OUTPUT_LIMIT = 64 * 1024
 IMAGE_LIMIT = 1024 * 1024
 IMAGE_COUNT = 2
+SVG_LIMIT = 2 * 1024 * 1024  # a larger SVG isn't rendered
 TRACEBACK_LINES = 20
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _channel_logger = logging.Logger("craft.kernel-actions", level=logging.CRITICAL + 1)
@@ -83,27 +88,34 @@ def owned_name(path: str) -> str:
     return path
 
 
-def jupyter_http(target: JupyterTarget) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        base_url=target.url,
-        headers={"Authorization": "token " + target.token},
-        cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
-        trust_env=False,
-        follow_redirects=False,
-        timeout=120,
-    )
+def jupyter_http(
+    target: JupyterTarget, timeout: float = 120
+) -> AbstractAsyncContextManager[httpx.AsyncClient]:
+    return hub.client(target.url, target.token, timeout)
 
 
-async def run_in_kernel(target: JupyterTarget, code: str, seconds: float = 120) -> dict[str, Any]:
-    """Execute code once in the owner's selected kernel and collect its visible outputs."""
+def channels_url(target: JupyterTarget) -> str:
+    """The websocket of the selected kernel, on the target's own server."""
+    scheme = urlsplit(target.url).scheme
+    channels = target.url + f"api/kernels/{target.kernel_id}/channels"
+    return ("wss" if scheme == "https" else "ws") + channels[len(scheme) :]
+
+
+async def run_in_kernel(
+    target: JupyterTarget, code: str, seconds: float = RUN_SECONDS
+) -> dict[str, Any]:
+    """Execute code once in the owner's selected kernel and collect its visible outputs.
+
+    After ``seconds`` the call answers ``RunTimeout``. Code the kernel has started is
+    interrupted, as JupyterLab's stop button does; a request still queued behind the owner's own
+    cell leaves that cell running.
+    """
     if not target.kernel_id:
         raise ValueError("No kernel is selected")
     from jupyter_client.session import Session
     from websockets.asyncio.client import connect as open_channel
+    from websockets.exceptions import WebSocketException
 
-    base = urlsplit(target.url)
-    channels = target.url + f"api/kernels/{target.kernel_id}/channels"
-    channels = ("wss" if base.scheme == "https" else "ws") + channels[len(base.scheme) :]
     session = Session(username="craft-workspace")
     message = session.msg(
         "execute_request",
@@ -119,34 +131,57 @@ async def run_in_kernel(target: JupyterTarget, code: str, seconds: float = 120) 
     message["channel"] = "shell"
     identifier = message["header"]["msg_id"]
     collected = KernelOutputs()
-    async with asyncio.timeout(seconds):
-        async with open_channel(
-            channels,
-            additional_headers={"Authorization": "token " + target.token},
-            proxy=None,
-            logger=_channel_logger,
-            open_timeout=10,
-            close_timeout=2,
-            max_size=8 * 1024 * 1024,
-        ) as channel:
-            await channel.send(session.pack(message).decode())
-            replied = idle = False
-            while not (replied and idle):
-                reply = json.loads(await channel.recv())
-                if reply.get("parent_header", {}).get("msg_id") != identifier:
-                    continue
-                kind = reply.get("header", {}).get("msg_type")
-                content = reply.get("content", {})
-                if kind == "status" and content.get("execution_state") == "idle":
-                    idle = True
-                elif kind == "execute_reply":
-                    replied = True
-                collected.add(kind, content)
-    return collected.result()
+    sent = started = False
+    try:
+        async with asyncio.timeout(seconds):
+            async with open_channel(
+                channels_url(target),
+                additional_headers={"Authorization": "token " + target.token},
+                proxy=None,
+                logger=_channel_logger,
+                open_timeout=10,
+                close_timeout=2,
+                max_size=8 * 1024 * 1024,
+            ) as channel:
+                await channel.send(session.pack(message).decode())
+                sent = True
+                replied = idle = False
+                while not (replied and idle):
+                    reply = json.loads(await channel.recv())
+                    if reply.get("parent_header", {}).get("msg_id") != identifier:
+                        continue
+                    started = True  # the kernel answers this request only once it runs it
+                    kind = reply.get("header", {}).get("msg_type")
+                    content = reply.get("content", {})
+                    if kind == "status" and content.get("execution_state") == "idle":
+                        idle = True
+                    elif kind == "execute_reply":
+                        replied = True
+                    collected.add(kind, content)
+    except TimeoutError:
+        if not sent:
+            raise WorkspaceUnavailable() from None  # the kernel's channel didn't open in time
+        if started:
+            await _interrupt(target)
+        raise RunTimeout() from None
+    except (OSError, WebSocketException):
+        raise WorkspaceUnavailable() from None
+    return await collected.result()
+
+
+async def _interrupt(target: JupyterTarget) -> None:
+    """Best effort, bounded: a kernel that can't be reached is left to its own code."""
+    with suppress(ApiError, httpx.HTTPError):
+        async with jupyter_http(target, timeout=5) as http:
+            await http.post(f"api/kernels/{target.kernel_id}/interrupt")
 
 
 class KernelOutputs:
-    """Visible text (64 KB), up to two images (1 MB each) and a bounded traceback."""
+    """Visible text (64 KB), up to two images (1 MB each) and a bounded traceback.
+
+    An SVG is kept as it came and becomes a PNG in ``result``, in a thread once the channel is
+    closed. vl_convert holds the GIL while it renders, so the event loop still waits for it.
+    """
 
     def __init__(self):
         self.outputs: list[str] = []
@@ -167,7 +202,7 @@ class KernelOutputs:
         self.outputs.append(piece)
 
     def image(self, data: dict[str, Any]) -> bool:
-        """Keep one PNG or JPEG (an SVG becomes a PNG) and report whether it was an image."""
+        """Keep one PNG, JPEG or SVG and report whether it was an image."""
         found = None
         for media in ("image/png", "image/jpeg"):
             if isinstance(data.get(media), str):
@@ -178,18 +213,15 @@ class KernelOutputs:
                 break
         if found is None and isinstance(data.get("image/svg+xml"), str | list):
             svg = data["image/svg+xml"]
-            svg = "".join(svg) if isinstance(svg, list) else svg
-            try:
-                import vl_convert
-
-                found = ("image/png", vl_convert.svg_to_png(svg))
-            except (ValueError, RuntimeError):
-                return True
+            found = ("image/svg+xml", ("".join(svg) if isinstance(svg, list) else svg).encode())
         if found is None:
             return False
         media, raw = found
-        if len(self.images) >= IMAGE_COUNT or len(raw) > IMAGE_LIMIT:
+        limit = SVG_LIMIT if media == "image/svg+xml" else IMAGE_LIMIT
+        if len(self.images) >= IMAGE_COUNT or len(raw) > limit:
             self.truncated = True
+        elif media == "image/svg+xml":
+            self.images.append({"media_type": media, "svg": raw.decode()})
         else:
             self.images.append({"media_type": media, "data_base64": base64.b64encode(raw).decode()})
         return True
@@ -221,14 +253,29 @@ class KernelOutputs:
             self.status = "error"
             self.error = self.error or content.get("ename", "Execution failed")
 
-    def result(self) -> dict[str, Any]:
+    async def result(self) -> dict[str, Any]:
+        """Each kept SVG becomes a PNG in a thread; one that fails or comes out too large goes."""
+        images = []
+        for image in self.images:
+            if "svg" in image:
+                import vl_convert
+
+                try:
+                    raw = await asyncio.to_thread(vl_convert.svg_to_png, image["svg"])
+                except (ValueError, RuntimeError):
+                    continue
+                if len(raw) > IMAGE_LIMIT:
+                    self.truncated = True
+                    continue
+                image = {"media_type": "image/png", "data_base64": base64.b64encode(raw).decode()}
+            images.append(image)
         return {
             "status": self.status,
             "outputs": self.outputs,
             "error": self.error,
             "truncated": self.truncated,
             "traceback": self.traceback,
-            "images": self.images,
+            "images": images,
         }
 
 
@@ -242,10 +289,9 @@ async def _ensure_folders(http: httpx.AsyncClient, path: str) -> None:
         folder = "/".join(parts[:depth])
         found = await http.get(_contents(folder), params={"content": "0"})
         if found.status_code == 404:
-            (await http.put(_contents(folder), json={"type": "directory"})).raise_for_status()
+            hub.checked(await http.put(_contents(folder), json={"type": "directory"}))
         else:
-            found.raise_for_status()
-            if found.json().get("type") != "directory":
+            if hub.checked(found).json().get("type") != "directory":
                 raise ValueError("A parent of the workspace path is not a folder")
 
 
@@ -256,8 +302,7 @@ async def write_text(target: JupyterTarget, path: str, content: str) -> dict[str
         saved = await http.put(
             _contents(path), json={"type": "file", "format": "text", "content": content}
         )
-        saved.raise_for_status()
-        return saved.json()
+        return hub.checked(saved).json()
 
 
 async def read_notebook(target: JupyterTarget, path: str) -> dict[str, Any] | None:
@@ -266,15 +311,13 @@ async def read_notebook(target: JupyterTarget, path: str) -> dict[str, Any] | No
         found = await http.get(_contents(path), params={"type": "notebook", "content": "1"})
         if found.status_code == 404:
             return None
-        found.raise_for_status()
-        return found.json()["content"]
+        return hub.checked(found).json()["content"]
 
 
 async def write_notebook(target: JupyterTarget, path: str, notebook: dict[str, Any]) -> None:
     async with jupyter_http(target) as http:
         await _ensure_folders(http, path)
-        saved = await http.put(_contents(path), json={"type": "notebook", "content": notebook})
-        saved.raise_for_status()
+        hub.checked(await http.put(_contents(path), json={"type": "notebook", "content": notebook}))
 
 
 async def read_folder(target: JupyterTarget, folder: str, limit: int) -> dict[str, bytes]:
@@ -286,8 +329,7 @@ async def read_folder(target: JupyterTarget, folder: str, limit: int) -> dict[st
         while pending:
             current = pending.pop()
             listing = await http.get(_contents(current) if current else "api/contents/")
-            listing.raise_for_status()
-            for entry in listing.json().get("content") or []:
+            for entry in hub.checked(listing).json().get("content") or []:
                 if entry["name"].startswith("."):
                     continue
                 if entry["type"] == "directory":
@@ -299,8 +341,7 @@ async def read_folder(target: JupyterTarget, folder: str, limit: int) -> dict[st
                 item = await http.get(
                     _contents(entry["path"]), params={"format": "base64", "type": "file"}
                 )
-                item.raise_for_status()
-                content = base64.b64decode(item.json()["content"])
+                content = base64.b64decode(hub.checked(item).json()["content"])
                 size += len(content) - (entry.get("size") or 0)
                 if size > limit:
                     raise ValueError("The notebook folder is too large")
@@ -313,7 +354,7 @@ async def exists(target: JupyterTarget, path: str) -> bool:
         found = await http.get(_contents(path), params={"content": "0"})
         if found.status_code == 404:
             return False
-        found.raise_for_status()
+        hub.checked(found)
         return True
 
 
@@ -329,4 +370,4 @@ async def write_bytes(target: JupyterTarget, path: str, content: bytes) -> None:
                 "content": base64.b64encode(content).decode(),
             },
         )
-        saved.raise_for_status()
+        hub.checked(saved)

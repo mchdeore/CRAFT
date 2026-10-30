@@ -10,10 +10,9 @@ import msgspec
 from app.agent import service
 from app.agent.handlers import RunAgentInput
 from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
-from app.infrastructure.errors import ApiError
+from app.infrastructure.errors import ApiError, NotFound
 from app.infrastructure.operations import Job, operation
 from app.infrastructure.operations.context import current_call
-from app.infrastructure.queue import register_maintenance
 from app.infrastructure.shapes import Shape
 
 TERMINAL = {"RUN_FINISHED", "RUN_ERROR", "CRAFT_ERROR"}
@@ -51,8 +50,17 @@ async def agent_run(caller: Caller, request: AgentRunJob) -> None:
     from app.agent import runtime
 
     run, segment, sessions = request.run, request.segment, caller.sessions
+    # The run is this logged call; its tool calls are child calls of it.
+    context = current_call.get()
+    assert context is not None
     found = await asyncio.to_thread(service.run_input, sessions, run, segment)
-    if found is None or found.owner_id != caller.user_id:
+    if found is None:
+        # Its input was pruned before a worker took it: the stream still ends.
+        context.error_code = NotFound.code
+        missing = {"type": "CRAFT_ERROR", "code": NotFound.code}
+        await asyncio.to_thread(service.append_event, sessions, run, segment, missing)
+        return
+    if found.owner_id != caller.user_id:
         return
     data = msgspec.convert(found.input, RunAgentInput)
     ended = False
@@ -62,9 +70,6 @@ async def agent_run(caller: Caller, request: AgentRunJob) -> None:
         await asyncio.to_thread(service.append_event, sessions, run, segment, event)
         ended = event["type"] in TERMINAL
 
-    # The run is this logged call; its tool calls are child calls of it.
-    context = current_call.get()
-    assert context is not None
     context.caller = replace(caller, conversation_id=data.thread_id, run_id=run)
     try:
         with runtime.read_only_query() if request.read_only else nullcontext():
@@ -99,4 +104,10 @@ async def agent_run(caller: Caller, request: AgentRunJob) -> None:
         await write({"type": "CRAFT_ERROR", "code": "internal_error"})
 
 
-register_maintenance(service.prune_events)
+@operation(PUBLIC, job=Job(queue="bulk", retry=False, every="*/15 * * * *"))
+def prune_run_events(caller: Caller) -> None:
+    """End runs left running with no job (their finish failed), then delete run events and
+    inputs a day after their run ended."""
+    assert caller.sessions is not None
+    service.end_stalled(caller.sessions)
+    service.prune_events(caller.sessions)

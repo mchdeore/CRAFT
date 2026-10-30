@@ -5,10 +5,15 @@ and tests may stand in their own. A person's Hub name is their CRAFT user ID, so
 kept here. The one call made with another token is ``owner``, which asks the Hub about the
 token it is given, as that token. Tokens are never logged: the service token lives in a
 repr-less field, and every token travels only in an ``Authorization`` header.
+
+A failure of the Hub or of a server behind it is an ``ApiError`` (``checked`` and ``client``), so
+a route answers 404, 409 or 503 instead of 500.
 """
 
 import asyncio
 import re
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Literal, Protocol
@@ -16,6 +21,8 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx
+
+from app.infrastructure.errors import Conflict, InvalidInput, NotFound, WorkspaceUnavailable
 
 State = Literal["stopped", "starting", "ready"]
 NOTEBOOK = "analysis.ipynb"  # the notebook whose kernel the agent's runs work in
@@ -50,7 +57,7 @@ class JupyterHub(Protocol):
         ...
 
     async def state(self, user_id: UUID) -> State:
-        """Whether the person's server is stopped, starting or ready."""
+        """Whether the person's server is stopped, starting or ready; a pending stop is starting."""
         ...
 
     async def start(self, user_id: UUID) -> None:
@@ -75,7 +82,8 @@ class JupyterHub(Protocol):
         ...
 
     async def wait_ready(self, user_id: UUID, seconds: float = 90, every: float = 1) -> bool:
-        """Start if needed and wait, bounded, for ``ready`` and the agent's read tools."""
+        """Start if needed (again after a pending stop) and wait, bounded, for ``ready`` and the
+        agent's read tools."""
         ...
 
     async def kernel(self, user_id: UUID) -> str:
@@ -115,10 +123,11 @@ class Hub:
             found = await http.get(_user(user_id))
         if found.status_code == 404:
             return "stopped"
-        found.raise_for_status()
-        server = (found.json().get("servers") or {}).get("")
-        if not server or server.get("pending") == "stop":
+        server = (checked(found).json().get("servers") or {}).get("")
+        if not server:
             return "stopped"
+        if server.get("pending") == "stop":
+            return "starting"  # the Hub refuses a start until the stop ends
         return "ready" if server.get("ready") else "starting"
 
     async def start(self, user_id: UUID) -> None:
@@ -126,18 +135,18 @@ class Hub:
             started = await http.post(_user(user_id) + "/server")
             if started.status_code == 404:
                 # First start before the person ever signed in to the Hub.
-                (await http.post(_user(user_id))).raise_for_status()
+                checked(await http.post(_user(user_id)))
                 started = await http.post(_user(user_id) + "/server")
             if started.status_code == 400 and await self.state(user_id) != "stopped":
-                return  # already running or starting
-            started.raise_for_status()
+                return  # already running or starting, or a stop is still pending
+            checked(started)
 
     async def stop(self, user_id: UUID) -> None:
         async with _api(self) as http:
             stopped = await http.delete(_user(user_id) + "/server")
         if stopped.status_code in {400, 404}:
             return  # not running, or no Hub user yet
-        stopped.raise_for_status()
+        checked(stopped)
 
     async def link(self, user_id: UUID, tenant: str, account: str) -> None:
         # The Hub user joins their craft-id account's sign-in group (craft-names in the values).
@@ -145,9 +154,8 @@ class Hub:
         async with _api(self) as http:
             made = await http.post(group)
             if made.status_code != 409:  # 409: it exists already
-                made.raise_for_status()
-            added = await http.post(group + "/users", json={"users": [str(user_id)]})
-            added.raise_for_status()
+                checked(made)
+            checked(await http.post(group + "/users", json={"users": [str(user_id)]}))
 
     async def owner(self, token: str) -> UUID | None:
         # Asked with the presented token itself, never with CRAFT's service token.
@@ -155,8 +163,7 @@ class Hub:
             found = await http.get("user")
         if found.status_code in {401, 403}:
             return None
-        found.raise_for_status()
-        body = found.json()
+        body = checked(found).json()
         if not isinstance(body, dict) or body.get("kind") != "user":
             return None  # a service's token names no person
         try:
@@ -170,9 +177,10 @@ class Hub:
     async def wait_ready(self, user_id: UUID, seconds: float = 90, every: float = 1) -> bool:
         try:
             async with asyncio.timeout(seconds):
-                if await self.state(user_id) == "stopped":
-                    await self.start(user_id)
-                while await self.state(user_id) != "ready":
+                # Stopped is started, also once a stop that was still pending has ended.
+                while (state := await self.state(user_id)) != "ready":
+                    if state == "stopped":
+                        await self.start(user_id)
                     await asyncio.sleep(every)
                 while not await self._control_up(user_id):
                     await asyncio.sleep(every)
@@ -181,9 +189,9 @@ class Hub:
         return True
 
     async def kernel(self, user_id: UUID) -> str:
-        async with _http(self, self.server(user_id)) as http:
+        async with client(self.server(user_id), self.token) as http:
             sessions = await http.get("api/sessions")
-            sessions.raise_for_status()
+            checked(sessions)
             for row in sessions.json():
                 if row.get("type") == "notebook" and row.get("path") == NOTEBOOK:
                     return row["kernel"]["id"]
@@ -193,19 +201,19 @@ class Hub:
                 made = await http.put(
                     "api/contents/" + NOTEBOOK, json={"type": "notebook", "content": empty}
                 )
-                made.raise_for_status()
+                checked(made)
             else:
-                found.raise_for_status()
+                checked(found)
             opened = await http.post(
                 "api/sessions",
                 json={"path": NOTEBOOK, "type": "notebook", "kernel": {"name": "python3"}},
             )
-            opened.raise_for_status()
+            checked(opened)
             return opened.json()["kernel"]["id"]
 
     async def _control_up(self, user_id: UUID) -> bool:
         """The control server answers (any status below 500); it starts a little after Lab."""
-        async with _http(self, self.server(user_id)) as http:
+        async with client(self.server(user_id), self.token) as http:
             # Without text/event-stream it answers 406 at once instead of opening an event stream.
             found = await http.get(
                 CONTROL, headers={**self.control_headers(), "Accept": "application/json"}
@@ -213,19 +221,42 @@ class Hub:
         return found.status_code < 500
 
 
-def _http(hub: Hub, base: str) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        base_url=base,
-        headers=hub.headers(),
-        cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
-        trust_env=False,
-        follow_redirects=False,
-        timeout=30,
-    )
+def checked(response: httpx.Response) -> httpx.Response:
+    """The response if it succeeded, else what its failure means to CRAFT's caller.
+
+    404 is ``NotFound``, 409 ``Conflict`` and 400 or 422 ``InvalidInput``. Anything else, such as
+    a 5xx or the 401 or 403 of a wrong service token, is ``WorkspaceUnavailable``.
+    """
+    if response.is_success:
+        return response
+    if response.status_code == 404:
+        raise NotFound()
+    if response.status_code == 409:
+        raise Conflict()
+    if response.status_code in {400, 422}:
+        raise InvalidInput()
+    raise WorkspaceUnavailable()
 
 
-def _api(hub: Hub) -> httpx.AsyncClient:
-    return _http(hub, hub.url.rstrip("/") + "/hub/api/")
+@asynccontextmanager
+async def client(base: str, token: str, timeout: float = 30) -> AsyncIterator[httpx.AsyncClient]:
+    """HTTP to the Hub or a server behind it; one that can't be reached is unavailable."""
+    try:
+        async with httpx.AsyncClient(
+            base_url=base,
+            headers={"Authorization": "token " + token},
+            cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
+            trust_env=False,
+            follow_redirects=False,
+            timeout=timeout,
+        ) as http:
+            yield http
+    except httpx.TransportError:
+        raise WorkspaceUnavailable() from None
+
+
+def _api(hub: Hub) -> AbstractAsyncContextManager[httpx.AsyncClient]:
+    return client(hub.url.rstrip("/") + "/hub/api/", hub.token)
 
 
 def _user(user_id: UUID) -> str:

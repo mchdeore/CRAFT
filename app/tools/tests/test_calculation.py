@@ -110,6 +110,41 @@ def test_wolfram_timeout_retries_once_with_safe_error(chat, monkeypatch):
     assert len(attempts) == 2 and "synthetic-private-app-id" not in str(stopped.value)
 
 
+@pytest.mark.parametrize(
+    "status,code,attempts",
+    [(501, "not_understood", 1), (403, "not_configured", 1), (503, "external_unavailable", 2)],
+)
+def test_wolfram_refusals_answer_at_once_and_outages_retry_once(
+    chat, monkeypatch, caplog, status, code, attempts
+):
+    import logging
+
+    from app.infrastructure.errors import ApiError
+    from app.infrastructure.shapes import FieldError
+
+    original = httpx.AsyncClient
+    requests = []
+    reply = "Wolfram|Alpha did not understand your input. Generated hint: try 2+2"
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(status, text=reply)
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ApiError) as failed:
+        asyncio.run(check_calculation(configured(chat), CalculationInput(expression="2+2")))
+    assert failed.value.code == code and len(requests) == attempts
+    if status == 501:
+        assert failed.value.status == 400
+        assert failed.value.fields == [FieldError(path="expression", message=reply)]
+    assert not [record for record in caplog.records if "Generated hint" in str(record.__dict__)]
+
+
 def test_numeric_exponents_and_mismatched_units(chat, monkeypatch):
     requests = []
     mock_service(monkeypatch, requests, "1000 N")

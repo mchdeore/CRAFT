@@ -15,8 +15,8 @@ export type TokenKind = "workspace" | "mcp";
 export interface NewWorkspaceToken { label: string; hours?: number | null; kind?: TokenKind }
 export interface WorkspaceToken { id: Id; kind: TokenKind; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
-/** `notebook`: the notebook this code works on; approving it grants that notebook for the conversation. */
 export interface Workspace { state: "stopped" | "starting" | "ready"; url: string | null }
+/** `notebook`: the notebook this code works on. Approving the run also covers later runs in this conversation (`run_in_granted_notebook`): all code runs in the one analysis kernel. */
 export interface RunCode { code: string; notebook?: string | null }
 export interface GrantedRun { notebook: string; code: string }
 export interface KernelImage { mediaType: "image/png" | "image/jpeg"; dataBase64: string }
@@ -35,6 +35,7 @@ export interface Mission { key: string; title: string; currentStage: string; ali
 export interface ListMissions { query?: string; limit?: number }
 export interface Health { status: "ok" | "unavailable" }
 export interface FieldError { path: string; message: string }
+/** `code` also takes `workspace_unavailable` (503: the Hub or the workspace failed), `run_timeout` (504: code ran past its limit and was interrupted) and `not_understood` (400: the calculation service couldn't read the expression; `fields` carries its reply). */
 export interface ApiError { code: string; message: string; requestId: string; fields?: FieldError[] }
 export type Classification = "unclassified" | "protected-a" | "protected-b";
 export interface CitationHandle { item: string; version: number; block: number; locator: string; quoteSha256: string; simulated: boolean }

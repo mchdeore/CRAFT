@@ -5,6 +5,7 @@ token belongs to, including tokens that must name no one and a Hub that fails.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
 import httpx
@@ -17,6 +18,7 @@ from starlette.routing import Route
 from app.infrastructure import hub
 from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
+from app.infrastructure.errors import WorkspaceUnavailable
 from app.workspace import service
 from app.workspace.handlers import Workspace, read_workspace, start_workspace, stop_workspace
 
@@ -37,10 +39,14 @@ class GeneratedHub:
         self.tokens: dict[str, tuple[str, list[str]]] = {}
         self.whoami_headers: list[str] = []
         self.whoami_status = 200
+        self.down = False  # every guarded call answers 503
+        self.stopping = 1  # reads of a pending stop before it ends
 
     def app(self) -> Starlette:
         async def guarded(request: Request):
             self.calls.append((request.method, request.url.path))
+            if self.down:
+                return Response(status_code=503)
             if request.headers.get("authorization") != "token " + TOKEN:
                 return Response(status_code=403)
             return None
@@ -62,6 +68,11 @@ class GeneratedHub:
                 # The next read after a spawn sees the server ready.
                 found["servers"][""] = {"ready": True, "pending": None}
                 return JSONResponse({**found, "servers": {"": server}})
+            if server and server.get("pending") == "stop":
+                self.stopping -= 1
+                if not self.stopping:
+                    del found["servers"][""]
+                return JSONResponse({**found, "servers": {"": server}})
             return JSONResponse(found)
 
         async def server(request: Request):
@@ -72,7 +83,7 @@ class GeneratedHub:
                 return Response(status_code=404)
             servers = self.users[name]["servers"]
             if request.method == "POST":
-                if "" in servers:
+                if "" in servers:  # running, or a spawn or stop is pending
                     return Response(status_code=400)
                 servers[""] = {"ready": False, "pending": "spawn"}
                 return Response(status_code=202)
@@ -152,14 +163,15 @@ class GeneratedHub:
 def generated(monkeypatch):
     found = GeneratedHub()
     transport = httpx.ASGITransport(app=found.app())
-    original = hub._http
+    original = hub.client
 
-    def connect(selected, base):
-        client = original(selected, base)
-        client._transport = transport
-        return client
+    @asynccontextmanager
+    async def connect(base, token, timeout=30):
+        async with original(base, token, timeout) as http:
+            http._transport = transport
+            yield http
 
-    monkeypatch.setattr(hub, "_http", connect)
+    monkeypatch.setattr(hub, "client", connect)
     return found
 
 
@@ -215,13 +227,49 @@ def test_first_start_links_the_craft_id_account_for_hub_sign_in(generated, monke
 
 
 def test_a_wrong_service_token_is_refused_and_never_echoed(generated):
-    from app.infrastructure.errors import ApiError
-
-    with pytest.raises(ApiError) as refused:
+    with pytest.raises(WorkspaceUnavailable) as refused:
         asyncio.run(start_workspace(caller("generated-wrong-token")))
-    assert refused.value.code == "internal_error"
+    assert refused.value.code == "workspace_unavailable" and refused.value.status == 503
     assert "generated-wrong-token" not in str(refused.value)
     assert "generated-wrong-token" not in repr(hub.from_settings(caller().settings))
+
+
+def test_a_failing_hub_answers_workspace_unavailable(generated):
+    person = caller()
+    asyncio.run(start_workspace(person))
+    generated.down = True
+    for action in (read_workspace, start_workspace, stop_workspace):
+        with pytest.raises(WorkspaceUnavailable):
+            asyncio.run(action(person))
+    with pytest.raises(WorkspaceUnavailable):
+        asyncio.run(service.run_code(person, "1"))
+
+
+def test_a_pending_stop_reads_as_starting_and_a_start_during_it_is_fine(generated):
+    person = caller()
+    asyncio.run(start_workspace(person))
+    generated.users[str(person.user_id)]["servers"][""] = {"ready": False, "pending": "stop"}
+    generated.stopping = 10  # still stopping for the rest of the test
+    lab = f"http://localhost:8200/user/{person.user_id}/lab"
+    assert asyncio.run(start_workspace(person)) == Workspace(state="starting", url=lab)
+    selected = hub.from_settings(person.settings)
+    assert selected is not None
+    spawn = ("POST", f"/hub/api/users/{person.user_id}/server")
+    before = generated.calls.count(spawn)
+    asyncio.run(selected.start(owner(person)))  # the Hub answers 400 while the stop is pending
+    assert generated.calls.count(spawn) == before + 1
+
+
+def test_the_agent_starts_the_server_again_once_a_pending_stop_ends(generated):
+    person = caller()
+    asyncio.run(start_workspace(person))
+    servers = generated.users[str(person.user_id)]["servers"]
+    servers[""] = {"ready": False, "pending": "stop"}
+    generated.stopping = 2
+    selected = hub.from_settings(person.settings)
+    assert selected is not None
+    assert asyncio.run(selected.wait_ready(owner(person), seconds=5, every=0))
+    assert servers[""] == {"ready": True, "pending": None}
 
 
 def test_the_agent_waits_for_ready_and_opens_one_analysis_kernel(generated):
@@ -315,13 +363,13 @@ def test_a_failing_hub_raises_without_the_token(generated):
     found = hub.from_settings(caller().settings)
     assert found is not None
     generated.whoami_status = 502
-    with pytest.raises(httpx.HTTPStatusError) as failed:
+    with pytest.raises(WorkspaceUnavailable) as failed:
         asyncio.run(found.owner("generated0server0token0one"))
     assert "generated0server0token0one" not in str(failed.value)
 
 
 def test_an_unreachable_hub_raises_without_the_token():
     unreachable = hub.Hub("http://127.0.0.1:1", "http://127.0.0.1:1", TOKEN)
-    with pytest.raises(httpx.TransportError) as failed:
+    with pytest.raises(WorkspaceUnavailable) as failed:
         asyncio.run(unreachable.owner("generated0server0token0one"))
     assert "generated0server0token0one" not in str(failed.value) + repr(unreachable)

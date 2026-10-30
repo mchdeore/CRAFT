@@ -1,1 +1,1 @@
-"""Idempotent simulated datasets; no office source is imported."""
+"""Checks for the frozen dataset that scripts/seed restores."""

@@ -16,13 +16,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.agent import service
 from app.agent.handlers import AGUIEvent
-from app.agent.storage import EVENTS_CHANNEL
+from app.agent.storage import EVENTS_CHANNEL, RUN_SECONDS
 from app.infrastructure.database.engine import conninfo
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.context import current_call
 
-# Longer than any run (runtime.RUN_SECONDS) plus time waiting for a worker.
-FOLLOW_SECONDS = 900 + 300
+# Longer than any run plus time waiting for a worker.
+FOLLOW_SECONDS = RUN_SECONDS + 300
 # Without a notification, look again this often; every CHECK_EVERY looks, check the job.
 POLL_SECONDS = 1.0
 CHECK_EVERY = 5
@@ -107,6 +107,7 @@ async def follow(caller, run, segment, after, *, raise_errors) -> AsyncGenerator
     started = loop.time()
     deadline = started + FOLLOW_SECONDS
     idle = 0
+    sent = False
     async with Listener.current(caller.settings).subscribe(run) as signal:
         while True:
             signal.clear()
@@ -123,12 +124,14 @@ async def follow(caller, run, segment, after, *, raise_errors) -> AsyncGenerator
                 if event["type"] == "RUN_ERROR":
                     _note(caller, code=event.get("code"))
                 yield msgspec.convert(event, AGUIEvent)
+                sent = True
                 if event["type"] in TERMINAL:
                     return
             if rows:
                 idle = 0
                 continue
             idle += 1
+            lost = loop.time() > deadline
             if idle % CHECK_EVERY == 0:
                 state = await run_in_threadpool(service.run_job_state, caller, run)
                 ended = state is None
@@ -136,11 +139,21 @@ async def follow(caller, run, segment, after, *, raise_errors) -> AsyncGenerator
                     service.events_after, caller, run, segment, after
                 ):
                     # The job ended (or was cancelled) with nothing more to read.
-                    raise ApiError()
+                    lost = True
                 if state in {"queued", "scheduled"} and loop.time() - started > QUEUED_SECONDS:
+                    # No worker took it: cancel it while still queued, which writes the
+                    # CANCELLED event the next read ends with. A worker that took it
+                    # meanwhile runs it, and this keeps following.
+                    if await run_in_threadpool(service.cancel_queued_run, caller, run):
+                        continue
+            if lost:
+                # Before its first event the request fails; after it, the stream still ends
+                # with a terminal event.
+                if not sent:
                     raise ApiError()
-            if loop.time() > deadline:
-                raise ApiError()
+                _note(caller, code=ApiError.code)
+                yield AGUIEvent(type="RUN_ERROR", code=ApiError.code, message=ApiError.message)
+                return
             try:
                 await asyncio.wait_for(signal.wait(), POLL_SECONDS)
             except TimeoutError:

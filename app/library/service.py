@@ -4,7 +4,8 @@ import math
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from functools import wraps
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from starlette.responses import Response
@@ -66,21 +67,27 @@ class PreparedSource:
         )
 
 
-@observe("library.convert")
-def _convert_observed(content: bytes, filename: str):
-    """Timed convert step when an operation is already open."""
+def observed(name: str) -> Any:
+    """observe(name) under an open operation; outside one the function runs untimed."""
+
+    def decorate(function: Any) -> Any:
+        step = observe(name)(function)
+
+        @wraps(function)
+        def run(*args: Any) -> Any:
+            return function(*args) if current_call.get() is None else step(*args)
+
+        return run
+
+    return decorate
+
+
+@observed("library.convert")
+def convert_request(content: bytes, filename: str):
+    """Convert request bytes."""
     from app.library.convert import convert
 
     return convert(content, filename)
-
-
-def convert_request(content: bytes, filename: str):
-    """Convert request bytes; emit a step only under an active operation."""
-    from app.library.convert import convert
-
-    if current_call.get() is None:
-        return convert(content, filename)
-    return _convert_observed(content, filename)
 
 
 def inspect_file(request):
@@ -306,7 +313,8 @@ def source_items(provider):
         raise NotFound() from None
 
 
-def _read_provider(provider, key: str, version: int):
+@observed("library.provider_read")
+def source_content(provider, key: str, version: int):
     """Read provider bytes; refuse when a database transaction is open."""
     if has_ambient_transaction():
         raise NotFound()
@@ -314,19 +322,6 @@ def _read_provider(provider, key: str, version: int):
         return provider.read_content(key, version)
     except (KeyError, FileNotFoundError):
         raise NotFound() from None
-
-
-@observe("library.provider_read")
-def _source_content_observed(provider, key: str, version: int):
-    """Timed provider read when an operation is already open."""
-    return _read_provider(provider, key, version)
-
-
-def source_content(provider, key: str, version: int):
-    """Read provider bytes; emit a step only under an active operation."""
-    if current_call.get() is None:
-        return _read_provider(provider, key, version)
-    return _source_content_observed(provider, key, version)
 
 
 def readable_source_version(session, caller: Caller, key: str, version: int | None, source):
@@ -738,12 +733,9 @@ def original(caller: Caller, request, attachment: bool) -> Response:
         item, version, _ = readable_source_version(
             session, caller, request.item, request.version, live
         )
+    # Access is checked before the read, so a refused caller reads nothing; changed bytes fail
+    # the SHA-256 comparison.
     content = source_content(provider, request.item, request.version)
-    live = source_item(provider, request.item)
-    with unit_of_work(sessions, read_only=True) as session:
-        item, version, _ = readable_source_version(
-            session, caller, request.item, request.version, live
-        )
     if hashlib.sha256(content).digest() != bytes(version["sha256"]):
         raise NotFound()
     from pathlib import Path

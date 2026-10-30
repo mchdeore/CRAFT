@@ -1,4 +1,6 @@
 import multiprocessing
+import os
+import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
@@ -65,3 +67,32 @@ def test_read_only_provider_access_does_not_create_metadata(tmp_path):
     assert provider.items() == {}
     assert provider.list_changes(0) == ([], 0)
     assert not provider.meta.exists()
+
+
+def _write_end(pipe: Path) -> int:
+    """The pipe's write end, once a read has opened the other end."""
+    for _ in range(500):
+        try:
+            return os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:  # nothing reads it yet
+            time.sleep(0.01)
+    raise AssertionError("the read never started")
+
+
+def test_a_slow_read_does_not_block_other_reads(tmp_path):
+    provider = SimulatedProvider(tmp_path)
+    provider.write_content("generated.md", b"Generated")
+    item = next(iter(provider.items()))
+    # A pipe in place of the snapshot stands in for a slow disk: the read waits for its bytes.
+    snapshot = provider.meta / "versions" / item / "1"
+    snapshot.unlink()
+    os.mkfifo(snapshot)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reading = pool.submit(provider.read_content, item, 1)
+        source = _write_end(snapshot)
+        try:
+            assert list(pool.submit(provider.items).result(timeout=5)) == [item]
+        finally:
+            os.write(source, b"Generated")
+            os.close(source)
+        assert reading.result(timeout=5) == b"Generated"

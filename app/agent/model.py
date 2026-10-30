@@ -1,15 +1,16 @@
-"""Configured framework model roles and observed, stateless model requests."""
+"""Configured framework model roles and observed, stateless, metered model requests."""
 
 import asyncio
 from contextlib import suppress
 from types import TracebackType
 from typing import Any, Literal
 
-from agent_framework import Message, ResponseStream
+from agent_framework import Message, ResponseStream, add_usage_details
 from agent_framework_foundry import FoundryChatClient
 from azure.ai.projects.aio import AIProjectClient
 from openai import DefaultAsyncHttpxClient
 
+from app.agent import usage
 from app.infrastructure.config.settings import Settings, validate_models
 from app.infrastructure.errors import ApiError, InvalidInput
 from app.infrastructure.operations import observe
@@ -65,30 +66,46 @@ def transport():
 
 
 @observe("agent.model")
-async def complete(source):
+async def complete(source, role: str, model: str):
     try:
-        return await source
+        usage.check()
+    except usage.BudgetExhausted:
+        source.close()  # never sent; closed so it isn't left unawaited
+        raise
+    try:
+        response = await source
     except Exception:
         raise ApiError() from None
+    usage.record(role, model, response.usage_details)
+    return response
 
 
 @observe("agent.model")
-async def forward(source, queue):
+async def forward(source, queue, role: str, model: str):
+    usage.check()
+    reported = None  # the usage update comes last, so a cut stream may report none
     try:
         async for update in source:
+            for content in update.contents:
+                if content.type == "usage":
+                    reported = add_usage_details(reported, content.usage_details)
             await queue.put(update)
     except Exception:
         raise ApiError() from None
+    finally:
+        usage.record(role, model, reported)
 
 
-def observed_stream(source):
+def observed_stream(source, role: str, model: str):
     async def updates():
         queue = asyncio.Queue(maxsize=1)
 
         async def produce():
             try:
-                await forward(source, queue)
+                await forward(source, queue, role, model)
                 await queue.put(None)
+            except usage.BudgetExhausted as error:
+                await queue.put(error)
             except Exception:
                 await queue.put(ApiError())
 
@@ -111,6 +128,7 @@ def observed_stream(source):
 
 class ConfiguredChatClient(FoundryChatClient):
     def __init__(self, settings: Settings, role: Role):
+        self.role = role
         self.selected_model = settings.model_main if role == "main" else settings.model_check
         self.effort = "medium" if role == "main" else "low"
         self.budget = settings.model_max_output_tokens
@@ -132,7 +150,9 @@ class ConfiguredChatClient(FoundryChatClient):
         source = super()._inner_get_response(
             messages=messages, options=sealed, stream=stream, **kwargs
         )
-        return observed_stream(source) if stream else complete(source)
+        if stream:
+            return observed_stream(source, self.role, self.selected_model)
+        return complete(source, self.role, self.selected_model)
 
     async def _prepare_options(self, messages, options):
         prepared = await super()._prepare_options(messages, options)
@@ -200,17 +220,25 @@ async def embeddings(settings: Settings, texts: list[str]) -> list[list[float]]:
         vectors = []
         for start in range(0, len(texts), EMBEDDING_BATCH):
             batch = texts[start : start + EMBEDDING_BATCH]
+            usage.check()
             response = await remote.embeddings.create(
                 model=settings.model_embedding,
                 input=batch,
                 dimensions=1536,
                 encoding_format="float",
             )
+            usage.record(
+                "embedding",
+                settings.model_embedding,
+                {"input_token_count": response.usage.prompt_tokens},
+            )
             values = [row.embedding for row in sorted(response.data, key=lambda row: row.index)]
             if len(values) != len(batch) or any(len(value) != 1536 for value in values):
                 raise ApiError()
             vectors.extend(values)
         return vectors
+    except usage.BudgetExhausted:
+        raise
     except Exception:
         raise ApiError() from None
     finally:
