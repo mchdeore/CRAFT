@@ -10,6 +10,7 @@ folder, "" for the top), ``NOTEBOOK`` (its file name) and ``OUTPUT`` (the execut
 """
 
 import filecmp
+import math
 import os
 import shutil
 import sys
@@ -23,9 +24,15 @@ WORK = Path("/work")  # run: the notebook's folder, read-only, with outputs/ wri
 OUT = Path("/out")  # run: the run folder
 RUNS = ".craft-runs"
 STALE_SECONDS = 24 * 3600
+# The app's copies are in app/infrastructure/notebook_runs.py; this package can't import it.
+TOTAL_SECONDS = 15 * 60
 CELL_SECONDS = 120
 CREATED = ".created-outputs"  # prepare made the folder's outputs/, so collect may remove it
 STATUS = ".status"
+# How the run step ended, in .status. collect exits 0 when every cell ran or one raised (the
+# executed copy shows the error), and otherwise with the status, which the worker reads from
+# the Job (app/infrastructure/notebook_jobs.py).
+DONE, FAILED, RAISED, TIMED_OUT, KERNEL_DIED = 0, 2, 3, 4, 5
 
 
 def _env() -> tuple[str, str, str, str]:
@@ -66,26 +73,44 @@ def prepare(root: Path = ROOT) -> None:
 
 
 def run(work: Path = WORK, out: Path = OUT) -> None:
+    """Execute the notebook cell by cell, each within its own limit and what is left of the
+    run's. Once the notebook is read, however the run ends, the executed copy, as far as it
+    got, and ``.status`` are written and the step exits 0, so collect brings them back."""
     # The workspace image's own packages, not the app's.
     import nbformat  # pyright: ignore[reportMissingImports]
     from nbclient import NotebookClient  # pyright: ignore[reportMissingImports]
-    from nbclient.exceptions import CellExecutionError  # pyright: ignore[reportMissingImports]
+    from nbclient.exceptions import (  # pyright: ignore[reportMissingImports]
+        CellExecutionError,
+        DeadKernelError,
+    )
 
     _, _, name, output = _env()
+    deadline = time.monotonic() + TOTAL_SECONDS
     notebook = nbformat.read(work / name, as_version=4)
     client = NotebookClient(
-        notebook,
-        timeout=CELL_SECONDS,
-        kernel_name="python3",
-        resources={"metadata": {"path": str(work)}},
+        notebook, kernel_name="python3", resources={"metadata": {"path": str(work)}}
     )
-    status = 0
+    status = FAILED
     try:
-        client.execute()
+        with client.setup_kernel():
+            for index, cell in enumerate(notebook.cells):
+                left = math.ceil(deadline - time.monotonic())
+                if left <= 0:
+                    raise TimeoutError("the run's total limit")
+                client.timeout = min(CELL_SECONDS, left)
+                client.execute_cell(cell, index)
+        status = DONE
     except CellExecutionError:
-        status = 3
-    nbformat.write(notebook, out / output)
-    (out / STATUS).write_text(str(status))
+        status = RAISED
+    except TimeoutError:  # the total, or a cell over its own limit (nbclient's CellTimeoutError)
+        status = TIMED_OUT
+    except DeadKernelError:
+        status = KERNEL_DIED
+    except Exception:
+        pass  # FAILED, and collect still brings back what ran
+    finally:
+        nbformat.write(notebook, out / output)
+        (out / STATUS).write_text(str(status))
 
 
 def _free(destination: Path, stamp: str) -> Path:
@@ -116,7 +141,7 @@ def _move(source: Path, destination: Path, stamp: str) -> Path:
 def collect(root: Path = ROOT) -> int:
     run, folder, _, output = _env()
     here = root / RUNS / run
-    status = int((here / STATUS).read_text()) if (here / STATUS).is_file() else 1
+    status = int((here / STATUS).read_text()) if (here / STATUS).is_file() else FAILED
     executed = here / output
     if not executed.is_file() or executed.is_symlink():
         print("the run left no executed copy", file=sys.stderr)
@@ -133,7 +158,9 @@ def collect(root: Path = ROOT) -> int:
     if (here / CREATED).exists() and outputs.is_dir() and not any(outputs.iterdir()):
         outputs.rmdir()
     shutil.rmtree(here)
-    return 0 if status in (0, 3) else 2
+    if status in (DONE, RAISED):
+        return 0
+    return status if status in (TIMED_OUT, KERNEL_DIED) else FAILED
 
 
 def main() -> None:

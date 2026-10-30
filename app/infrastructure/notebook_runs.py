@@ -8,8 +8,8 @@ overwriting a file. The workspace service picks a backend and codes only against
 - ``notebook_jobs.JobRunner``: a Kubernetes Job on the owner's volume, on the local cluster.
 - ``notebook_sandbox.SandboxRunner``: a Docker container under Compose, until K-remove-docker.
 
-The runner inside the workspace image (``workspace/src/craft_run``) keeps its own copy of the
-per-cell limit, because that package can't import the app.
+The runner inside the workspace image (``workspace/src/craft_run``) keeps its own copies of the
+run and cell limits, because that package can't import the app.
 """
 
 from typing import Protocol
@@ -24,7 +24,8 @@ JOB_SECONDS = TOTAL_SECONDS + 2 * STEP_SECONDS + 60
 
 class RunError(RuntimeError):
     """A run that didn't finish. The message is one fixed code, never notebook content:
-    ``run_failed``, ``run_timeout``, ``cancelled``, ``copy_failed`` or ``folder_too_large``."""
+    ``run_failed``, ``run_timeout``, ``kernel_died``, ``cancelled``, ``copy_failed`` or
+    ``folder_too_large``."""
 
 
 class NotebookRunner(Protocol):

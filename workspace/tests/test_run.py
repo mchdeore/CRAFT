@@ -1,9 +1,81 @@
-"""The trusted steps of a notebook-run Job: a run folder in, results beside the notebook out."""
+"""The steps of a notebook-run Job: a run folder in, the notebook run within its limits, and
+results beside the notebook out."""
 
+import contextlib
+import json
+import math
 import os
+import sys
+import time
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import craft_run
 import pytest
+
+
+@pytest.fixture
+def kernel(monkeypatch):
+    """nbformat and nbclient live only in the workspace image; these stand in for the names the
+    run step uses, on a fake clock. A cell's source is how many seconds it takes, "raise" or
+    "die"; anything else breaks the client itself. As in nbclient 0.11.0, a timeout and a dead
+    kernel aren't CellExecutionErrors."""
+
+    class CellExecutionError(Exception):
+        pass
+
+    class CellTimeoutError(TimeoutError):
+        pass
+
+    class DeadKernelError(RuntimeError):
+        pass
+
+    state = SimpleNamespace(now=0.0, limits=[])
+
+    class NotebookClient:
+        timeout: int | None = None  # the run step sets it before each cell
+
+        def __init__(self, notebook, **options):
+            pass
+
+        @contextlib.contextmanager
+        def setup_kernel(self):
+            yield
+
+        def execute_cell(self, cell, index):
+            state.limits.append(self.timeout)
+            if cell["source"] == "raise":
+                raise CellExecutionError()
+            if cell["source"] == "die":
+                raise DeadKernelError()
+            seconds = float(cell["source"])
+            limit = self.timeout or math.inf  # as in nbclient, 0 or None is no limit
+            state.now += min(seconds, limit)
+            if seconds > limit:
+                raise CellTimeoutError()
+            cell["outputs"] = ["ran"]
+
+    def read(path, as_version):
+        return SimpleNamespace(**json.loads(Path(path).read_text()))
+
+    def write(notebook, path):
+        Path(path).write_text(json.dumps(vars(notebook)))
+
+    for name, names in {
+        "nbformat": {"read": read, "write": write},
+        "nbclient": {"NotebookClient": NotebookClient},
+        "nbclient.exceptions": {
+            "CellExecutionError": CellExecutionError,
+            "CellTimeoutError": CellTimeoutError,
+            "DeadKernelError": DeadKernelError,
+        },
+    }.items():
+        module = ModuleType(name)
+        vars(module).update(names)
+        monkeypatch.setitem(sys.modules, name, module)
+    clock = SimpleNamespace(monotonic=lambda: state.now, time=time.time)
+    monkeypatch.setattr(craft_run, "time", clock)
+    return state
 
 
 @pytest.fixture
@@ -72,3 +144,38 @@ def test_a_run_without_its_executed_copy_or_with_a_failure_fails(volume):
     craft_run.prepare(volume)
     finish_run(volume, status="1")
     assert craft_run.collect(volume) == 2
+
+
+def write_notebook(volume, *sources):
+    cells = [{"cell_type": "code", "source": source, "outputs": []} for source in sources]
+    (volume / "work" / "fit.ipynb").write_text(json.dumps({"cells": cells}))
+
+
+def test_a_run_cut_short_still_brings_back_its_executed_copy(volume, kernel):
+    here = volume / ".craft-runs" / "r1"
+    # A cell over its 2 minutes, a dead kernel, a cell that raised and a broken client.
+    for last, status, code in (("200", 4, 4), ("die", 5, 5), ("raise", 3, 0), ("?", 2, 2)):
+        write_notebook(volume, "1", last, "1")
+        craft_run.prepare(volume)
+        craft_run.run(volume / "work", here)
+        assert (here / ".status").read_text() == str(status)
+        assert craft_run.collect(volume) == code
+        executed = volume / "work" / "fit.run-1.ipynb"
+        cells = json.loads(executed.read_text())["cells"]
+        assert [cell["outputs"] for cell in cells] == [["ran"], [], []]  # as far as it got
+        executed.unlink()
+
+
+def test_each_cell_gets_at_most_what_is_left_and_the_run_stops_at_its_total(
+    volume, kernel, monkeypatch
+):
+    monkeypatch.setattr(craft_run, "TOTAL_SECONDS", 150)
+    write_notebook(volume, "100", "50", "1")
+    craft_run.prepare(volume)
+    here = volume / ".craft-runs" / "r1"
+    craft_run.run(volume / "work", here)
+    assert kernel.limits == [120, 50]  # the third cell never started
+    assert (here / ".status").read_text() == str(craft_run.TIMED_OUT)
+    assert craft_run.collect(volume) == craft_run.TIMED_OUT
+    cells = json.loads((volume / "work" / "fit.run-1.ipynb").read_text())["cells"]
+    assert [cell["outputs"] for cell in cells] == [["ran"], ["ran"], []]

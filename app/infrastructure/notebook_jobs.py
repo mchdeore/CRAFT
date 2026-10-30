@@ -3,8 +3,9 @@
 The Job mounts the owner's volume (JupyterHub's ``claim-<user ID>``) and runs three
 containers from the workspace image (``craft_run``): a trusted step makes a run folder, the
 notebook runs with its folder read-only and only the run folder writable, and a trusted step
-moves the executed copy and new outputs beside the notebook without overwriting. No file
-passes through the worker. Deleting the Job stops a run at once.
+moves the executed copy and new outputs beside the notebook without overwriting, also after a
+cell timed out or the kernel died. No file passes through the worker. Deleting the Job stops a
+run at once.
 
 The worker's service account may only create, read and delete Jobs, and an admission policy
 (``deploy/craft/templates/notebook-runs.yaml``) holds those Jobs to this shape.
@@ -16,6 +17,7 @@ on the Docker sandbox.
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,8 +31,11 @@ logger = logging.getLogger("craft.workspace")
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 LABEL = "craft-notebook-run"
-POLL_SECONDS = 1.0
+POLL_SECONDS = 2.0
 USER = 1000
+# collect's exit codes for a run cut short (craft_run's TIMED_OUT and KERNEL_DIED): the executed
+# copy is back as far as it got, and the Job fails with the code in its message.
+CUT_SHORT = {4: "run_timeout", 5: "kernel_died"}
 
 
 @dataclass
@@ -120,6 +125,20 @@ def manifest(
             "backoffLimit": 0,
             "activeDeadlineSeconds": TOTAL_SECONDS + 2 * STEP_SECONDS,
             "ttlSecondsAfterFinished": 600,  # the worker deletes it; this catches a lost worker
+            # The worker may not read pods: this rule puts collect's exit code for a run cut
+            # short into the Job's failure message.
+            "podFailurePolicy": {
+                "rules": [
+                    {
+                        "action": "FailJob",
+                        "onExitCodes": {
+                            "containerName": "collect",
+                            "operator": "In",
+                            "values": sorted(CUT_SHORT),
+                        },
+                    }
+                ]
+            },
             "template": {
                 "metadata": {"labels": {LABEL: "true"}},
                 "spec": {
@@ -182,23 +201,45 @@ class JobRunner:
                 created = await http.post(self.cluster.jobs(), json=body)
                 created.raise_for_status()
                 while True:
-                    found = await http.get(self.cluster.jobs(name))
-                    found.raise_for_status()
+                    status = await _status(http, self.cluster.jobs(name))
                     conditions = {
                         c["type"]: c
-                        for c in found.json().get("status", {}).get("conditions") or []
+                        for c in status.get("conditions") or []
                         if c.get("status") == "True"
                     }
                     if "Complete" in conditions:
                         return
                     if "Failed" in conditions:
-                        if conditions["Failed"].get("reason") == "DeadlineExceeded":
-                            raise RunError("run_timeout")
-                        raise RunError("run_failed")
+                        raise RunError(_failure(conditions["Failed"]))
                     await asyncio.sleep(POLL_SECONDS)
             finally:
                 # Also after a cancelled or lost create: deleting by name stops whatever exists.
                 await asyncio.shield(_delete(http, self.cluster, name))
+
+
+async def _status(http: httpx.AsyncClient, url: str) -> dict[str, Any]:
+    """The Job's status. A blip of the API server (no connection, 429 or a 5xx) is no news
+    yet, so the next poll asks again; the queued job's own limit bounds how long."""
+    try:
+        found = await http.get(url)
+    except httpx.TransportError:
+        return {}
+    if found.status_code == 429 or found.status_code >= 500:
+        return {}
+    found.raise_for_status()
+    return found.json().get("status", {})
+
+
+def _failure(condition: dict[str, Any]) -> str:
+    """The run's error code for the Job's Failed condition."""
+    if condition.get("reason") == "DeadlineExceeded":
+        return "run_timeout"
+    # The pod failure policy's message: "Container collect for pod <name> failed with exit
+    # code 4 matching FailJob rule at index 0".
+    code = re.search(r"exit code (\d+)", condition.get("message", ""))
+    if condition.get("reason") == "PodFailurePolicy" and code:
+        return CUT_SHORT.get(int(code[1]), "run_failed")
+    return "run_failed"
 
 
 async def _delete(http: httpx.AsyncClient, cluster: Cluster, name: str) -> None:
