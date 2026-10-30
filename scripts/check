@@ -3,8 +3,10 @@
 #   scripts/check        quick: lint, format, types, fast tests (+ contract types when the contract changed)
 #   scripts/check full   milestone: lock, migrations, every test except live, the workspace image, compose, contract types
 # Tests use a disposable PostgreSQL container (craft-check-db) on port 55481 and the passwords in .env.
-# CHECK_DB_PORT=<port> uses the database already on 127.0.0.1:<port> instead, such as the
-# local cluster's through kubectl port-forward (deploy/README.md).
+# Each worktree tests in a database of its own there, so branches whose migrations differ don't
+# collide; the main checkout keeps craft_test. CHECK_DB_PORT=<port> uses craft_test in the database
+# already on 127.0.0.1:<port> instead, such as the local cluster's through kubectl port-forward
+# (deploy/README.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mode=${1:-quick}
@@ -12,7 +14,13 @@ mode=${1:-quick}
 [ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
 export DOCKER_CONTEXT=${DOCKER_CONTEXT:-colima} UV_NO_PROGRESS=1
 export CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_PORT=${CHECK_DB_PORT:-55481}
+if [ -f .git ] && [ -z "${CHECK_DB_PORT:-}" ]; then # a linked worktree, where .git is a file
+  export CRAFT_TEST_DATABASE=craft_test_$(printf %s "$PWD" | git hash-object --stdin | cut -c1-8)
+else
+  export CRAFT_TEST_DATABASE=craft_test
+fi
 DB=craft-check-db
+LOCK=$(git rev-parse --git-common-dir)/craft-check.lock # shared by every worktree
 failed=()
 step() { # name command...
   local name=$1; shift
@@ -25,6 +33,29 @@ start_db() {
     pg_isready -q -h 127.0.0.1 -p "$CHECK_DB_PORT" && return 0
     echo "No database answers on 127.0.0.1:$CHECK_DB_PORT" >&2; return 1
   fi
+  lock_db
+  start_container || return 1 # exiting releases the lock
+  unlock_db
+  drop_gone_test_dbs
+  [ "$CRAFT_TEST_DATABASE" = craft_test ] || create_test_db
+}
+
+lock_db() { # one run at a time checks and starts the container; a dead owner's lock is taken over
+  local pid worktree waiting=
+  until mkdir "$LOCK" 2>/dev/null; do
+    pid= worktree=
+    read -r pid worktree 2>/dev/null <"$LOCK/owner" || true
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then rm -rf "$LOCK"; continue; fi
+    [ -n "$waiting" ] || echo "waiting for another scripts/check (pid $pid, worktree $worktree)"
+    waiting=1; sleep 5
+  done
+  echo "$$ $PWD" >"$LOCK/owner"
+  trap 'rm -rf "$LOCK"' EXIT
+}
+
+unlock_db() { rm -rf "$LOCK"; trap - EXIT; }
+
+start_container() {
   if [ "$(docker inspect -f '{{.State.Health.Status}}' $DB 2>/dev/null)" = healthy ]; then return; fi
   docker rm -f $DB >/dev/null 2>&1 || true
   # Only the passwords come from .env; the port stays the check port.
@@ -40,6 +71,36 @@ start_db() {
     sleep 1
   done
   echo "$DB did not become healthy" >&2; return 1
+}
+
+drop_gone_test_dbs() { # the databases of worktrees that were removed
+  docker exec $DB psql -U postgres -AtF ' ' -c "select datname, shobj_description(oid, 'pg_database')
+    from pg_database where datname ~ '^craft_test_'" |
+    while read -r name worktree; do
+      if [ -n "$worktree" ] && [ ! -d "$worktree" ]; then
+        echo "dropping $name: its worktree $worktree is gone"
+        docker exec $DB dropdb -U postgres --if-exists "$name" || true
+      fi
+    done
+}
+
+create_test_db() { # when missing, set up as initdb.sh sets up craft_test
+  docker exec -i $DB psql -q -v ON_ERROR_STOP=1 -U postgres \
+    -v db="$CRAFT_TEST_DATABASE" -v worktree="$PWD" <<'SQL'
+select format('create database %I owner craft_owner', :'db')
+  where not exists (select from pg_database where datname = :'db') \gexec
+comment on database :"db" is :'worktree';
+\connect :"db"
+set client_min_messages = warning;
+create extension if not exists vector;
+grant usage on schema public to craft_app;
+alter default privileges for role craft_owner in schema public grant select on tables to craft_app;
+alter default privileges for role craft_owner in schema public grant usage on sequences to craft_app;
+SQL
+}
+
+free_port() { # compose's database port: any free one, since a fixed one may be taken
+  uv run python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
 }
 
 contract_changed() {
@@ -69,7 +130,7 @@ else
   step "migrations" bash -c 'uv run alembic upgrade head && uv run alembic check'
   step "workspace image" docker build -q -t craft-user-workspace:local-pilot workspace
   step "pytest (full)" uv run pytest -m 'not live and not cluster' --tb=short
-  step "compose" env -u CRAFT_DATABASE_HOST CRAFT_DATABASE_PORT=55482 \
+  step "compose" env -u CRAFT_DATABASE_HOST CRAFT_DATABASE_PORT="$(free_port)" \
     bash -c 'docker compose -p craft-check up --build --wait; s=$?; docker compose -p craft-check down -v; exit $s'
   step "contract types" contract_types
 fi

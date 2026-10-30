@@ -1,4 +1,4 @@
-"""Migration verification rolls back DDL in craft_test, preserving other fixtures."""
+"""Migration verification rolls back DDL in the test database, preserving other fixtures."""
 
 from collections.abc import Iterator
 from datetime import timedelta
@@ -12,6 +12,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, Engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
+from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.metadata import (
     doc_versions,
     include_name,
@@ -22,11 +23,14 @@ from app.infrastructure.paths import ROOT
 
 
 @pytest.fixture
-def isolated_migrations(owner_engine: Engine) -> Iterator[tuple[Config, Connection]]:
+def isolated_migrations(
+    owner_engine: Engine, settings: Settings
+) -> Iterator[tuple[Config, Connection]]:
+    name = settings.database_name
     with owner_engine.connect() as connection, connection.begin() as transaction:
-        assert connection.execute(text("select current_database()")).scalar() == "craft_test"
+        assert connection.execute(text("select current_database()")).scalar() == name
         config = Config(toml_file=str(ROOT / "pyproject.toml"))
-        config.attributes["database_name"] = "craft_test"
+        config.attributes["database_name"] = name
         config.attributes["connection"] = connection
         yield config, connection
         transaction.rollback()

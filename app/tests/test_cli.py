@@ -31,7 +31,10 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
     owner, engine = make_owner_sessions(configured)
     rows.load(engine, SimulatedProvider(tmp_path))
     engine.dispose()
-    env = os.environ | {"CRAFT_DATABASE_NAME": "craft_test", "CRAFT_PROVIDER_ROOT": str(tmp_path)}
+    env = os.environ | {
+        "CRAFT_DATABASE_NAME": settings.database_name,
+        "CRAFT_PROVIDER_ROOT": str(tmp_path),
+    }
     result = subprocess.run(
         [
             "uv",
