@@ -2,20 +2,13 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
+from app.infrastructure.grants import cube_readable
 from app.infrastructure.provider import source_provider
-
-
-def readable_values(caller: Caller):
-    return exists().where(
-        m.mission_grants.c.user_id == caller.user_id,
-        m.mission_grants.c.mission_key == m.cube_values.c.mission_key,
-        or_(m.mission_grants.c.silo.is_(None), m.mission_grants.c.silo == m.cube_values.c.silo),
-    )
 
 
 def picked(caller: Caller, at: date, known_at: datetime, *, silo=None, stage=None, keys=None):
@@ -34,7 +27,9 @@ def picked(caller: Caller, at: date, known_at: datetime, *, silo=None, stage=Non
         func.row_number().over(partition_by=cells, order_by=order).label("position"),
     )
     query = query.join(m.missions, m.missions.c.key == values.c.mission_key).where(
-        readable_values(caller), values.c.valid_from <= at, values.c.recorded_at <= known_at
+        cube_readable(caller, values.c.mission_key, values.c.silo),
+        values.c.valid_from <= at,
+        values.c.recorded_at <= known_at,
     )
     if silo is not None:
         query = query.where(values.c.silo == silo)

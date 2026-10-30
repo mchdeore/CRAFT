@@ -13,6 +13,7 @@ from starlette.responses import Response
 from app.infrastructure.access import Caller
 from app.infrastructure.database.unit_of_work import has_ambient_transaction, unit_of_work
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
+from app.infrastructure.grants import document_access
 from app.infrastructure.operations import observe
 from app.infrastructure.operations.context import current_call
 from app.infrastructure.provider import source_provider as configured_provider
@@ -184,14 +185,12 @@ def search(caller: Caller, request):
     live = source_items(provider)
     vector = embed(request.query, caller=caller)
     with unit_of_work(sessions, read_only=True) as session:
-        access = {}
-        permitted = []
-        for key, record in live.items():
-            scope_key = (record["mission_key"], record["silo"])
-            if scope_key not in access:
-                access[scope_key] = storage.provider_readable(session, caller, record)
-            if record["deleted_at"] is None and access[scope_key]:
-                permitted.append(key)
+        access = document_access(session, caller)
+        permitted = [
+            key
+            for key, record in live.items()
+            if record["deleted_at"] is None and access.readable(record)
+        ]
         candidates = storage.candidates(
             session, caller, request, vector, model_name(settings), items=permitted
         )
@@ -332,7 +331,7 @@ def readable_source_version(session, caller: Caller, key: str, version: int | No
     if (
         item["deleted_at"] is not None
         or source["deleted_at"] is not None
-        or not storage.provider_readable(session, caller, source)
+        or not document_access(session, caller).readable(source)
         or original is None
         or original.get("sha256") != bytes(selected["sha256"]).hex()
     ):
@@ -344,19 +343,29 @@ def documents(caller: Caller, request):
     from app.library.handlers import CatalogDocument, DocumentCatalog
 
     sessions, settings = scope(caller)
-    provider = source_provider(settings)
+    sources = source_items(source_provider(settings))
     with unit_of_work(sessions, read_only=True) as session:
         candidates = storage.catalog_items(session, caller)
+        latest = storage.latest_versions(session, candidates[:200])
+        access = document_access(session, caller)
     rows = []
     for key in candidates[:200]:
-        try:
-            live = source_item(provider, key)
-            with unit_of_work(sessions, read_only=True) as session:
-                _, selected, _ = readable_source_version(session, caller, key, None, live)
-                if max(row["version"] for row in live["versions"]) != selected["version"]:
-                    continue
-                version = selected["version"]
-        except NotFound:
+        # Listed when the latest indexed version is the source's latest, unchanged and readable.
+        live = sources.get(key)
+        version, sha256 = latest[key]
+        original = (
+            next((row for row in live["versions"] if row["version"] == version), None)
+            if live is not None
+            else None
+        )
+        if (
+            live is None
+            or live["deleted_at"] is not None
+            or not access.readable(live)
+            or original is None
+            or original.get("sha256") != sha256.hex()
+            or max(row["version"] for row in live["versions"]) != version
+        ):
             continue
         title = live.get("title")
         classification = live.get("classification")
@@ -395,14 +404,15 @@ def document(caller: Caller, request):
             session, caller, request.item, request.version, live
         )
         blocks = storage.blocks(session, version["id"])
+        summary = storage.summary(session, version["id"])
     return LibraryDocument(
         item=item["item"],
         version=version["version"],
         title=item["title"],
         path=item["path"],
         tags=tags(item),
-        summary=version["summary"],
-        summary_kind=version["summary_kind"],
+        summary=summary["summary"],
+        summary_kind=summary["summary_kind"],
         outline=[Outline(block=b["block"], heading_path=b["heading_path"]) for b in blocks],
         versions=[
             Version(
@@ -487,27 +497,28 @@ def read_facets(caller: Caller, request):
         rows = storage.facet_records(session, request.missions, request.facets)
         source_ids = {item for row in rows for item in row["sources"]}
         cached = storage.provider_records(session, source_ids)
-        cached_access = {
-            item: storage.provider_readable(session, caller, row) for item, row in cached.items()
-        }
+        access = document_access(session, caller)
     live = source_items(source_provider(settings))
+    # A source counts when both its indexed and its live record are readable.
+    readable = {
+        item
+        for item in source_ids
+        if item in cached
+        and access.readable(cached[item])
+        and item in live
+        and live[item]["deleted_at"] is None
+        and access.readable(live[item])
+    }
+    visible = [
+        row
+        for row in rows
+        if row["sources"]
+        and all(
+            item in readable and live[item]["mission_key"] == row["mission_key"]
+            for item in row["sources"]
+        )
+    ]
     with unit_of_work(sessions, read_only=True) as session:
-        live_access = {
-            item: cached_access.get(item, False)
-            and item in live
-            and live[item]["deleted_at"] is None
-            and storage.provider_readable(session, caller, live[item])
-            for item in source_ids
-        }
-        visible = [
-            row
-            for row in rows
-            if row["sources"]
-            and all(
-                live_access.get(item, False) and live[item]["mission_key"] == row["mission_key"]
-                for item in row["sources"]
-            )
-        ]
         vectors = storage.facet_vectors(
             session, [row["id"] for row in visible], model_name(settings)
         )
@@ -571,11 +582,11 @@ def checked_citation(caller: Caller, handle):
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:
         item, version, _ = readable_version(session, caller, handle.item, handle.version)
+        access = document_access(session, caller)
     provider = source_provider(settings)
     live = source_item(provider, handle.item)
-    with unit_of_work(sessions, read_only=True) as session:
-        if not storage.provider_readable(session, caller, live):
-            raise NotFound()
+    if not access.readable(live):
+        raise NotFound()
     if not live["versions"]:
         raise NotFound()
     latest = max(row["version"] for row in live["versions"])
@@ -676,10 +687,8 @@ def validate_prepared_source(session, caller: Caller, prepared: PreparedSource) 
     ):
         raise Conflict()
     item, version, versions = readable_version(session, caller, prepared.item, prepared.version)
-    if item["deleted_at"] is not None or not storage.provider_readable(
-        session,
-        caller,
-        {"mission_key": prepared.source_mission, "silo": prepared.source_silo},
+    if item["deleted_at"] is not None or not document_access(session, caller).readable(
+        {"mission_key": prepared.source_mission, "silo": prepared.source_silo}
     ):
         raise NotFound()
     if (
@@ -850,10 +859,10 @@ KINDS = ("value", "facet", "mission")
 def relations(caller: Caller, request):
     """One item's neighbourhood, or a mission's documents, from the document_relations view.
 
-    Only frozen rows are read: no provider call and no model. A document appears when the
-    caller may read it; a cube value when the cube's own rule (cube.label_values) lets them
-    read it, so mission and silo grants apply to admins too; a facet text only when every one
-    of its sources is readable, as read_facets requires.
+    Only frozen rows are read: no provider call and no model. A document appears under the
+    document rule and a cube value under the cube rule (cube.label_values), so mission and silo
+    grants apply to admins for values (both rules in app/infrastructure/grants.py); a facet text
+    only when every one of its sources is readable, as read_facets requires.
     """
     from app.cube import handlers as cube
     from app.library.handlers import Graph, GraphEdge, GraphNode
