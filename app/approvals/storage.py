@@ -63,6 +63,8 @@ notebook_grants = Table(
     Column("user_id", UUID, ForeignKey("users.id"), nullable=False),
     Column("conversation_id", UUID, ForeignKey("conversations.id"), nullable=False),
     Column("path", Text, nullable=False),
+    # The approved operation: an edit grant covers only edits, a run grant only runs.
+    Column("operation", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("revoked_at", DateTime(timezone=True)),
 )
@@ -70,6 +72,7 @@ Index(
     "uq_notebook_grants_active",
     notebook_grants.c.conversation_id,
     notebook_grants.c.path,
+    notebook_grants.c.operation,
     unique=True,
     postgresql_where=text("revoked_at IS NULL"),
 )
@@ -296,17 +299,23 @@ def events(session, identifier):
     )
 
 
-def add_grant(session, approval, user, conversation, path):
+def add_grant(session, approval, user, conversation, path, operation):
     from sqlalchemy.dialects.postgresql import insert
 
     session.execute(
         insert(notebook_grants)
-        .values(approval_id=approval, user_id=user, conversation_id=conversation, path=path)
+        .values(
+            approval_id=approval,
+            user_id=user,
+            conversation_id=conversation,
+            path=path,
+            operation=operation,
+        )
         .on_conflict_do_nothing()
     )
 
 
-def grant_for(session, user, conversation, path):
+def grant_for(session, user, conversation, path, operation):
     from sqlalchemy import select
 
     conversations = metadata.tables["conversations"]
@@ -317,6 +326,7 @@ def grant_for(session, user, conversation, path):
             notebook_grants.c.user_id == user,
             notebook_grants.c.conversation_id == conversation,
             notebook_grants.c.path == path,
+            notebook_grants.c.operation == operation,
             notebook_grants.c.revoked_at.is_(None),
             conversations.c.owner_id == user,
         )
