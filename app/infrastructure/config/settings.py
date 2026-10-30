@@ -6,12 +6,12 @@ from typing import Annotated, Literal
 
 import msgspec
 
+from app.identity.settings import IdentitySettings
 from app.infrastructure.config.env import read_env
 
 PREFIX = "CRAFT_"
 # Setup, Compose and tests only; scripts/seed reads CRAFT_SEED, the tests CRAFT_TEST_DATABASE.
 OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account", "seed", "test_database"}
-IDENTITY = {"id_db_password", "id_signing_key", "id_public_url"}  # craft-id's own settings
 # Settings of the deleted indexer, RQ queue, dev page and process manager; older .env files may
 # still set them.
 RETIRED = {
@@ -156,6 +156,10 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
         return f"Settings(database={self.database_host}:{self.database_port}/{self.database_name})"
 
     __str__ = __repr__
+
+
+# craft-id's own settings, read by IdentitySettings; the app skips them.
+IDENTITY = set(IdentitySettings.__struct_fields__) - set(Settings.__struct_fields__)
 
 
 def validate_oidc(settings: Settings) -> None:

@@ -5,12 +5,23 @@ image:
   pullPolicy: Never          # built by Colima's Docker engine, which k3s uses directly
 
 # Settings come from one Secret made from .env (deploy/README.md). Each container reads only the
-# keys it needs, as compose passes them; a key missing from .env leaves the app's default.
+# keys it needs, as compose passes them; a key missing from the Secret leaves the app's default.
+# This list and the fixed values in templates/_helpers.tpl pass every app setting except these,
+# which the chart leaves out on purpose (test_chart_and_env_example_list_every_setting checks):
+#   - CRAFT_LOCAL_PASSWORD_SIGNIN        # tests only; sign-in-cleanup removes the password path
+#   - CRAFT_SIGN_IN_ATTEMPTS_PER_MINUTE  # the same password path
+#   - CRAFT_PASSWORD_MIN_LENGTH          # the same password path
+#   - CRAFT_PROCESS_ROOT                 # the process manager, which the cluster doesn't run
 secret: craft-env
 settings:
   - CRAFT_APP_DB_PASSWORD
   - CRAFT_DATABASE_NAME
   - CRAFT_LOG_LEVEL
+  - CRAFT_PROVIDER
+  - CRAFT_PROVIDER_URL
+  - CRAFT_PROVIDER_TOKEN
+  - CRAFT_SESSION_IDLE_HOURS
+  - CRAFT_SESSION_ABSOLUTE_HOURS
   - CRAFT_ALLOWED_ORIGINS
   - CRAFT_CROSS_ORIGIN_BROWSER
   - CRAFT_MODEL_MAIN

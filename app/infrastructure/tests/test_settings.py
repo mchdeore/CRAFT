@@ -1,6 +1,9 @@
+import re
+
 import pytest
 
-from app.infrastructure.config.settings import Settings
+from app.infrastructure.config.settings import IDENTITY, OTHER_TOOLS, QUEUES, Settings
+from app.infrastructure.paths import ROOT
 
 SECRET = "s3cr3t-pa55word"
 VALID = {"CRAFT_APP_DB_PASSWORD": SECRET, "CRAFT_DATABASE_PORT": "5432"}
@@ -140,3 +143,24 @@ def test_worker_queues_and_retired_settings() -> None:
     with pytest.raises(SystemExit) as stopped:
         Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "agent,urgent"})
     assert "worker_queues" in str(stopped.value) and "urgent" not in str(stopped.value)
+
+
+def test_chart_and_env_example_list_every_setting() -> None:
+    def names(fields: set[str]) -> set[str]:
+        return {f"CRAFT_{field.upper()}" for field in fields}
+
+    settings = set(Settings.__struct_fields__)
+    example = (ROOT / ".env.example").read_text()
+    in_example = set(re.findall(r"^(CRAFT_[A-Z0-9_]+)=", example, re.M))
+    assert in_example == names(settings | OTHER_TOOLS | IDENTITY)
+
+    values = (ROOT / "deploy/craft/values.yaml").read_text()
+    listed = set(re.findall(r"^  - (CRAFT_[A-Z0-9_]+)$", values, re.M))
+    left_out = set(re.findall(r"^#   - (CRAFT_[A-Z0-9_]+)", values, re.M))
+    helpers = (ROOT / "deploy/craft/templates/_helpers.tpl").read_text()
+    fixed: set[str] = set()
+    # CRAFT_WORKER_CONCURRENCY_{{ upper $queue }} stands for one setting per queue.
+    fixed_env = r"name: (CRAFT_[A-Z0-9_]+)(\{\{ upper \$queue \}\})?"
+    for name, per_queue in re.findall(fixed_env, helpers):
+        fixed |= {name + queue.upper() for queue in QUEUES} if per_queue else {name}
+    assert listed | fixed == names(settings) - left_out
