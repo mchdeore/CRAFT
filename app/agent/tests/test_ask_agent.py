@@ -13,10 +13,8 @@ from app.infrastructure.operations.registry import registry
 from app.library.handlers import CitationCheck, check_citation
 from app.tests.support.chat import ask
 from app.tests.support.chat import chat as chat
-from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
-from app.tests.support.notes import remove_notes as remove_notes
 
 
 def test_ask_agent_answer_is_cited(chat):

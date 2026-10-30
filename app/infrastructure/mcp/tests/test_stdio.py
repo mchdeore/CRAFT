@@ -35,11 +35,14 @@ def server_fixture(app: FastAPI):
     return build_server(local, caller), local, executed
 
 
-def log_rows(app: FastAPI, name: str):
+def log_rows(app: FastAPI, name: str, after: int):
+    """This test's call_log rows (ids above `after`) for one tool."""
     with app.state.engine.connect() as connection:
         return (
             connection.execute(
-                select(call_log).where(call_log.c.name.endswith("." + name)).order_by(call_log.c.id)
+                select(call_log)
+                .where(call_log.c.name.endswith("." + name), call_log.c.id > after)
+                .order_by(call_log.c.id)
             )
             .mappings()
             .all()
@@ -58,9 +61,8 @@ def test_lists_only_tool_operations(app: FastAPI) -> None:
     asyncio.run(run())
 
 
-def test_call_runs_pipeline(app: FastAPI) -> None:
+def test_call_runs_pipeline(app: FastAPI, last_call_id: int) -> None:
     server, _, _ = server_fixture(app)
-    before = len(log_rows(app, "probe_read"))
 
     async def run():
         async with create_connected_server_and_client_session(server) as session:
@@ -71,13 +73,12 @@ def test_call_runs_pipeline(app: FastAPI) -> None:
             assert json.loads(result.content[0].text) == result.structuredContent
 
     asyncio.run(run())
-    rows = log_rows(app, "probe_read")[before:]
+    rows = log_rows(app, "probe_read", last_call_id)
     assert len(rows) == 1 and rows[0]["origin"] == "mcp" and rows[0]["outcome"] == "ok"
 
 
-def test_invalid_arguments(app: FastAPI) -> None:
+def test_invalid_arguments(app: FastAPI, last_call_id: int) -> None:
     server, _, _ = server_fixture(app)
-    before = len(log_rows(app, "probe_read"))
 
     async def run():
         async with create_connected_server_and_client_session(server) as session:
@@ -87,7 +88,7 @@ def test_invalid_arguments(app: FastAPI) -> None:
                 assert result.isError and result.structuredContent["code"] == "invalid_input"
 
     asyncio.run(run())
-    rows = log_rows(app, "probe_read")[before:]
+    rows = log_rows(app, "probe_read", last_call_id)
     assert len(rows) == 2 and all(r["outcome"] == "error" for r in rows)
 
 
@@ -116,7 +117,7 @@ def test_unknown_tool(app: FastAPI) -> None:
     asyncio.run(run())
 
 
-def test_no_content_in_logs(app: FastAPI) -> None:
+def test_no_content_in_logs(app: FastAPI, last_call_id: int) -> None:
     server, _, _ = server_fixture(app)
     stream = io.StringIO()
     configure_logging("DEBUG", stream)
@@ -129,7 +130,8 @@ def test_no_content_in_logs(app: FastAPI) -> None:
 
     asyncio.run(run())
     assert marker not in stream.getvalue()
-    assert all(marker not in str(cell) for cell in log_rows(app, "probe_read")[-1].values())
+    [row] = log_rows(app, "probe_read", last_call_id)
+    assert all(marker not in str(cell) for cell in row.values())
 
 
 @pytest.mark.slow

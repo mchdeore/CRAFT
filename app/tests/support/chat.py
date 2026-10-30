@@ -38,9 +38,12 @@ class AgentWorker:
         from app.infrastructure.queue import worker_thread
 
         with self.owner.begin() as connection:
-            # A job left queued by an earlier test would run with these settings.
+            # An agent job left queued by an earlier test would run with these settings.
             connection.execute(
-                text("update procrastinate_jobs set status = 'cancelled' where status = 'todo'")
+                text(
+                    "update procrastinate_jobs set status = 'cancelled'"
+                    " where status = 'todo' and queue_name = 'agent'"
+                )
             )
         self.stack.enter_context(worker_thread(settings, ["agent"]))
 
@@ -71,62 +74,40 @@ def agent_worker(owner, settings):
 
 @pytest.fixture
 def chat(cube_source):
+    """A conversation for the cube account, served by a live MCP server and an agent worker.
+    Teardown removes the conversations, notes and skills the account wrote."""
+    from app.infrastructure.mcp.tests.http_fixture import live_server
+
     source = cube_source
+    owner = source["caller"].user_id
     table = m.metadata.tables["conversations"]
     with source["owner"].begin() as connection:
         identifier = connection.execute(
             table.insert()
-            .values(
-                owner_id=source["caller"].user_id,
-                title="Simulated conversation",
-            )
+            .values(owner_id=owner, title="Simulated conversation")
             .returning(table.c.id)
         ).scalar_one()
-    if getattr(source["settings"], "mcp_url", None):
-        from app.infrastructure.mcp.tests.http_fixture import live_server
-
-        with live_server(source["app"]):
-            configured = source["app"].state.settings
-            with agent_worker(source["owner"], configured) as worker:
-                yield source | {
-                    "thread": identifier,
-                    "settings": configured,
-                    "caller": replace(source["caller"], settings=configured),
-                    "worker": worker,
-                }
-    else:
-        with agent_worker(source["owner"], source["settings"]) as worker:
-            yield source | {"thread": identifier, "worker": worker}
-    with source["owner"].begin() as connection:
-        connection.execute(
-            m.metadata.tables["messages"]
-            .delete()
-            .where(m.metadata.tables["messages"].c.conversation_id == identifier)
-        )
-        connection.execute(
-            m.metadata.tables["agent_sessions"]
-            .delete()
-            .where(m.metadata.tables["agent_sessions"].c.conversation_id == identifier)
-        )
-        connection.execute(
-            m.metadata.tables["agent_runs"]
-            .delete()
-            .where(m.metadata.tables["agent_runs"].c.conversation_id == identifier)
-        )
-        connection.execute(table.delete().where(table.c.id == identifier))
+    with live_server(source["app"]):
+        configured = source["app"].state.settings
+        with agent_worker(source["owner"], configured) as worker:
+            yield source | {
+                "thread": identifier,
+                "settings": configured,
+                "caller": replace(source["caller"], settings=configured),
+                "worker": worker,
+            }
+    remove_owned(source["owner"], owner)
 
 
-@pytest.fixture(autouse=True)
-def remove_extra_conversations(chat):
-    yield
-    table = m.metadata.tables["conversations"]
-    with chat["owner"].begin() as connection:
-        ids = list(
-            connection.execute(
-                select(table.c.id).where(table.c.owner_id == chat["caller"].user_id)
-            ).scalars()
-        )
+def remove_owned(engine, owner):
+    conversations = m.metadata.tables["conversations"]
+    owned = select(conversations.c.id).where(conversations.c.owner_id == owner)
+    with engine.begin() as connection:
+        # Notes point at conversations, and skill revisions at skills.
+        connection.execute(m.notes.delete().where(m.notes.c.owner == owner))
+        connection.execute(m.skill_revisions.delete().where(m.skill_revisions.c.owner == owner))
+        connection.execute(m.skills.delete().where(m.skills.c.owner == owner))
         for name in ["workspace_files", "messages", "agent_sessions", "agent_runs"]:
-            owned = m.metadata.tables[name]
-            connection.execute(owned.delete().where(owned.c.conversation_id.in_(ids)))
-        connection.execute(table.delete().where(table.c.id.in_(ids)))
+            table = m.metadata.tables[name]
+            connection.execute(table.delete().where(table.c.conversation_id.in_(owned)))
+        connection.execute(conversations.delete().where(conversations.c.owner_id == owner))

@@ -202,12 +202,15 @@ def caller(app, settings=None):
     return Caller(sessions=app.state.sessions, settings=settings or app.state.settings)
 
 
-def log_rows(app, names):
+def log_rows(app, names, after):
+    """This test's call_log rows (ids above `after`) with these names."""
     with app.state.engine.connect() as connection:
         return [
             dict(row)
             for row in connection.execute(
-                select(call_log).where(call_log.c.name.in_(names)).order_by(call_log.c.id)
+                select(call_log)
+                .where(call_log.c.name.in_(names), call_log.c.id > after)
+                .order_by(call_log.c.id)
             ).mappings()
         ]
 
@@ -282,7 +285,7 @@ def test_model_adapter_configured_endpoint_and_store_false(app, intercepted):
     ]
 
 
-def test_model_adapter_no_transaction_open_during_call(app, intercepted):
+def test_model_adapter_no_transaction_open_during_call(app, intercepted, last_call_id):
     @operation(PUBLIC)
     async def transaction_probe(caller: Caller) -> None:
         assert caller.sessions is not None
@@ -297,7 +300,7 @@ def test_model_adapter_no_transaction_open_during_call(app, intercepted):
 
     asyncio.run(transaction_probe(caller(app, intercepted.settings)))
     assert intercepted.boundaries and all(intercepted.boundaries)
-    recorded = log_rows(app, ["agent.model", transaction_probe.__operation__.name])
+    recorded = log_rows(app, ["agent.model", transaction_probe.__operation__.name], last_call_id)
     operation_rows = [row for row in recorded if row["kind"] == "operation"]
     assert operation_rows
     assert any(
@@ -307,7 +310,7 @@ def test_model_adapter_no_transaction_open_during_call(app, intercepted):
     )
 
 
-def test_model_adapter_no_prompt_answer_or_key_logs(app, intercepted, capsys):
+def test_model_adapter_no_prompt_answer_or_key_logs(app, intercepted, capsys, last_call_id):
     output = io.StringIO()
     configure_logging("DEBUG", output)
 
@@ -334,7 +337,7 @@ def test_model_adapter_no_prompt_answer_or_key_logs(app, intercepted, capsys):
         model.client(bad)
     safe = intercepted.no_leaks(output.getvalue() + capsys.readouterr().out)
     assert safe
-    records = log_rows(app, ["agent.model"])
+    records = log_rows(app, ["agent.model"], last_call_id)
     safe = intercepted.no_leaks(str(records))
     assert safe and any(row["outcome"] == "error" for row in records)
 
@@ -379,7 +382,7 @@ def test_embedding(app, intercepted):
 
 
 def test_model_usage_is_metered_and_the_cap_refuses_at_the_limit(
-    app, owner_engine, intercepted, monkeypatch, capsys
+    app, owner_engine, intercepted, monkeypatch, capsys, last_call_id
 ):
     # Each intercepted response reports 4 input tokens (2 cached) and 4 output tokens, and an
     # embedding 4 tokens. At these prices a token costs $0.03125: $0.25 a response, $0.125 an
@@ -438,7 +441,8 @@ def test_model_usage_is_metered_and_the_cap_refuses_at_the_limit(
         ("embedding", "text-embedding-3-large", 4, 0, 0),
     ]
     steps = {
-        row["call_id"]: row["name"] for row in log_rows(app, ["agent.model", "agent.embedding"])
+        row["call_id"]: row["name"]
+        for row in log_rows(app, ["agent.model", "agent.embedding"], last_call_id)
     }
     assert [steps[row.call_id] for row in rows[1:]] == [
         "agent.model",
@@ -493,7 +497,7 @@ def test_scripted_framework_tool_invocation(settings):
     asyncio.run(run())
 
 
-def test_model_stream_observation(app, intercepted):
+def test_model_stream_observation(app, intercepted, last_call_id):
     @operation(PUBLIC)
     async def stream_probe(caller: Caller) -> None:
         selected = model.client(intercepted.settings)
@@ -509,7 +513,7 @@ def test_model_stream_observation(app, intercepted):
             await selected.close()
 
     asyncio.run(stream_probe(caller(app, intercepted.settings)))
-    records = log_rows(app, ["agent.model", stream_probe.__operation__.name])
+    records = log_rows(app, ["agent.model", stream_probe.__operation__.name], last_call_id)
     root = [row for row in records if row["kind"] == "operation"][-1]
     assert any(
         row["kind"] == "step" and row["parent_call_id"] == root["call_id"] for row in records

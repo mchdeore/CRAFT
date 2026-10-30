@@ -6,11 +6,11 @@ from uuid import uuid4
 
 import msgspec
 import pytest
-from argon2 import PasswordHasher
 from sqlalchemy import Connection, and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app import create_app
+from app.accounts import service as accounts
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.provider.simulated import SimulatedProvider
@@ -39,7 +39,7 @@ def cube_source(settings, owner_engine, tmp_path):
         connection.execute(
             m.metadata.tables["local_credentials"]
             .insert()
-            .values(user_id=user, password_hash=PasswordHasher().hash(password))
+            .values(user_id=user, password_hash=accounts.PASSWORDS.hash(password))
         )
         connection.execute(
             m.missions.insert().values(

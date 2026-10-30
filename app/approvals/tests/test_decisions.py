@@ -5,11 +5,11 @@ from uuid import UUID, uuid4
 
 import msgspec
 import pytest
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import create_app
+from app.accounts import service as accounts
 from app.agent import service as agent_service
 from app.agent.handlers import RunAgentInput
 from app.approvals.handlers import ApprovalRequest, Decision, decide_approval, request_approval
@@ -54,7 +54,7 @@ def context(settings, owner_engine):
             db.execute(
                 metadata.tables["local_credentials"]
                 .insert()
-                .values(user_id=user, password_hash=PasswordHasher().hash(password))
+                .values(user_id=user, password_hash=accounts.PASSWORDS.hash(password))
             )
         conversation = db.execute(
             metadata.tables["conversations"]

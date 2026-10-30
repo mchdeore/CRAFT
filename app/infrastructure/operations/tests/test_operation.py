@@ -48,31 +48,33 @@ def trusted(app: FastAPI, roles: frozenset[str] = frozenset({"member"})) -> Call
     )
 
 
-def rows(app: FastAPI, name: str):
+def rows(app: FastAPI, name: str, after: int = 0):
+    """This test's call_log rows (ids above `after`) for one operation."""
     with app.state.engine.connect() as connection:
         return (
             connection.execute(
-                select(call_log).where(call_log.c.name == name).order_by(call_log.c.id)
+                select(call_log)
+                .where(call_log.c.name == name, call_log.c.id > after)
+                .order_by(call_log.c.id)
             )
             .mappings()
             .all()
         )
 
 
-def test_operation_python_http_same_function(settings: Settings) -> None:
+def test_operation_python_http_same_function(settings: Settings, last_call_id: int) -> None:
     @operation(PUBLIC, get="/probe")
     def probe(caller: Caller, request: ProbeInput) -> ProbeOutput:
         return ProbeOutput(value=request.value, result_value=request.value + 1)
 
     app = create_app(settings)
     caller = trusted(app)
-    before = len(rows(app, "probe.probe"))
     result = probe(caller, ProbeInput(value=7))
     assert result.value == 7 and result.result_value == 8
     with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
         response = client.get("/api/probe?value=7")
     assert response.json() == {"value": 7, "resultValue": 8}
-    records = rows(app, "probe.probe")[before:]
+    records = rows(app, "probe.probe", last_call_id)
     assert len(records) == 2 and {r["origin"] for r in records} == {"python", "http"}
 
 
@@ -100,7 +102,9 @@ def test_operation_validation_is_strict(settings: Settings) -> None:
         assert client.get("/api/probe/not-a-uuid").json()["code"] == "invalid_input"
 
 
-def test_operation_curl_without_session(settings: Settings, tmp_path: Path) -> None:
+def test_operation_curl_without_session(
+    settings: Settings, tmp_path: Path, last_call_id: int
+) -> None:
     @operation(SIGNED_IN, get="/probe")
     def probe(caller: Caller) -> None:
         return None
@@ -110,7 +114,6 @@ def test_operation_curl_without_session(settings: Settings, tmp_path: Path) -> N
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(app, log_config=None, access_log=False, lifespan="off"))
     thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
-    before = len(rows(app, "probe.probe"))
     thread.start()
     try:
         deadline = time.monotonic() + 5
@@ -144,7 +147,7 @@ def test_operation_curl_without_session(settings: Settings, tmp_path: Path) -> N
             if line.lower().startswith("x-request-id:")
         )
         assert payload["requestId"] == request_id
-        recorded = rows(app, "probe.probe")[before:]
+        recorded = rows(app, "probe.probe", last_call_id)
         assert (
             len(recorded) == 1
             and recorded[0]["origin"] == "http"
@@ -174,7 +177,7 @@ def test_operation_access_across_transports(settings: Settings) -> None:
         )
 
 
-def test_operation_nested_call_restores_context(app: FastAPI) -> None:
+def test_operation_nested_call_restores_context(app: FastAPI, last_call_id: int) -> None:
     seen = []
 
     @operation(SIGNED_IN)
@@ -196,13 +199,13 @@ def test_operation_nested_call_restores_context(app: FastAPI) -> None:
     caller = trusted(app)
     outer(caller)
     assert current_call.get() is None
-    parent = rows(app, "probe.outer")[-1]
-    child = rows(app, "probe.inner")[-2:]
+    [parent] = rows(app, "probe.outer", last_call_id)
+    child = rows(app, "probe.inner", last_call_id)
     assert len(child) == 2 and all(r["parent_call_id"] == parent["call_id"] for r in child)
     assert len({r["call_id"] for r in [parent, *child]}) == 3
 
 
-def test_operation_read_only_and_rollback(app: FastAPI) -> None:
+def test_operation_read_only_and_rollback(app: FastAPI, last_call_id: int) -> None:
     name = "test_" + uuid4().hex
 
     @operation(PUBLIC)
@@ -235,7 +238,7 @@ def test_operation_read_only_and_rollback(app: FastAPI) -> None:
             ).scalar()
             == 0
         )
-    assert rows(app, "probe.write")[-1]["outcome"] == "error"
+    assert [row["outcome"] for row in rows(app, "probe.write", last_call_id)] == ["error"]
 
 
 def test_operation_registration_rejects_invalid_signature() -> None:
@@ -281,7 +284,9 @@ class PositiveOutput(Shape):
     count: Annotated[int, msgspec.Meta(ge=1)]
 
 
-def test_native_output_constraints_are_checked_for_shapes_and_lists(settings: Settings) -> None:
+def test_native_output_constraints_are_checked_for_shapes_and_lists(
+    settings: Settings, last_call_id: int
+) -> None:
     @operation(PUBLIC, get="/bad-output")
     def bad_output(caller: Caller) -> PositiveOutput:
         return PositiveOutput(count=0)
@@ -299,8 +304,8 @@ def test_native_output_constraints_are_checked_for_shapes_and_lists(settings: Se
             assert response.status_code == 500 and response.json()["code"] == "internal_error"
             cache_policy = response.headers.get("Cache-Control")
             assert cache_policy == "no-store"
-    assert rows(app, "probe.bad_output")[-1]["error_code"] == "internal_error"
-    assert rows(app, "probe.bad_output_list")[-1]["error_code"] == "internal_error"
+    for name in ["probe.bad_output", "probe.bad_output_list"]:
+        assert {row["error_code"] for row in rows(app, name, last_call_id)} == {"internal_error"}
 
 
 def test_default_shape_input_on_http_and_python(app):
