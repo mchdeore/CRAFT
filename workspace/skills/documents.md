@@ -29,7 +29,7 @@ doc.add_paragraph("Reviewed on 20 October 2026.")
 craft.save(doc, working)
 ```
 
-`replace_in_word` does not match text split across differently formatted runs. Report the count it returns.
+`replace_in_word` also matches text split across differently formatted runs; the new text takes the formatting of the run the match starts in. Report the count it returns.
 
 ## Build
 

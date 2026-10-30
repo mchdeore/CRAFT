@@ -274,8 +274,9 @@ def test_approving_a_notebook_edit_grants_later_edits_without_asking(context, wo
 
     second = EditNotebook(path="work/fit.ipynb", action="insert", index=1, source="x")
     assert asyncio.run(edit_granted_notebook(trusted, second)).cells == 2
-    run = GrantedRun(notebook="work/fit.ipynb", code="x")
-    assert asyncio.run(run_in_granted_notebook(trusted, run)).status == "ok"
+    # An approved edit is no approval to run code.
+    with pytest.raises(ApprovalRequired):
+        asyncio.run(run_in_granted_notebook(trusted, GrantedRun(notebook=first.path, code="x")))
     other = EditNotebook(path="work/other.ipynb", action="insert", index=0, source="y")
     with pytest.raises(ApprovalRequired):
         asyncio.run(edit_granted_notebook(trusted, other))
@@ -283,7 +284,35 @@ def test_approving_a_notebook_edit_grants_later_edits_without_asking(context, wo
     revoke_notebook_grant(own, GrantRef(id=grants[0].id))
     with pytest.raises(ApprovalRequired):
         asyncio.run(edit_granted_notebook(trusted, second))
-    assert [call[0] for call in calls] == ["notebook", "notebook", "run"]
+    assert [call[0] for call in calls] == ["notebook", "notebook"]
+
+
+def test_an_approved_run_adds_its_own_grant_that_covers_no_edit(context, workspace):
+    from app.approvals.handlers import GrantQuery, list_notebook_grants
+    from app.workspace.handlers import GrantedRun, edit_granted_notebook, run_in_granted_notebook
+
+    calls, _ = workspace
+    edit = EditNotebook(path="work/fit.ipynb", action="insert", index=0, source="x = 1")
+    trusted, edited = proposal(context, edit_notebook, edit)
+    asyncio.run(edit_notebook(trusted, edit))
+    value = RunCode(code="x", notebook=edit.path)
+    _, ran = proposal(context, run_code, value)
+    asyncio.run(run_code(trusted, value))
+    own = replace(context["caller"], origin="http")
+    grants = list_notebook_grants(own, GrantQuery(conversation_id=context["conversation"]))
+    assert {g.approval_id for g in grants} == {edited, ran}
+
+    later = EditNotebook(path=edit.path, action="insert", index=1, source="y")
+    assert asyncio.run(edit_granted_notebook(trusted, later)).cells == 2
+    run = GrantedRun(notebook=edit.path, code="y")
+    assert asyncio.run(run_in_granted_notebook(trusted, run)).status == "ok"
+    # A run grant alone covers no edit of its notebook.
+    proposal(context, run_code, RunCode(code="x", notebook="work/run.ipynb"))
+    with pytest.raises(ApprovalRequired):
+        asyncio.run(
+            edit_granted_notebook(trusted, msgspec.structs.replace(later, path="work/run.ipynb"))
+        )
+    assert [call[0] for call in calls] == ["notebook", "run", "notebook", "run"]
 
 
 def test_a_rejected_edit_grants_nothing(context, workspace):

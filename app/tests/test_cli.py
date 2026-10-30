@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import subprocess
-from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -16,22 +15,16 @@ from mcp.client.stdio import stdio_client
 
 from app import create_app
 from app.infrastructure.access import Caller
-from app.infrastructure.config.settings import Settings
-from app.infrastructure.database import metadata as m
-from app.infrastructure.database.engine import make_owner_sessions
-from app.infrastructure.provider.simulated import SimulatedProvider
-from app.seed.base import seed
-from app.tests.support import rows
+from app.tests.support.cube import cube_source as cube_source
 
 
 @pytest.mark.slow
-def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
-    configured = msgspec.structs.replace(settings, provider_root=str(tmp_path))
-    seed(configured)
-    owner, engine = make_owner_sessions(configured)
-    rows.load(engine, SimulatedProvider(tmp_path))
-    engine.dispose()
-    env = os.environ | {"CRAFT_DATABASE_NAME": "craft_test", "CRAFT_PROVIDER_ROOT": str(tmp_path)}
+def test_cli_call_and_mcp(cube_source) -> None:
+    configured, username = cube_source["settings"], cube_source["username"]
+    env = os.environ | {
+        "CRAFT_DATABASE_NAME": configured.database_name,
+        "CRAFT_PROVIDER_ROOT": configured.provider_root,
+    }
     result = subprocess.run(
         [
             "uv",
@@ -40,7 +33,7 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
             "call",
             "library.list_documents",
             "--as",
-            "analyst",
+            username,
             "{}",
         ],
         env=env,
@@ -54,7 +47,7 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
 
     async def run():
         parameters = StdioServerParameters(
-            command="uv", args=["run", "craft", "mcp", "--as", "analyst"], env=env
+            command="uv", args=["run", "craft", "mcp", "--as", username], env=env
         )
         async with (
             stdio_client(parameters) as (incoming, outgoing),
@@ -68,24 +61,11 @@ def test_cli_call_and_mcp(settings: Settings, tmp_path: Path) -> None:
             result = await session.call_tool("list_documents", {})
             assert result.structuredContent is not None and result.structuredContent["documents"]
 
-    try:
-        asyncio.run(run())
-        with TestClient(create_app(configured)) as client:
-            assert (
-                client.post("/api/library/search", json={"query": "radiator margin"}).status_code
-                == 401
-            )
-    finally:
-        sessions, engine = make_owner_sessions(configured)
-        with sessions.begin() as session:
-            session.execute(
-                m.vectors.delete().where(m.vectors.c.owner_kind.in_(["chunk", "doc_version"]))
-            )
-            session.execute(m.version_diffs.delete())
-            session.execute(m.doc_versions.delete())
-            session.execute(m.provider_items.delete())
-            session.execute(m.index_cursor.delete())
-        engine.dispose()
+    asyncio.run(run())
+    with TestClient(create_app(configured)) as client:
+        assert (
+            client.post("/api/library/search", json={"query": "radiator margin"}).status_code == 401
+        )
 
 
 @pytest.mark.parametrize("arguments", [[], ['{"value": 2}']])

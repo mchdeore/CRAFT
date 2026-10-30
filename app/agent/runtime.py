@@ -5,7 +5,7 @@ import hashlib
 import logging
 import re
 from collections.abc import AsyncGenerator
-from contextlib import contextmanager, suppress
+from contextlib import aclosing, contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import asdict, replace
 from typing import Any
@@ -27,6 +27,7 @@ from app.accounts.handlers import reply_language
 from app.agent import model, service
 from app.agent.approval_adapter import DurableApprovalAgent
 from app.agent.handlers import AGUIEvent, RunRef, issue_run_token, revoke_run_token
+from app.agent.storage import RUN_SECONDS
 from app.agent.workspace import WorkspaceEndpoint, WorkspaceToolsets
 from app.agent.workspace_run import (
     JupyterTarget,
@@ -48,7 +49,6 @@ from app.library.handlers import ChunkText, LibraryDocument, LibraryHit
 from app.skills import native as saved_skills
 
 LANGUAGES = {"en": "English", "fr": "French"}
-RUN_SECONDS = 900  # ceiling for settings.agent_run_seconds
 TOOL_LIMIT = 20
 TASK_TOOL_LIMIT = 60  # a task-mode run's limits: 60 tool calls in RUN_SECONDS
 WORKSPACE_READY_SECONDS = 90  # a stopped workspace starts with the run; wait this long for it
@@ -156,8 +156,8 @@ async def _workspace_for_caller(caller):
         granted = []
     if granted:
         guidance += (
-            " Notebooks granted in this conversation (use edit_granted_notebook and "
-            "run_in_granted_notebook for these, without asking): "
+            " Notebooks granted in this conversation (edit_granted_notebook after an approved "
+            "edit, run_in_granted_notebook after an approved run, without asking): "
             + ", ".join(sorted({grant.path for grant in granted}))
             + "."
         )
@@ -382,6 +382,42 @@ def originals(message_id: str, cited, language: str) -> dict | None:
     return {"messageId": message_id, "items": items} if items else None
 
 
+async def _begin(caller, trusted, request, version):
+    """Start or resume the run: its saved state, its resume answer and its mode. A cancel
+    doesn't stop the thread, which can still commit the run as running, so wait for it and
+    end a run it started as cancelled, its state unchanged."""
+
+    def begin():
+        if request.resume is not None:
+            return service.resume(caller, request)
+        return service.start(caller, request, version), None, request.mode
+
+    beginning = asyncio.ensure_future(run_in_threadpool(begin))
+    try:
+        return await asyncio.shield(beginning)
+    except asyncio.CancelledError:
+        await asyncio.wait({beginning})
+        if not beginning.cancelled() and beginning.exception() is None:
+            unchanged = beginning.result()[0] or {}
+            await run_in_threadpool(
+                service.finish, trusted, request, "cancelled", unchanged, end_reason="cancelled"
+            )
+        raise
+
+
+async def _within(events, deadline):
+    """The adapter's events, each read under the run's deadline but never across a yield:
+    fired while a slow reader holds the run, the timeout's cancel would land outside it and
+    skip its run_timeout."""
+    while True:
+        try:
+            async with asyncio.timeout_at(deadline):
+                event = await anext(events)
+        except StopAsyncIteration:
+            return
+        yield event
+
+
 async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     resuming = request.resume is not None
     newest = next(
@@ -398,7 +434,6 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     language = await run_in_threadpool(reply_language, caller)
     ref = conversations.ConversationRef(id=request.thread_id)
     await run_in_threadpool(conversations.load_for_run, caller, ref)
-    resume_payload = None
     allowed = [
         operation.tool_name
         for operation in tool_operations(registry, agent=_read_only_query.get())
@@ -412,12 +447,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
             [{"id": str(request.skill.id), "revision": request.skill.revision}],
             set(allowed),
         )
-    if resuming:
-        state, resume_payload, mode = await run_in_threadpool(service.resume, caller, request)
-    else:
-        mode = request.mode
-        state = await run_in_threadpool(service.start, caller, request, version)
     trusted = replace(caller, conversation_id=request.thread_id, run_id=request.run_id)
+    state, resume_payload, mode = await _begin(caller, trusted, request, version)
     parent = current_call.get()
     if parent is not None:
         parent.caller = trusted
@@ -583,8 +614,8 @@ async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
         }
         if resume_payload is not None:
             data["resume"] = resume_payload
-        async with asyncio.timeout_at(deadline):
-            async for event in adapter.run(data):
+        async with aclosing(_within(adapter.run(data), deadline)) as events:
+            async for event in events:
                 value = {
                     key: value
                     for key, value in event.model_dump(
@@ -899,13 +930,30 @@ async def run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     producer = asyncio.create_task(produce())
     try:
         while True:
-            event = await queue.get()
+            # Wait for the producer too, so one that ends without sending None can't hang this.
+            get = asyncio.ensure_future(queue.get())
+            try:
+                await asyncio.wait({get, producer}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                waiting = not get.done()
+                get.cancel()
+            if waiting:
+                # The producer ended first: read what it left, if anything.
+                if queue.empty():
+                    break
+                continue
+            event = get.result()
             if event is None:
                 await producer
-                break
+                return
             if isinstance(event, BaseException):
                 raise event
             yield event
+        # It ended without sending None: raise its own error, or end the run failed.
+        error = None if producer.cancelled() else producer.exception()
+        if error is not None:
+            raise error
+        yield AGUIEvent(type="RUN_ERROR", code="internal_error", message="Run failed.")
     finally:
         if not producer.done():
             producer.cancel()

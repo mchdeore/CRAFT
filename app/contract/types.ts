@@ -15,8 +15,8 @@ export type TokenKind = "workspace" | "mcp";
 export interface NewWorkspaceToken { label: string; hours?: number | null; kind?: TokenKind }
 export interface WorkspaceToken { id: Id; kind: TokenKind; label: string; createdAt: string; expiresAt: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface IssuedWorkspaceToken extends WorkspaceToken { token: string }
-/** `notebook`: the notebook this code works on; approving it grants that notebook for the conversation. */
 export interface Workspace { state: "stopped" | "starting" | "ready"; url: string | null }
+/** `notebook`: the notebook this code works on. Approving the run also covers later runs in this conversation (`run_in_granted_notebook`): all code runs in the one analysis kernel. */
 export interface RunCode { code: string; notebook?: string | null }
 export interface GrantedRun { notebook: string; code: string }
 export interface KernelImage { mediaType: "image/png" | "image/jpeg"; dataBase64: string }

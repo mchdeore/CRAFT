@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import io
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,8 @@ from sqlalchemy import select, text
 
 from app.agent import model
 from app.agent.handlers import EmbeddingInput, embed
+from app.agent.usage import BudgetExhausted, model_usage
+from app.cli import main
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.database.unit_of_work import unit_of_work
@@ -120,7 +123,13 @@ class Intercept:
                     ],
                 }
             ],
-            "usage": {"input_tokens": 4, "output_tokens": 4, "total_tokens": 8},
+            "usage": {
+                "input_tokens": 4,
+                "input_tokens_details": {"cached_tokens": 2},
+                "output_tokens": 4,
+                "output_tokens_details": {"reasoning_tokens": 1},
+                "total_tokens": 8,
+            },
             "parallel_tool_calls": False,
             "error": None,
             "incomplete_details": None,
@@ -354,7 +363,7 @@ def test_model_adapter_settings_fail_safe(settings, intercepted, monkeypatch):
         model.client(intercepted.settings)
     assert "model_logging" in str(failure.value)
     unconfigured = Settings.from_env({"CRAFT_APP_DB_PASSWORD": settings.app_db_password})
-    assert unconfigured.model_main == "gpt-5.2" and not unconfigured.model_key
+    assert unconfigured.model_main == "gpt-5.4" and not unconfigured.model_key
     with pytest.raises(ApiError):
         model.client(unconfigured)
 
@@ -367,6 +376,88 @@ def test_embedding(app, intercepted):
     assert intercepted.received[-1]["dimensions"] == 1536
     scripted = embed(caller(app), EmbeddingInput(text="Synthetic embedding input"))
     assert scripted.model == app.state.settings.model_embedding
+
+
+def test_model_usage_is_metered_and_the_cap_refuses_at_the_limit(
+    app, owner_engine, intercepted, monkeypatch, capsys
+):
+    # Each intercepted response reports 4 input tokens (2 cached) and 4 output tokens, and an
+    # embedding 4 tokens. At these prices a token costs $0.03125: $0.25 a response, $0.125 an
+    # embedding, so a request, a stream and an embedding spend the budget exactly.
+    settings = msgspec.structs.replace(
+        intercepted.settings,
+        model_budget_usd=0.625,
+        model_price_input=31250.0,
+        model_price_output=31250.0,
+        embedding_price=31250.0,
+    )
+    trusted = caller(app, settings)
+    # Earlier runs on the check database are inside the day; a request 25 hours ago is not.
+    with owner_engine.begin() as connection:
+        connection.execute(model_usage.delete())
+        connection.execute(
+            model_usage.insert().values(
+                at=datetime.now(UTC) - timedelta(hours=25),
+                call_id=uuid4(),
+                role="main",
+                model="gpt-5.4",
+                input_tokens=1000,
+                cached_input_tokens=0,
+                output_tokens=0,
+            )
+        )
+
+    @operation(PUBLIC)
+    async def chat_probe(caller: Caller) -> None:
+        selected = model.client(settings)
+        try:
+            await selected.get_response(intercepted.messages())
+            async for _ in selected.get_response(intercepted.messages(), stream=True):
+                pass
+        finally:
+            await selected.close()
+
+    asyncio.run(chat_probe(trusted))
+    embed(trusted, EmbeddingInput(text="Synthetic embedding input"))
+    sent = len(intercepted.received)
+    with pytest.raises(BudgetExhausted):
+        asyncio.run(chat_probe(trusted))
+    with pytest.raises(BudgetExhausted):
+        embed(trusted, EmbeddingInput(text="Synthetic embedding input"))
+    assert len(intercepted.received) == sent  # refused before anything was sent
+
+    columns = ["role", "model", "input_tokens", "cached_input_tokens", "output_tokens", "call_id"]
+    with app.state.engine.connect() as connection:
+        rows = connection.execute(
+            select(*(model_usage.c[name] for name in columns)).order_by(model_usage.c.id)
+        ).all()
+    assert [tuple(row[:5]) for row in rows] == [
+        ("main", "gpt-5.4", 1000, 0, 0),
+        ("main", "gpt-5.2", 4, 2, 4),
+        ("main", "gpt-5.2", 4, 2, 4),
+        ("embedding", "text-embedding-3-large", 4, 0, 0),
+    ]
+    steps = {
+        row["call_id"]: row["name"] for row in log_rows(app, ["agent.model", "agent.embedding"])
+    }
+    assert [steps[row.call_id] for row in rows[1:]] == [
+        "agent.model",
+        "agent.model",
+        "agent.embedding",
+    ]
+    assert intercepted.no_leaks(str(rows))
+
+    monkeypatch.setattr(
+        "app.infrastructure.config.settings.Settings.from_env", lambda env=None: settings
+    )
+    capsys.readouterr()
+    main(["usage"])
+    day = {"input_tokens": 8, "cached_input_tokens": 4, "output_tokens": 8, "embedding_tokens": 4}
+    assert json.loads(capsys.readouterr().out) == {
+        "budget_usd_per_day": 0.625,
+        "last_24_hours": day | {"spent_usd": 0.625},
+        "total": day | {"input_tokens": 1008, "spent_usd": 31.875},
+    }
 
 
 def test_scripted_framework_tool_invocation(settings):

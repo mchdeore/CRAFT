@@ -21,6 +21,12 @@ def approval_status_expression():
     return service.status_expression()
 
 
+def reject_pending(session, user, run) -> None:
+    """Reject the run's pending approval in the caller's transaction: its paused run was
+    cancelled, so nothing will resume it."""
+    service.reject_pending(session, user, run)
+
+
 def approved_preparation(caller: Caller, operation_name: str, value) -> tuple[UUID, object]:
     """Read only the server preparation bound to the current approved invocation."""
     require(caller, SIGNED_IN)

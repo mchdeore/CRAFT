@@ -1,6 +1,5 @@
 """Readable library queries use explicit sessions and never choose transactions."""
 
-from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import and_, column, func, or_, select, table, text, tuple_
@@ -9,51 +8,6 @@ from sqlalchemy.orm import Session
 from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.grants import readable
-
-
-def clear_index(
-    session: Session,
-    items: Sequence[str],
-    *,
-    preserve_versions: bool = False,
-    preserve_facets: bool = False,
-    versions: Sequence[tuple[str, int]] | None = None,
-) -> None:
-    """Remove derived rows for these source items, preserving other providers.
-
-    With versions, only those (item, version) pairs lose their chunks and vectors.
-    """
-    if not items:
-        return
-    documents = select(m.doc_versions.c.id).where(m.doc_versions.c.item.in_(items))
-    if versions is not None:
-        documents = documents.where(
-            tuple_(m.doc_versions.c.item, m.doc_versions.c.version).in_(list(versions))
-        )
-    chunks = select(m.chunks.c.id).where(m.chunks.c.doc_version_id.in_(documents))
-    facets = select(m.facet_texts.c.id).where(m.facet_texts.c.sources.overlap(list(items)))
-    vector_owners = [
-        and_(m.vectors.c.owner_kind == "doc_version", m.vectors.c.owner_id.in_(documents)),
-        and_(m.vectors.c.owner_kind == "chunk", m.vectors.c.owner_id.in_(chunks)),
-    ]
-    if not preserve_facets:
-        vector_owners.append(
-            and_(m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(facets))
-        )
-    session.execute(m.vectors.delete().where(or_(*vector_owners)))
-    if not preserve_facets:
-        session.execute(m.facet_texts.delete().where(m.facet_texts.c.id.in_(facets)))
-    session.execute(
-        m.version_diffs.delete().where(
-            or_(
-                m.version_diffs.c.from_version.in_(documents),
-                m.version_diffs.c.to_version.in_(documents),
-            )
-        )
-    )
-    session.execute(m.chunks.delete().where(m.chunks.c.id.in_(chunks)))
-    if not preserve_versions:
-        session.execute(m.doc_versions.delete().where(m.doc_versions.c.id.in_(documents)))
 
 
 def item(session: Session, caller: Caller, key: str):
@@ -139,106 +93,6 @@ def provider_readable(session: Session, caller: Caller, record) -> bool:
         ).first()
         is not None
     )
-
-
-def facet_documents(session: Session, mission, items):
-    latest = (
-        select(m.doc_versions.c.item, func.max(m.doc_versions.c.version).label("version"))
-        .group_by(m.doc_versions.c.item)
-        .subquery()
-    )
-    return [
-        dict(row)
-        for row in session.execute(
-            select(
-                m.provider_items.c.item,
-                m.provider_items.c.title,
-                m.provider_items.c.silo,
-                m.provider_items.c.simulated,
-                m.doc_versions.c.summary,
-            )
-            .join(m.doc_versions, m.doc_versions.c.item == m.provider_items.c.item)
-            .join(
-                latest,
-                and_(
-                    latest.c.item == m.doc_versions.c.item,
-                    latest.c.version == m.doc_versions.c.version,
-                ),
-            )
-            .join(m.missions, m.missions.c.key == m.provider_items.c.mission_key)
-            .where(
-                m.provider_items.c.mission_key == mission,
-                m.provider_items.c.item.in_(items),
-                m.provider_items.c.deleted_at.is_(None),
-            )
-            .order_by(m.provider_items.c.item)
-        ).mappings()
-    ]
-
-
-def facet_refresh(session: Session, missions, changed_items, main_model, embedding_model):
-    rows = list(
-        session.execute(
-            select(
-                m.facet_texts.c.mission_key,
-                m.facet_texts.c.sources,
-                m.facet_texts.c.model,
-                m.vectors.c.model.label("embedding_model"),
-                m.vectors.c.recipe,
-            ).outerjoin(
-                m.vectors,
-                and_(
-                    m.vectors.c.owner_kind == "facet_text",
-                    m.vectors.c.owner_id == m.facet_texts.c.id,
-                ),
-            )
-        ).mappings()
-    )
-    seen = {row["mission_key"] for row in rows}
-    dirty = set(missions) - seen
-    for row in rows:
-        if set(row["sources"]) & changed_items or (
-            row["mission_key"] in missions
-            and (
-                row["model"] != main_model
-                or row["embedding_model"] != embedding_model
-                or row["recipe"] != "facet-v1"
-            )
-        ):
-            dirty.add(row["mission_key"])
-    return dirty
-
-
-def replace_facets(session: Session, mission, prepared, main_model, embedding_model):
-    ids = list(
-        session.execute(
-            select(m.facet_texts.c.id).where(m.facet_texts.c.mission_key == mission)
-        ).scalars()
-    )
-    session.execute(
-        m.vectors.delete().where(
-            m.vectors.c.owner_kind == "facet_text", m.vectors.c.owner_id.in_(ids)
-        )
-    )
-    session.execute(m.facet_texts.delete().where(m.facet_texts.c.mission_key == mission))
-    for facet, (text_value, sources, vector) in prepared.items():
-        identifier = session.execute(
-            m.facet_texts.insert()
-            .values(
-                mission_key=mission, facet=facet, text=text_value, sources=sources, model=main_model
-            )
-            .returning(m.facet_texts.c.id)
-        ).scalar_one()
-        session.execute(
-            m.vectors.insert().values(
-                owner_kind="facet_text",
-                owner_id=identifier,
-                model=embedding_model,
-                recipe="facet-v1",
-                embedding=vector,
-            )
-        )
-    return len(ids)
 
 
 def facet_records(session: Session, missions, facets):

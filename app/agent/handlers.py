@@ -26,15 +26,6 @@ class EmbeddingOutput(Shape):
     model: str
 
 
-class EmbeddingBatchInput(Shape):
-    texts: Annotated[list[str], msgspec.Meta(min_length=1)]
-
-
-class EmbeddingBatchOutput(Shape):
-    vectors: list[Annotated[list[float], msgspec.Meta(min_length=1536, max_length=1536)]]
-    model: str
-
-
 class ModelMessage(Shape):
     role: Literal["system", "user", "assistant", "tool"]
     text: str
@@ -256,7 +247,8 @@ async def run_events(caller: Caller, request: RunEventsRef) -> AsyncIterator[AGU
 
 @operation(SIGNED_IN, post="/agent/runs/{run}/cancel")
 def cancel_run(caller: Caller, request: RunRef) -> None:
-    """Stop an owned queued or running run; its stream ends with RUN_ERROR run_cancelled."""
+    """Stop an owned queued, running or paused run; its stream ends with RUN_ERROR
+    run_cancelled. A paused run's pending approval is rejected."""
     from app.agent import service
 
     service.cancel_run(caller, request.run)
@@ -282,19 +274,6 @@ def embed(caller: Caller, request: EmbeddingInput) -> EmbeddingOutput:
         raise NotFound()
     return EmbeddingOutput(
         vector=asyncio.run(model.embedding(caller.settings, request.text)),
-        model=caller.settings.model_embedding,
-    )
-
-
-@operation(PUBLIC)
-def embed_batch(caller: Caller, request: EmbeddingBatchInput) -> EmbeddingBatchOutput:
-    """Embed several already authorized source texts in order through one model client."""
-    if caller.settings is None:
-        from app.infrastructure.errors import NotFound
-
-        raise NotFound()
-    return EmbeddingBatchOutput(
-        vectors=asyncio.run(model.embeddings(caller.settings, request.texts)),
         model=caller.settings.model_embedding,
     )
 
