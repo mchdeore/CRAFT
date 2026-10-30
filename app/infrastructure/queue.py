@@ -506,7 +506,8 @@ def worker_thread(
 
     thread = threading.Thread(target=target, name="craft-test-worker", daemon=True)
     thread.start()
-    ready.wait(30)
+    if not ready.wait(30):
+        raise TimeoutError("worker did not start")
     if "error" in state:
         raise state["error"]
     try:

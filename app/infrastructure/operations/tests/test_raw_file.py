@@ -5,10 +5,10 @@ import hashlib
 from uuid import uuid4
 
 import msgspec
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
 from app import create_app
+from app.accounts import service as accounts
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import TooLarge
@@ -51,7 +51,7 @@ def test_raw_transport_and_auth(settings, owner_engine):
         connection.execute(
             m.metadata.tables["local_credentials"]
             .insert()
-            .values(user_id=user, password_hash=PasswordHasher().hash(password))
+            .values(user_id=user, password_hash=accounts.PASSWORDS.hash(password))
         )
     configured = msgspec.structs.replace(settings, allowed_origins="https://testserver")
     app = create_app(configured)

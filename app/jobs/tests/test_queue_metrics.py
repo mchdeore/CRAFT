@@ -23,6 +23,10 @@ def test_parse_since_durations():
 def test_samples_and_report_match_known_jobs(settings, jobs, owner_engine, monkeypatch, capsys):
     monkeypatch.setattr(queue, "SAMPLE_SECONDS", 0.05)
     monkeypatch.setattr(queue, "RECOVER_SECONDS", 0.05)
+    with owner_engine.connect() as connection:
+        last_sample = connection.execute(
+            text("select coalesce(max(id), 0) from queue_samples")
+        ).scalar_one()
     with queue.worker_thread(settings, ["interactive"], concurrency=2):
         done = [jobs.defer(test_jobs.sleep, seconds=0) for _ in range(3)]
         for job in done:
@@ -39,7 +43,8 @@ def test_samples_and_report_match_known_jobs(settings, jobs, owner_engine, monke
             )
         ).scalar_one()
         samples = connection.execute(
-            text("select count(*) from queue_samples where queue = 'interactive'")
+            text("select count(*) from queue_samples where queue = 'interactive' and id > :last"),
+            {"last": last_sample},
         ).scalar_one()
     assert metrics >= 3
     assert samples >= 1

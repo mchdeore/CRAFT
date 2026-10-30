@@ -1,8 +1,8 @@
 """A scripted model and word-hash embeddings that tests install in place of the configured model.
 
-`install` swaps the model client and embeddings for settings that name `ENDPOINT`;
-any other endpoint keeps the configured client, so adapter tests still reach the
-intercepted transport."""
+`install` swaps the model client and embeddings for settings that name `ENDPOINT`.
+Settings with no model, or with a reserved `.invalid` host, keep the configured client, so
+adapter tests still reach the intercepted transport; any other endpoint is refused."""
 
 import hashlib
 import html
@@ -12,6 +12,7 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 import msgspec
 import pytest
@@ -33,8 +34,6 @@ from app.infrastructure.operations import observe
 ENDPOINT = "https://scripted-model.test"
 KEY = "scripted"
 MODEL = "scripted"
-# Subprocess tests run `COMMAND + [craft arguments]` with `ENVIRONMENT` added.
-COMMAND = ["uv", "run", "python", "-m", "app.tests.support.scripted_cli"]
 ENVIRONMENT = {"CRAFT_MODEL_ENDPOINT": ENDPOINT, "CRAFT_MODEL_KEY": KEY}
 
 
@@ -369,12 +368,20 @@ def scripted(settings) -> bool:
     return settings.model_endpoint == ENDPOINT
 
 
+def refuse_real(settings) -> None:
+    """Allow only an unconfigured model or an `.invalid` host (the adapter tests' interceptor)."""
+    host = urlsplit(settings.model_endpoint).hostname or ""
+    if model.configured(settings) and not host.endswith(".invalid"):
+        raise RuntimeError("tests must not reach a real model")
+
+
 def install(patch: pytest.MonkeyPatch) -> None:
     configured_client = model.client
     configured_embeddings = model.embeddings
 
     def client(settings, role: model.Role = "main"):
         if not scripted(settings):
+            refuse_real(settings)
             return configured_client(settings, role)
         if role not in {"main", "check"}:
             from app.infrastructure.errors import InvalidInput
@@ -388,6 +395,7 @@ def install(patch: pytest.MonkeyPatch) -> None:
 
     async def embeddings(settings, texts):
         if not scripted(settings):
+            refuse_real(settings)
             return await configured_embeddings(settings, texts)
         return await scripted_embeddings(settings, texts)
 

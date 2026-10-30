@@ -20,7 +20,6 @@ from app.infrastructure.mcp.tests.test_mcp_tokens import call, logged
 from app.infrastructure.operations.storage import call_log
 from app.jobs.handlers import requested_job
 from app.tests.support.chat import chat as chat
-from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
 

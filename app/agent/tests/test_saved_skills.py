@@ -391,7 +391,6 @@ def test_native_completion_only_pins_checked_matching_success(context, result_ki
     assert provider.references == []
 
 
-@pytest.mark.slow
 def test_capability_overview_is_owned_bounded_and_complete_discovery_pages(context):
     from app.tools import service as tools_service
 

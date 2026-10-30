@@ -2,7 +2,6 @@ import pytest
 
 from app.infrastructure.database import metadata as m
 from app.tests.support.chat import chat as chat
-from app.tests.support.chat import remove_extra_conversations as remove_extra_conversations
 from app.tests.support.cube import cube_source as cube_source
 
 

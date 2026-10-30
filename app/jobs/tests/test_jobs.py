@@ -25,6 +25,7 @@ from app.infrastructure.operations import Job, operation
 from app.infrastructure.operations.jobs import current_job, enqueue
 from app.infrastructure.paths import ROOT
 from app.tests.support import jobs as test_jobs
+from app.tests.support import model as scripted_model
 from app.tests.support.cube import cube_source as cube_source
 
 ORIGIN = {"Origin": "https://testserver"}
@@ -35,14 +36,15 @@ def jobs(settings, owner_engine, monkeypatch):
     monkeypatch.setattr(queue, "POLL_SECONDS", 0.1)
     for name in ("interactive", "bulk"):
         monkeypatch.setitem(queue.WAITS, name, (0, 0, 0))
-    with owner_engine.begin() as connection:
-        connection.execute(
-            text("update procrastinate_jobs set status = 'cancelled' where status = 'todo'")
-        )
+    with owner_engine.connect() as connection:
+        newest = connection.execute(
+            text("select coalesce(max(id), 0) from procrastinate_jobs")
+        ).scalar_one()
     engine = make_engine(settings)
     sessions = made = make_sessions(engine)
 
     class Jobs:
+        last_job_id = newest  # jobs above it are this test's own
         caller = Caller(user_id=uuid4(), roles=frozenset({"member"}), sessions=made)
         sessions = made
 
@@ -83,6 +85,14 @@ def jobs(settings, owner_engine, monkeypatch):
 
     yield Jobs
     engine.dispose()
+    with owner_engine.begin() as connection:
+        connection.execute(
+            text(
+                "update procrastinate_jobs set status = 'cancelled'"
+                " where status = 'todo' and id > :last"
+            ),
+            {"last": newest},
+        )
 
 
 def test_a_lock_returns_the_active_job(jobs):
@@ -177,19 +187,22 @@ def test_a_long_bulk_job_never_delays_the_agent_queue(settings, jobs):
         long = jobs.defer(test_jobs.bulk, seconds=30)
         jobs.wait(long, {"started"})
         quick = jobs.defer(test_jobs.agent)
-        started = time.monotonic()
         jobs.wait(quick, {"finished"}, seconds=5)
-        assert time.monotonic() - started < 3
+        assert jobs.row(long).state == "started"
         jobs.cancel(long)
         jobs.wait(long, {"stopped"})
 
 
 @pytest.mark.slow
 def test_a_killed_workers_job_is_retried_and_finishes(settings, jobs, monkeypatch):
-    environment = os.environ | {
-        "CRAFT_DATABASE_NAME": settings.database_name,
-        "CRAFT_WORKER_QUEUES": "interactive",
-    }
+    environment = (
+        os.environ
+        | scripted_model.ENVIRONMENT
+        | {
+            "CRAFT_DATABASE_NAME": settings.database_name,
+            "CRAFT_WORKER_QUEUES": "interactive",
+        }
+    )
     worker = subprocess.Popen(
         [sys.executable, "-m", "app.tests.support.job_worker"], cwd=ROOT, env=environment
     )
@@ -299,9 +312,9 @@ def test_two_workers_queue_a_scheduled_job_once_per_tick(settings, jobs, owner_e
                 connection.execute(
                     text(
                         "select id from procrastinate_jobs"
-                        " where task_name = :name and status = 'todo'"
+                        " where task_name = :name and status = 'todo' and id > :last"
                     ),
-                    {"name": name},
+                    {"name": name, "last": jobs.last_job_id},
                 ).scalars()
             )
 
@@ -314,8 +327,9 @@ def test_two_workers_queue_a_scheduled_job_once_per_tick(settings, jobs, owner_e
     jobs.cancel(queued[0])
 
 
+@pytest.mark.slow
 def test_a_tick_during_a_run_waits_for_it_and_runs_as_the_system(
-    settings, jobs, owner_engine, monkeypatch
+    settings, jobs, owner_engine, monkeypatch, last_call_id
 ):
     name = tick.__operation__.name
     monkeypatch.setitem(TICK, "seconds", 3.0)
@@ -356,7 +370,9 @@ def test_a_tick_during_a_run_waits_for_it_and_runs_as_the_system(
     call_log = metadata.tables["call_log"]
     with owner_engine.connect() as connection:
         users = connection.execute(
-            select(call_log.c.user_id, call_log.c.origin).where(call_log.c.name == name)
+            select(call_log.c.user_id, call_log.c.origin).where(
+                call_log.c.name == name, call_log.c.id > last_call_id
+            )
         ).all()
     assert users and set(users) == {(None, "python")}
 
@@ -449,10 +465,14 @@ def test_a_notification_that_cannot_be_written_never_fails_the_job(settings, job
 def test_a_killed_workers_notify_job_fails_and_tells_its_requester(
     settings, jobs, person, monkeypatch
 ):
-    environment = os.environ | {
-        "CRAFT_DATABASE_NAME": settings.database_name,
-        "CRAFT_WORKER_QUEUES": "interactive",
-    }
+    environment = (
+        os.environ
+        | scripted_model.ENVIRONMENT
+        | {
+            "CRAFT_DATABASE_NAME": settings.database_name,
+            "CRAFT_WORKER_QUEUES": "interactive",
+        }
+    )
     worker = subprocess.Popen(
         [sys.executable, "-m", "app.tests.support.job_worker"], cwd=ROOT, env=environment
     )

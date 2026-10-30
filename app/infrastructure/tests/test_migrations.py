@@ -214,19 +214,20 @@ def test_workspace_call_rows_survive_an_incompatible_downgrade(
     config, connection = isolated_migrations
     command.upgrade(config, "head")
     expected = ScriptDirectory.from_config(config).get_current_head()
-    connection.execute(
+    inserted = connection.execute(
         text(
             "insert into call_log (kind, name, origin, outcome, duration_ms, request_id, call_id) "
-            "values ('operation', 'accounts.me', 'workspace', 'ok', 1, uuidv7(), uuidv7())"
+            "values ('operation', 'accounts.me', 'workspace', 'ok', 1, uuidv7(), uuidv7()) "
+            "returning id"
         )
-    )
+    ).scalar_one()
     with pytest.raises(IntegrityError), connection.begin_nested():
         command.downgrade(config, "0014")
     assert (
         connection.execute(
-            text("select count(*) from call_log where origin = 'workspace'")
+            text("select origin from call_log where id = :id"), {"id": inserted}
         ).scalar_one()
-        == 1
+        == "workspace"
     )
     assert (
         connection.execute(text("select version_num from alembic_version")).scalar_one() == expected
