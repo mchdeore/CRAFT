@@ -18,6 +18,7 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAn
 
 from app.agent import runtime
 from app.agent.handlers import RunAgentInput
+from app.agent.workspace_session import RunBoundSession
 from app.approvals import handlers as approvals
 from app.infrastructure import hub, workspaces
 from app.infrastructure.access import Caller
@@ -25,6 +26,7 @@ from app.infrastructure.config.settings import Settings
 from app.infrastructure.errors import ApiError
 from app.infrastructure.mcp.client import LocalHTTPTool, ToolCallMiddleware, client
 from app.infrastructure.operations.context import CallContext, current_call
+from app.infrastructure.operations.storage import call_log
 from app.notes import handlers as notes
 from app.skills.native import SavedSkillsProvider
 from app.workspace import handlers as workspace_handlers
@@ -100,8 +102,6 @@ class Remote:
 
 @asynccontextmanager
 async def bound(*, reply=None, behavior=None, allowed=None, remaining=10):
-    from app.agent.workspace_session import RunBoundSession
-
     evidence, trace = [], []
     budget = {"calls": 0, "exceeded": False}
     allowed = allowed if allowed is not None else [tool.name for tool in native_tools()]
@@ -336,8 +336,6 @@ def workspace(monkeypatch, context):
     monkeypatch.setattr(workspaces, "write_notebook", write_nb)
     yield calls, files
     # Workspace-origin audit rows would block a later downgrade below migration 0015.
-    from app.infrastructure.operations.storage import call_log
-
     with context["owner"].begin() as connection:
         connection.execute(
             call_log.delete().where(

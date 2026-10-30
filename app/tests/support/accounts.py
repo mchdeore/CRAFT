@@ -1,4 +1,5 @@
-"""A signed-in session account with probe operations, as the session tests use."""
+"""The session tests' member: a password, a conversation, probe operations and a client that
+login() signs in."""
 
 from types import SimpleNamespace
 from uuid import UUID, uuid4

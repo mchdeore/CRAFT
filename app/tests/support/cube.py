@@ -15,8 +15,9 @@ from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library.convert import convert
-from app.tests.support import rows
-from app.tests.support.people import person
+from app.tests.support import people, rows
+
+BUDGET = b"# 1 Budget\n\n| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 350 | W |\n"
 
 
 @pytest.fixture
@@ -93,7 +94,7 @@ def cube_source(settings, owner_engine, tmp_path):
                 m.cube_values.insert().values(**values).returning(m.cube_values.c.id)
             ).scalar_one()
 
-    with person(owner_engine) as account:
+    with people.person(owner_engine) as account:
         with owner_engine.begin() as connection:
             connection.execute(
                 m.mission_grants.insert().values(user_id=account.id, mission_key=mission, silo=None)
@@ -177,9 +178,6 @@ def clear_index(connection: Connection, items: list[str]) -> None:
     )
     connection.execute(m.chunks.delete().where(m.chunks.c.id.in_(chunks)))
     connection.execute(m.doc_versions.delete().where(m.doc_versions.c.id.in_(documents)))
-
-
-BUDGET = b"# 1 Budget\n\n| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 350 | W |\n"
 
 
 @pytest.fixture

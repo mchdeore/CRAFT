@@ -17,7 +17,8 @@ notifications, inputs = metadata.tables["notifications"], metadata.tables["agent
 
 @pytest.fixture
 def person(settings, owner_engine):
-    """A user with three conversations, and a caller with its own engine."""
+    """A user with no roles or password, three conversations, and a caller with its own engine.
+    Unlike people.person(), it yields the caller and the conversations."""
     users = metadata.tables["users"]
     with owner_engine.begin() as connection:
         user = connection.execute(

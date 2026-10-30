@@ -1,4 +1,5 @@
-"""Two generated people, a conversation and a run with a pending-decision tool operation."""
+"""The approvals context, and helpers that sign its people in, read their decision rows and drive
+their runs through a live runtime."""
 
 import json
 from contextlib import contextmanager
@@ -16,13 +17,13 @@ from app.agent.handlers import RunAgentInput
 from app.approvals.handlers import ApprovalRequest
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.database.metadata import metadata
-from app.infrastructure.mcp.tests.http_fixture import live_server
 from app.infrastructure.operations import DATA, operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.shapes import Shape
+from app.tests.support import people
 from app.tests.support.chat import agent_worker
 from app.tests.support.model import ScriptedChatClient
-from app.tests.support.people import person
+from app.tests.support.server import live_server
 
 
 class MutationInput(Shape):
@@ -32,7 +33,7 @@ class MutationInput(Shape):
 @pytest.fixture
 def context(settings, owner_engine):
     """A requester and a foreign person sharing one password, the requester's conversation with
-    a started run, and a tool operation that needs a decision. Every row of theirs goes after."""
+    a started run, and a tool operation that needs a decision; no decision is requested yet."""
     snapshot = registry.copy()
 
     @operation(SIGNED_IN, post="/decision-fixture", tool=True, effects=DATA)
@@ -47,8 +48,8 @@ def context(settings, owner_engine):
     conversations = metadata.tables["conversations"]
     try:
         with (
-            person(owner_engine, password=password) as requester,
-            person(owner_engine, password=password) as foreign,
+            people.person(owner_engine, password=password) as requester,
+            people.person(owner_engine, password=password) as foreign,
         ):
             with owner_engine.begin() as db:
                 conversation = db.execute(

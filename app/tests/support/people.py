@@ -1,4 +1,5 @@
-"""Generated people: a user with roles and a password, removed with every row of theirs."""
+"""Generated people: a user with roles and a password, removed with the rows tied to it by
+foreign key."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -6,6 +7,7 @@ from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from sqlalchemy import ColumnElement, Engine, Table, or_, select, tuple_
+from sqlalchemy.schema import sort_tables
 
 from app.accounts import service as accounts
 from app.infrastructure.database.metadata import metadata
@@ -22,8 +24,8 @@ class Person:
 def person(
     engine: Engine, roles: tuple[str, ...] = ("member",), password: str | None = None
 ) -> Iterator[Person]:
-    """A user with these roles and a password credential. On exit the user is deleted with
-    every row that references it, directly or through other rows."""
+    """A user with these roles and a password credential. On exit the user is deleted with every
+    row that references it by foreign key, directly or through other rows, and its runs' events."""
     username, password = "person_" + uuid4().hex, password or uuid4().hex
     users = metadata.tables["users"]
     with engine.begin() as connection:
@@ -48,7 +50,7 @@ def person(
 
 
 def remove(engine: Engine, user: UUID) -> None:
-    """Delete the user's rows in reverse `metadata.sorted_tables` order: dependents first."""
+    """Delete the user's rows, each table's before the rows they reference."""
     owned = owned_rows(user)
     runs, inputs = metadata.tables["agent_runs"], metadata.tables["agent_run_inputs"]
     events = metadata.tables["agent_run_events"]
@@ -62,17 +64,16 @@ def remove(engine: Engine, user: UUID) -> None:
                 )
             )
         )
-        for table in reversed(metadata.sorted_tables):
-            if table in owned:
-                connection.execute(table.delete().where(owned[table]))
+        for table, rows in reversed(owned.items()):
+            connection.execute(table.delete().where(rows))
 
 
 def owned_rows(user: UUID) -> dict[Table, ColumnElement[bool]]:
-    """For each table, which rows reference the user directly or through other such rows.
-    `sorted_tables` lists every table after the tables it references."""
+    """For each table, in dependency order, the rows that reference the user directly or through
+    other such rows."""
     users = metadata.tables["users"]
     owned: dict[Table, ColumnElement[bool]] = {users: users.c.id == user}
-    for table in metadata.sorted_tables:
+    for table in dependency_order():
         references = [
             tuple_(*key.columns).in_(
                 select(*[element.column for element in key.elements]).where(
@@ -85,3 +86,16 @@ def owned_rows(user: UUID) -> dict[Table, ColumnElement[bool]]:
         if references:
             owned[table] = or_(*references)
     return owned
+
+
+def dependency_order() -> list[Table]:
+    """Every table after the tables it references: `metadata.sorted_tables`, which leaves out
+    foreign keys declared use_alter (messages.run_id), with those added back."""
+    tables = sorted(metadata.tables.values(), key=lambda table: table.key)
+    late = [
+        (key.referred_table, table)
+        for table in tables
+        for key in table.foreign_key_constraints
+        if key.use_alter
+    ]
+    return sort_tables(tables, extra_dependencies=late)

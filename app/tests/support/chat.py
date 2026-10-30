@@ -12,9 +12,9 @@ from sqlalchemy import select, text
 
 from app.agent.handlers import AskAgent, RunAgentInput, ask_agent, get_answer, run_agent
 from app.infrastructure.database import metadata as m
-from app.infrastructure.mcp.tests.http_fixture import live_server
 from app.infrastructure.queue import worker_thread
 from app.jobs.handlers import JobRef
+from app.tests.support.server import live_server
 
 
 def ask(caller, question, conversation=None, seconds=60):
