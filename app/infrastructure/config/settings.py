@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Annotated, Literal
 
 import msgspec
@@ -65,6 +66,13 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     model_endpoint: str = ""
     model_key: str = ""
     model_max_output_tokens: Annotated[int, msgspec.Meta(ge=16, le=16000)] = 4000
+    # The spend cap: model requests refuse once the usage recorded since model_budget_since
+    # (None: all of it) costs model_budget_usd. Prices are USD per million tokens.
+    model_budget_usd: Annotated[float, msgspec.Meta(ge=0)] = 9.5
+    model_budget_since: Annotated[datetime, msgspec.Meta(tz=True)] | None = None
+    model_price_input: Annotated[float, msgspec.Meta(ge=0)] = 2.5
+    model_price_output: Annotated[float, msgspec.Meta(ge=0)] = 15.0
+    embedding_price: Annotated[float, msgspec.Meta(ge=0)] = 0.13
     agent_run_seconds: Annotated[int, msgspec.Meta(ge=30, le=900)] = 120
     wolfram_app_id: str = ""
     mcp_url: str = "http://127.0.0.1:8000/mcp"
@@ -95,6 +103,9 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             if key.startswith(PREFIX)
             and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS | IDENTITY | RETIRED
         }
+        # An empty start, as .env.example lists it, counts all recorded usage.
+        if raw.get("model_budget_since") == "":
+            del raw["model_budget_since"]
         try:
             settings = msgspec.convert(raw, cls, strict=False)
             if settings.session_idle_hours > settings.session_absolute_hours:

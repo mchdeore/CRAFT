@@ -24,6 +24,7 @@ from agent_framework import (
     FunctionInvocationLayer,
     Message,
     ResponseStream,
+    UsageDetails,
 )
 
 from app.agent import model
@@ -232,6 +233,8 @@ def catalog_summary(catalog, kind: str):
 
 
 class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatClient):
+    usage: UsageDetails | None = None  # the token counts every response reports; tests set them
+
     def __init__(self, role: str = "main"):
         super().__init__()
         self.role = role
@@ -309,6 +312,7 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
             messages=[Message(role="assistant", contents=contents, message_id=signature[:32])],
             response_id="scripted_" + signature[:24],
             model=MODEL,
+            usage_details=self.usage,
         )
 
     def _inner_get_response(self, *, messages, options, stream=False, **kwargs) -> Any:
@@ -337,12 +341,18 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
                         message_id=message.message_id,
                         model=MODEL,
                     )
+                if response.usage_details:  # last, as the configured client streams it
+                    yield ChatResponseUpdate(
+                        role="assistant",
+                        contents=[Content.from_usage(response.usage_details)],
+                        model=MODEL,
+                    )
 
             source = ResponseStream(updates(), finalizer=lambda _: self.reply(messages))
             from app.infrastructure.operations.context import current_call
 
             if current_call.get() is not None:
-                return model.observed_stream(source)
+                return model.observed_stream(source, self.role, MODEL)
             return source
 
         async def reply():
@@ -350,7 +360,9 @@ class ScriptedChatClient(FunctionInvocationLayer, ChatMiddlewareLayer, BaseChatC
 
         from app.infrastructure.operations.context import current_call
 
-        return model.complete(reply()) if current_call.get() is not None else reply()
+        if current_call.get() is not None:
+            return model.complete(reply(), self.role, MODEL)
+        return reply()
 
 
 def scripted(settings) -> bool:

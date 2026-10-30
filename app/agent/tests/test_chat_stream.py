@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import msgspec
@@ -25,6 +26,7 @@ from app.agent.handlers import (
     run_agent,
     run_events,
 )
+from app.agent.usage import model_usage
 from app.infrastructure import queue
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_engine
@@ -442,6 +444,46 @@ def test_chat_stream_output_budget(chat, monkeypatch):
             .one()
         )
     assert result == "error"
+
+
+def test_chat_stream_spend_cap(chat, monkeypatch):
+    # Each scripted response reports 10 input tokens (4 cached) and 10 output tokens, $0.25 at
+    # these prices: one run (a search, then the answer) spends the budget and the next is refused.
+    monkeypatch.setattr(
+        ScriptedChatClient,
+        "usage",
+        {"input_token_count": 10, "cache_read_input_token_count": 4, "output_token_count": 10},
+    )
+    since = datetime.now(UTC)
+    configured = msgspec.structs.replace(
+        chat["settings"],
+        model_budget_since=since,
+        model_budget_usd=0.5,
+        model_price_input=12500.0,
+        model_price_output=12500.0,
+    )
+    caller = replace(chat["caller"], settings=configured)
+    refused = request(chat)
+    with chat["worker"].using(configured):
+        finished = collect(caller, request(chat))
+        stopped = collect(caller, refused)
+    assert finished[-1]["type"] == "RUN_FINISHED"
+    assert stopped[-1] == {
+        "type": "RUN_ERROR",
+        "code": "budget_exhausted",
+        "message": "Model budget reached.",
+    }
+    assert row(chat, refused.run_id)["status"] == "failed"
+    with chat["owner"].connect() as connection:
+        rows = connection.execute(
+            select(
+                model_usage.c.role,
+                model_usage.c.input_tokens,
+                model_usage.c.cached_input_tokens,
+                model_usage.c.output_tokens,
+            ).where(model_usage.c.at >= since)
+        ).all()
+    assert [tuple(usage) for usage in rows] == [("main", 10, 4, 10)] * 2
 
 
 def test_http_disconnect_keeps_the_run_going(chat):

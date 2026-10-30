@@ -1,4 +1,5 @@
-"""The craft command: mcp, worker, queues, operations, call, provider, users, missions and id."""
+"""The craft command: mcp, worker, queues, usage, operations, call, provider, users, missions
+and id."""
 
 import argparse
 import re
@@ -32,6 +33,7 @@ def main(argv: list[str] | None = None) -> None:
         default=parse_since("24h"),
         help="lookback window (default 24h)",
     )
+    commands.add_parser("usage", help="model tokens and spend since CRAFT_MODEL_BUDGET_SINCE")
     call = commands.add_parser("call")
     call.add_argument("operation")
     call.add_argument("--as", dest="username", required=True)
@@ -107,6 +109,22 @@ def main(argv: list[str] | None = None) -> None:
         engine = make_engine(settings)
         try:
             print(json.dumps(queue_report(make_sessions(engine), args.since), sort_keys=True))
+        finally:
+            engine.dispose()
+    elif args.command == "usage":
+        import json
+        import sys
+
+        from app.agent.usage import report
+        from app.infrastructure.config.settings import Settings
+        from app.infrastructure.database.engine import make_engine, make_sessions
+        from app.infrastructure.logging import configure_logging
+
+        settings = Settings.from_env()
+        configure_logging(settings.log_level, sys.stderr)
+        engine = make_engine(settings)
+        try:
+            print(json.dumps(report(settings, make_sessions(engine)), sort_keys=True))
         finally:
             engine.dispose()
     elif args.command in {"worker", "provider", "call", "users", "missions"}:

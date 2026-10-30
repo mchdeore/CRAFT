@@ -44,6 +44,7 @@ def register_tables() -> None:
         "app.infrastructure.operations.storage",
         "app.conversations.storage",
         "app.agent.storage",
+        "app.agent.usage",
         "app.approvals.storage",
         "app.jobs.storage",
         "app.identity.storage",

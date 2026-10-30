@@ -1,6 +1,7 @@
 """Test setup: every test uses the craft_test database, never craft_dev."""
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import msgspec
 import pytest
@@ -23,7 +24,11 @@ TEST_DATABASE = "craft_test"
 def settings() -> Settings:
     source = read_env() | scripted_model.ENVIRONMENT
     return msgspec.structs.replace(
-        Settings.from_env(source), database_name=TEST_DATABASE, local_password_signin=True
+        Settings.from_env(source),
+        database_name=TEST_DATABASE,
+        local_password_signin=True,
+        # The check database outlives a run, so only this run's model usage counts.
+        model_budget_since=datetime.now(UTC),
     )
 
 
