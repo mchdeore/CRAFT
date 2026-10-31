@@ -7,20 +7,12 @@ from argparse import ArgumentParser
 
 
 def engine(settings):
-    from sqlalchemy import URL, create_engine
+    from sqlalchemy import create_engine
 
-    return create_engine(
-        URL.create(
-            "postgresql+psycopg",
-            username="craft_id",
-            password=settings.id_db_password,
-            host=settings.database_host,
-            port=settings.database_port,
-            database=settings.database_name,
-        ),
-        pool_pre_ping=True,
-        connect_args={"connect_timeout": 3, "options": "-c statement_timeout=3000"},
-    )
+    from app.infrastructure.database.engine import CONNECT_ARGS, database_url
+
+    url = database_url(settings, "craft_id", settings.id_db_password)
+    return create_engine(url, pool_pre_ping=True, connect_args=CONNECT_ARGS)
 
 
 def run(parser: ArgumentParser, args) -> None:
