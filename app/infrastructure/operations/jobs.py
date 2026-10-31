@@ -8,8 +8,9 @@ as a child of the call that queued it, with the same request ID.
 import asyncio
 import inspect
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from time import monotonic, perf_counter
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
 import msgspec
@@ -34,25 +35,22 @@ SCHEDULED = {
 }
 
 
-class RunningJob(Protocol):
-    """What a job operation sees of its run on the worker (app.infrastructure.queue.JobRun)."""
+@dataclass(frozen=True)
+class RunningJob:
+    """What a job operation sees of its run on the worker."""
 
-    @property
-    def sessions(self) -> Any: ...
-    @property
-    def settings(self) -> Any: ...
-    @property
-    def id(self) -> int: ...
-    @property
-    def attempt(self) -> int: ...
-    @property
-    def progress_at(self) -> list[float]:
-        """When report_progress last wrote, as a one-item list the run updates in place."""
-        ...
+    settings: Any
+    sessions: Any
+    id: int
+    attempt: int
+    context: Any  # Procrastinate's JobContext
+    # When report_progress last wrote, as a one-item list updated in place.
+    progress_at: list[float] = field(default_factory=lambda: [0.0], repr=False, compare=False)
 
     def should_abort(self) -> bool:
-        """Whether the job was asked to stop (blocking jobs check between steps)."""
-        ...
+        """Whether the job was asked to stop (blocking jobs check between steps; async jobs
+        are cancelled instead)."""
+        return self.context.should_abort()
 
 
 current_job: ContextVar[RunningJob | None] = ContextVar("current_job", default=None)
@@ -109,7 +107,8 @@ def enqueue(session: Any, caller: Caller, operation: Any, request: Any = None) -
         },
         "parent": {"request": str(call.request_id), "call": str(call.call_id)} if call else None,
     }
-    return defer(session, declared.name, args, caller.user_id)
+    lock = (declared.job.lock(request) or None) if declared.job.lock else None
+    return defer(session, declared.name, args, caller.user_id, lock)
 
 
 def deferring(declared: Operation) -> Any:
@@ -169,7 +168,7 @@ def runner(declared: Operation) -> Any:
                 error = failure
                 raise
             except BaseException:
-                # The original error stays raised, so the queue can tell transient from permanent.
+                # The original error stays raised, so the queue records its class.
                 error = ApiError()
                 raise
             finally:
@@ -202,25 +201,7 @@ def runner(declared: Operation) -> Any:
     return run_sync
 
 
-def register(declared: Operation) -> None:
-    from app.infrastructure.queue import register_job
-
-    job = declared.job
-    assert job is not None
-    lock, interrupted = job.lock, job.interrupted
-    register_job(
-        declared.name,
-        runner(declared),
-        queue=job.queue,
-        timeout=job.timeout,
-        retry=job.retry,
-        lock_key=(lambda args: lock(_input(declared, args["input"]))) if lock else None,
-        interrupted=(
-            (lambda sessions, args: interrupted(sessions, _input(declared, args["input"])))
-            if interrupted
-            else None
-        ),
-        every=job.every,
-        every_args=SCHEDULED,
-        notify=job.notify,
-    )
+def interrupt(declared: Operation, sessions: Any, args: dict) -> None:
+    """Run the job's interrupted hook on its queued input: its worker died mid-run."""
+    if declared.job is not None and declared.job.interrupted is not None:
+        declared.job.interrupted(sessions, _input(declared, args.get("input")))

@@ -96,7 +96,6 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /health/queue` | — | `QueueHealth` | public | — |
 | `GET /api/jobs` | —; query `JobPageRequest` | `JobPage` | signed in; own jobs (administrator: all) | — |
 | `GET /api/jobs/:jobId` | — | `Job` | signed in; own job (administrator: any) | — |
-| `POST /api/jobs/:jobId/retry` | — | `Job` | signed in; own job (administrator: any) | — |
 | `POST /api/jobs/:jobId/cancel` | — | `Job` | signed in; own job (administrator: any) | — |
 | `GET /api/notifications` | —; query `NotificationPageRequest` | `Notification[]` | signed in; own notifications | — |
 | `POST /api/notifications/:id/read` | — | `Notification` | signed in; own notification | — |

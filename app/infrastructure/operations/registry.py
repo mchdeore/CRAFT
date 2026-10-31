@@ -14,19 +14,19 @@ from app.infrastructure.shapes import Shape
 
 @dataclass(frozen=True)
 class Job:
-    """Run the operation on a worker queue: calling it queues a job and returns its ID.
+    """Run the operation on a worker queue: calling it queues a job and returns its ID. A job
+    runs once: a failure, or a worker that died mid-run, leaves it failed.
 
-    lock maps the input to a key: a second call while one is queued or running returns that
-    job. interrupted(sessions, input) runs when a worker died and the job will not be retried.
-    every is a cron string: the workers queue the job once per tick, as the system (a PUBLIC
-    operation with no input, never retried: the next tick runs it again). Runs never overlap:
-    a tick during a run waits for it, and further ticks while one waits are dropped.
-    notify tells the person who queued the job when it finishes or finally fails (a worker
-    shutting down mid-run counts as failing; the owner's own cancel doesn't notify).
+    timeout applies to async jobs. lock maps the input to a key: a second call while one is
+    queued or running returns that job. interrupted(sessions, input) runs when a worker died
+    mid-run. every is a cron string: the workers queue the job once per tick, as the system (a
+    PUBLIC operation with no input; the next tick runs it again). Runs never overlap: a tick
+    during a run waits for it, and further ticks while one waits are dropped. notify tells the
+    person who queued the job when it finishes or fails (a worker shutting down mid-run counts
+    as failing; the owner's own cancel doesn't notify).
     """
 
     queue: str
-    retry: bool = True
     timeout: float | None = None
     lock: Callable[[Any], str] | None = None
     interrupted: Callable[[Any, Any], None] | None = None
@@ -169,8 +169,8 @@ def declare(
 
         from app.infrastructure.access import PUBLIC
 
-        if access != PUBLIC or input_shape is not None or path or job.notify or job.retry:
-            raise ValueError("A scheduled job runs as the system: public, no input, no retry")
+        if access != PUBLIC or input_shape is not None or path or job.notify:
+            raise ValueError("A scheduled job runs as the system: public, no input, no notice")
         if not croniter.is_valid(job.every):
             raise ValueError("A scheduled job needs a valid cron string")
     return Operation(

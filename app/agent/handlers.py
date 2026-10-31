@@ -70,7 +70,6 @@ class AGUIEvent(Shape, omit_defaults=True):
     activity_type: str | None = None
     content: Any = None
     replace: bool | None = None
-    outcome: Any = None
     code: str | None = None
     message: str | None = None
     name: str | None = None

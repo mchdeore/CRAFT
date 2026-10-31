@@ -21,7 +21,6 @@ from app.infrastructure.logging import configure_logging
 from app.infrastructure.operations import observe, operation, storage
 from app.infrastructure.operations.jobs import SCHEDULED, runner
 from app.infrastructure.operations.registry import registry
-from app.infrastructure.queue import PermanentError
 from app.infrastructure.shapes import Shape
 from app.tests.support import jobs as test_jobs
 from app.tests.support.chat import chat as chat
@@ -192,8 +191,8 @@ def test_a_call_log_outage_changes_no_result(settings, monkeypatch) -> None:
         with TestClient(app) as client:
             response = client.get("/api/call-log-outage")
         run = runner(test_jobs.sleep.__operation__)
-        with pytest.raises(PermanentError):
-            asyncio.run(run(job, {"fail": "permanent"}, requester, None))
+        with pytest.raises(test_jobs.GeneratedFailure):
+            asyncio.run(run(job, {"fail": True}, requester, None))
     finally:
         app.state.engine.dispose()
     assert response.status_code == 200 and response.json() == {"value": 7}

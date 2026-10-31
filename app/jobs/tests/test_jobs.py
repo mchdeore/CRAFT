@@ -6,13 +6,14 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from procrastinate.jobs import Status
 from procrastinate.periodic import PeriodicDeferrer
 from sqlalchemy import select, text
 
@@ -21,7 +22,7 @@ from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import Forbidden
 from app.infrastructure.operations import Job, operation
-from app.infrastructure.operations.jobs import current_job
+from app.infrastructure.operations.jobs import RunningJob, current_job
 from app.infrastructure.paths import ROOT
 from app.tests.support import jobs as test_jobs
 from app.tests.support import model as scripted_model
@@ -77,14 +78,11 @@ def test_calling_a_job_operation_queues_it_and_the_worker_logs_a_child_call(sett
     assert (queued.outcome, ran.outcome) == ("ok", "ok")
 
 
-def test_transient_failures_retry_and_permanent_ones_fail_once(settings, jobs):
+def test_a_failing_job_runs_once(settings, jobs):
     with queue.worker_thread(settings, ["interactive"]):
-        transient = jobs.defer(test_jobs.sleep, fail="transient", times=2)
-        permanent = jobs.defer(test_jobs.sleep, fail="permanent")
-        done = jobs.wait(transient, {"finished", "failed"})
-        failed = jobs.wait(permanent, {"finished", "failed"})
-    assert (done.state, done.attempts) == ("finished", 3)  # every run counts, success too
-    assert (failed.state, failed.attempts, failed.error) == ("failed", 1, "PermanentError")
+        failing = jobs.defer(test_jobs.sleep, fail=True)
+        failed = jobs.wait(failing, {"finished", "failed"})
+    assert (failed.state, failed.attempts, failed.error) == ("failed", 1, "GeneratedFailure")
 
 
 def test_running_jobs_stop_through_the_api(settings, jobs, cube_source):
@@ -108,9 +106,6 @@ def test_running_jobs_stop_through_the_api(settings, jobs, cube_source):
             assert stopping.status_code == 200
             assert stopping.json()["status"] in {"stopping", "stopped"}
             assert jobs.wait(job, {"stopped", "failed", "finished"}).state == "stopped"
-        retried = http.post(f"/api/jobs/{running}/retry", headers=ORIGIN)
-        assert retried.status_code == 200 and retried.json()["jobId"] != str(running)
-        jobs.cancel(int(retried.json()["jobId"]))
         assert http.get("/health/queue").json()["queues"][0]["queue"] == "agent"
 
 
@@ -129,7 +124,7 @@ def test_a_long_bulk_job_never_delays_the_agent_queue(settings, jobs):
 
 
 @pytest.mark.slow
-def test_a_killed_workers_job_is_retried_and_finishes(settings, jobs, monkeypatch):
+def test_a_killed_workers_job_fails(settings, jobs, monkeypatch):
     environment = (
         os.environ
         | scripted_model.ENVIRONMENT
@@ -150,37 +145,49 @@ def test_a_killed_workers_job_is_retried_and_finishes(settings, jobs, monkeypatc
     monkeypatch.setattr(queue, "STALLED_SECONDS", 2.0)
     monkeypatch.setattr(queue, "RECOVER_SECONDS", 0.5)
     with queue.worker_thread(settings, ["interactive"]):
-        done = jobs.wait(job, {"finished", "failed"}, seconds=30)
-    assert (done.state, done.attempts, done.error) == ("finished", 2, "WorkerLost")
+        jobs.wait(job, {"finished", "failed"}, seconds=30)
+        # Recovery records the lost worker just after it fails the job.
+        deadline = time.monotonic() + 10
+        while jobs.row(job).error is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+    done = jobs.row(job)
+    assert (done.state, done.attempts, done.error) == ("failed", 1, "WorkerLost")
 
 
 def test_a_failing_recovery_hook_is_logged_and_the_lost_worker_still_recorded(
     settings, monkeypatch, caplog
 ):
-    def interrupted(sessions, args):
+    def interrupted(sessions, request):
         raise RuntimeError("hook failed")
 
-    kind = queue.Kind("test.lost", lambda: None, "agent", None, False, None, interrupted)
-    monkeypatch.setitem(queue.KINDS, kind.name, kind)
+    lost_job = replace(
+        test_jobs.agent.__operation__,
+        name="tests.lost",
+        job=Job(queue="agent", interrupted=interrupted),
+    )
+    monkeypatch.setitem(queue.JOBS, lost_job.name, lost_job)
     recorded = []
     monkeypatch.setattr(
         queue,
         "_record_failure",
         lambda _, job_id, attempt, error: recorded.append((job_id, type(error).__name__)),
     )
-    lost = SimpleNamespace(id=1, task_name=kind.name, queue="agent", attempts=0, task_kwargs={})
+    lost = SimpleNamespace(
+        id=1, task_name=lost_job.name, queue="agent", attempts=0, task_kwargs={"input": None}
+    )
 
     class Manager:
         async def get_stalled_jobs(self, seconds_since_heartbeat):
             return [lost]
 
         async def finish_job(self, job, status, delete_job):
-            pass
+            assert status == Status.FAILED and not delete_job
 
     app = cast(Any, SimpleNamespace(job_manager=Manager()))
     with caplog.at_level("WARNING", logger="craft.jobs"):
         assert asyncio.run(queue.recover(app, settings, cast(Any, None))) == 1
     assert recorded == [(1, "WorkerLost")]
+    assert vars(caplog.records[0])["fields"]["error_type"] == "RuntimeError"
     warnings = [record.getMessage() for record in caplog.records]
     assert warnings == ["job recovery hook failed", "job recovered"]
 
@@ -189,7 +196,7 @@ TICKS: list[int] = []
 TICK = {"seconds": 0.0}
 
 
-@operation(PUBLIC, job=Job(queue="bulk", retry=False, every="* * * * *"))
+@operation(PUBLIC, job=Job(queue="bulk", every="* * * * *"))
 async def tick(caller: Caller) -> None:
     """A scheduled job that records each run."""
     job = current_job.get()
@@ -219,11 +226,9 @@ def test_a_scheduled_job_is_public_with_no_input():
         """Not a scheduled job."""
 
     for access, job in [
-        (SIGNED_IN, Job(queue="bulk", retry=False, every="* * * * *")),
-        # A retry would put the job back in the queue beside the next tick's.
-        (PUBLIC, Job(queue="bulk", every="* * * * *")),
-        (PUBLIC, Job(queue="bulk", retry=False, every="* * * * *", notify=True)),
-        (PUBLIC, Job(queue="bulk", retry=False, every="often")),
+        (SIGNED_IN, Job(queue="bulk", every="* * * * *")),
+        (PUBLIC, Job(queue="bulk", every="* * * * *", notify=True)),
+        (PUBLIC, Job(queue="bulk", every="often")),
     ]:
         with pytest.raises(ValueError):
             operation(access, job=job)(signed_in)
@@ -335,20 +340,6 @@ def test_a_job_reports_progress_and_notifies_its_requester(settings, jobs, perso
     assert written == {("job_done", "job", str(done)), ("job_failed", "job", str(failed))}
 
 
-@dataclass
-class StubRun:
-    """A RunningJob without a worker: report_progress needs only its id and throttle."""
-
-    sessions: Any = None
-    settings: Any = None
-    id: int = 7
-    attempt: int = 1
-    progress_at: list[float] = field(default_factory=lambda: [0.0])
-
-    def should_abort(self) -> bool:
-        return False
-
-
 def test_progress_is_checked_and_written_at_most_once_a_second(monkeypatch):
     from app.infrastructure.operations.jobs import report_progress
     from app.jobs import handlers
@@ -357,7 +348,8 @@ def test_progress_is_checked_and_written_at_most_once_a_second(monkeypatch):
         report_progress(1, 2)
     written = []
     monkeypatch.setattr(handlers, "save_progress", lambda *args: written.append(args[2:]))
-    running = current_job.set(StubRun())
+    # A run without a worker: report_progress needs only its id and throttle.
+    running = current_job.set(RunningJob(None, None, 7, 1, None))
     try:
         for bad in [(3, 2, None), (-1, 2, None), (1, 2, "x" * 81)]:
             with pytest.raises(ValueError):
@@ -452,7 +444,7 @@ def test_job_logs_and_error_bodies_carry_no_content_or_secrets(settings, jobs, p
     configure_logging("DEBUG", stream)
     with queue.worker_thread(settings, ["interactive"]):
         # The marker is job input: it reaches the job, never a log line or an error body.
-        failed = jobs.defer(test_jobs.sleep, key=marker, fail="permanent")
+        failed = jobs.defer(test_jobs.sleep, key=marker, fail=True)
         notified = jobs.defer(test_jobs.counted, requested_by=person, total=3)
         jobs.wait(failed, {"failed"})
         jobs.wait(notified, {"finished"})
@@ -466,7 +458,7 @@ def test_job_logs_and_error_bodies_carry_no_content_or_secrets(settings, jobs, p
     assert '"name":"notifications.job_ended"' in lines
     assert not [secret for secret in secrets if secret in lines]
     body = msgspec.json.encode(read_job(jobs.caller, JobRef(job_id=str(failed)))).decode()
-    assert '"error":"PermanentError"' in body and marker not in body
+    assert '"error":"GeneratedFailure"' in body and marker not in body
 
 
 def notified_jobs(sessions, user):

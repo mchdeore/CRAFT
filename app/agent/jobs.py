@@ -44,7 +44,6 @@ def interrupted(sessions, request: AgentRunJob) -> None:
     SIGNED_IN,
     job=Job(
         queue="agent",
-        retry=False,
         lock=lambda request: service.RUN_LOCK + str(request.run),
         interrupted=interrupted,
     ),
@@ -133,7 +132,7 @@ async def agent_run(caller: Caller, request: AgentRunJob) -> None:
         await write({"type": "CRAFT_ERROR", "code": "internal_error"})
 
 
-@operation(PUBLIC, job=Job(queue="bulk", retry=False, every="*/15 * * * *"))
+@operation(PUBLIC, job=Job(queue="bulk", every="*/15 * * * *"))
 def prune_run_events(caller: Caller) -> None:
     """End runs left running with no job (their finish failed), then delete run events and
     inputs a day after their run ended."""
