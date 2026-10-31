@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import re
 from functools import wraps
 from time import perf_counter
 from typing import Annotated, Any, get_args, get_origin
@@ -61,14 +62,46 @@ def decode(operation: Operation, value: Any) -> Any:
         if value is None:
             value = {}
         if isinstance(value, operation.input):
-            return msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
-        if isinstance(value, (bytes, bytearray)):
-            return msgspec.json.decode(value, type=operation.input)
-        return msgspec.convert(value, operation.input, strict=True)
-    except (msgspec.ValidationError, msgspec.DecodeError, TypeError, ValueError):
+            request = msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
+        elif isinstance(value, (bytes, bytearray)):
+            request = msgspec.json.decode(value, type=operation.input)
+        else:
+            request = msgspec.convert(value, operation.input, strict=True)
+    # RecursionError: JSON nested deeper than msgspec decodes (about 10,000 levels).
+    except (msgspec.ValidationError, msgspec.DecodeError, TypeError, ValueError, RecursionError):
         raise InvalidInput(
             fields=[FieldError(path="$", message="Input does not match the declared fields.")]
         ) from None
+    if unstorable_text(request):
+        raise InvalidInput(
+            fields=[
+                FieldError(path="$", message="Text must be valid Unicode without NUL characters.")
+            ]
+        )
+    return request
+
+
+# PostgreSQL text refuses NUL, and UTF-8 has no lone surrogate: the MCP SDK's JSON parser keeps
+# both, where msgspec's refuses surrogates itself.
+UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
+
+
+def unstorable_text(value: Any) -> bool:
+    """Whether a decoded string anywhere in `value` holds text a database can't store. Bytes
+    are not text. A loop, not recursion: msgspec decodes JSON nested thousands deep."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if UNSTORABLE.search(item):
+                return True
+        elif isinstance(item, msgspec.Struct):
+            pending.extend(msgspec.structs.astuple(item))
+        elif isinstance(item, dict):
+            pending.extend(item.items())
+        elif isinstance(item, (list, tuple, set, frozenset)):
+            pending.extend(item)
+    return False
 
 
 def validate_output(operation: Operation, value: Any) -> Any:
@@ -257,7 +290,9 @@ class JsonHttpInput:
         content = await bounded_body(self.request, self.limit)
         try:
             value = msgspec.json.decode(content)
-        except msgspec.DecodeError:
+        # DecodeError, UnicodeDecodeError for invalid UTF-8 in a string, or nesting too deep:
+        # decode() refuses the content as invalid input.
+        except (ValueError, RecursionError):
             return content
         if isinstance(value, dict):
             return dict(self.request.query_params) | value | dict(self.request.path_params)
@@ -458,7 +493,7 @@ def endpoint(operation: Operation) -> Any:
                             raise ValueError
                         values.update(decoded)
                         values.update(request.path_params)
-                    except (msgspec.DecodeError, ValueError):
+                    except (msgspec.DecodeError, ValueError, RecursionError):
                         values = body
             elif body := await json_body(request):
                 values = body  # refused as input: the operation takes none

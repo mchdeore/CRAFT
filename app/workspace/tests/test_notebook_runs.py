@@ -24,20 +24,39 @@ NOTEBOOK = {
 }
 
 
-def test_a_person_can_queue_more_than_two_notebook_runs(context, workspace, monkeypatch):
+@pytest.fixture
+def queue_run(context, workspace):
+    """Queues a run of the owner's work/fit.ipynb; every queued job is deleted afterwards."""
+    from sqlalchemy import text
+
     _, files = workspace
     files["work/fit.ipynb"] = NOTEBOOK
     own = replace(context["caller"], origin="http")
-    queued = [asyncio.run(run_notebook(own, RunNotebook(path="work/fit.ipynb"))) for _ in range(3)]
-    assert len({run.job_id for run in queued}) == 3
-    assert all(run.notebook == "work/fit.ipynb" for run in queued)
-    from sqlalchemy import text
-
+    yield lambda: asyncio.run(run_notebook(own, RunNotebook(path="work/fit.ipynb")))
     with context["owner"].begin() as connection:
         connection.execute(
             text("delete from procrastinate_jobs where args->>'requested_by' = :user"),
             {"user": str(context["caller"].user_id)},
         )
+
+
+def test_a_person_can_queue_more_than_two_notebook_runs(queue_run):
+    queued = [queue_run() for _ in range(3)]
+    assert len({run.job_id for run in queued}) == 3
+    assert all(run.notebook == "work/fit.ipynb" for run in queued)
+
+
+def test_two_runs_queued_in_the_same_second_get_different_outputs(queue_run, monkeypatch):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    moment = datetime(2026, 10, 31, 9, 10, 17, tzinfo=UTC)
+    monkeypatch.setattr(service, "datetime", SimpleNamespace(now=lambda tz: moment))
+    first, second = queue_run(), queue_run()
+    assert first.output != second.output
+    for run in (first, second):  # named after the notebook and when it was queued, to sort
+        assert run.output.startswith("work/fit.run-20261031-091017")
+        assert run.output.endswith(".ipynb")
 
 
 def test_the_queued_job_outlasts_the_run_jobs_deadline():

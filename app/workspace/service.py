@@ -137,7 +137,8 @@ async def run_notebook(caller, path: str) -> dict[str, Any]:
         raise NotFound()
     notebook = PurePosixPath(name)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    output = f"{notebook.stem}.run-{stamp}.ipynb"
+    # The time sorts a notebook's runs; the tag tells apart runs queued in the same second.
+    output = f"{notebook.stem}.run-{stamp}-{uuid4().hex[:6]}.ipynb"
     assert caller.sessions is not None
     with unit_of_work(caller.sessions) as session:
         job = enqueue(session, caller, notebook_run, NotebookRunJob(path=name, output=output))

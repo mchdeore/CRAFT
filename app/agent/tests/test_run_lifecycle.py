@@ -109,7 +109,7 @@ def test_a_run_no_worker_takes_is_cancelled_and_its_stream_ends(owner_engine, pe
     data = turn(person.threads[0])
     segment, _ = service.queue_run(person.caller, data, False)
 
-    async def follow():
+    async def follow(segment):
         return [
             msgspec.to_builtins(event)
             async for event in runs.follow(
@@ -118,9 +118,13 @@ def test_a_run_no_worker_takes_is_cancelled_and_its_stream_ends(owner_engine, pe
         ]
 
     try:
-        assert asyncio.run(asyncio.wait_for(follow(), 10)) == [service.CANCELLED]
+        assert asyncio.run(asyncio.wait_for(follow(segment), 10)) == [service.CANCELLED]
         with person.caller.sessions.begin() as session:
             assert active_job(session, service.RUN_LOCK + str(data.run_id)) is None
+        # It never started, so the same run can be sent again.
+        again, _ = service.queue_run(person.caller, data, False)
+        assert again == segment + 1
+        assert asyncio.run(asyncio.wait_for(follow(again), 10)) == [service.CANCELLED]
     finally:
         with owner_engine.begin() as connection:
             connection.execute(events.delete().where(events.c.run_id == data.run_id))

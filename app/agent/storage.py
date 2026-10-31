@@ -165,6 +165,18 @@ def append_event(session: Session, run, segment, event) -> int:
     return seq
 
 
+def replace_end(session: Session, run, segment, event) -> None:
+    """End the segment with `event` in place of its RUN_FINISHED, so the stream still has one
+    end: a paused run that is cancelled ends with the cancel."""
+    finished = agent_run_events.c.event.op("->>", return_type=Text)("type") == "RUN_FINISHED"
+    session.execute(
+        agent_run_events.delete().where(
+            agent_run_events.c.run_id == run, agent_run_events.c.segment == segment, finished
+        )
+    )
+    append_event(session, run, segment, event)
+
+
 def events_after(session: Session, run, segment, after, limit=200):
     return list(
         session.execute(
@@ -178,6 +190,20 @@ def events_after(session: Session, run, segment, after, limit=200):
             .limit(limit)
         ).tuples()
     )
+
+
+def newest_event(session: Session, run, segment, through):
+    """The newest of the segment's first `through` events, or None."""
+    return session.execute(
+        select(agent_run_events.c.event)
+        .where(
+            agent_run_events.c.run_id == run,
+            agent_run_events.c.segment == segment,
+            agent_run_events.c.seq <= through,
+        )
+        .order_by(agent_run_events.c.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def last_event(session: Session, run):
@@ -275,7 +301,7 @@ def stalled(session: Session) -> list:
     return list(session.execute(running).scalars())
 
 
-def _refuse_second_task(session: Session, user) -> None:
+def refuse_second_task(session: Session, user) -> None:
     """One running task-mode run per person, so a few people can't fill the agent worker.
     A run counts only while its newest segment is recent: a row left "running" by a lost
     database connection must not lock its owner out of task mode."""
@@ -287,6 +313,17 @@ def _refuse_second_task(session: Session, user) -> None:
     )
     if session.execute(running.limit(1)).first() is not None:
         raise RateLimited()
+
+
+def mode(session: Session, run) -> str | None:
+    """The run's mode, `chat` or `task`; None before it has started."""
+    return session.execute(select(agent_runs.c.mode).where(agent_runs.c.id == run)).scalar()
+
+
+def started(session: Session, run) -> bool:
+    """Whether the run has started; a run starts once."""
+    found = session.execute(select(agent_runs.c.id).where(agent_runs.c.id == run)).first()
+    return found is not None
 
 
 def start(session: Session, user, conversation, identifier, model, version, mode="chat"):
@@ -305,7 +342,7 @@ def start(session: Session, user, conversation, identifier, model, version, mode
         from app.infrastructure.errors import NotFound
 
         raise NotFound()
-    if session.execute(select(agent_runs.c.id).where(agent_runs.c.id == identifier)).first():
+    if started(session, identifier):
         raise Conflict()
     active = agent_runs.c.status.in_(["running", "paused"])
     if session.execute(
@@ -326,7 +363,7 @@ def start(session: Session, user, conversation, identifier, model, version, mode
     if count >= 3:
         raise RateLimited()
     if mode == "task":
-        _refuse_second_task(session, user)
+        refuse_second_task(session, user)
     session.execute(
         agent_runs.insert().values(
             id=identifier,
@@ -379,7 +416,7 @@ def resume(session: Session, user, identifier) -> str:
         )
     ).scalar_one()
     if mode == "task":
-        _refuse_second_task(session, user)
+        refuse_second_task(session, user)
     session.execute(
         agent_runs.update()
         .where(agent_runs.c.id == identifier, agent_runs.c.started_by == user)
