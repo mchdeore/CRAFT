@@ -1,6 +1,13 @@
 """Synthetic files verify source order, locators, inactive cells and indexing."""
 
+import re
+import signal
+import tracemalloc
+import zlib
+from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_BZIP2, ZIP_DEFLATED, ZipFile
 
 import pytest
 
@@ -204,3 +211,159 @@ def test_html_optional_end_tags_keep_rows():
     expected = ["| Mass (kg) | Label |", "|---|---|", "| 1 | A |"]
     preserved = len(tables) == 1 and tables[0].text.splitlines() == expected
     assert preserved
+
+
+def repack(path: Path, name: str, change) -> bytes:
+    """The package at `path` with entry `name` changed."""
+    out = BytesIO()
+    with ZipFile(path) as source, ZipFile(out, "w", ZIP_DEFLATED) as target:
+        for info in source.infolist():
+            data = source.read(info)
+            target.writestr(info, change(data) if info.filename == name else data)
+    return out.getvalue()
+
+
+def corrupted(path: Path, name: str) -> bytes:
+    """The package at `path` with entry `name`'s deflate data starting 0xFF: an invalid block."""
+    content = bytearray(path.read_bytes())
+    with ZipFile(path) as package:
+        header = package.getinfo(name).header_offset
+    # A 30-byte local header ends with the name's and the extra field's lengths, then the data.
+    name_length = int.from_bytes(content[header + 26 : header + 28], "little")
+    extra_length = int.from_bytes(content[header + 28 : header + 30], "little")
+    content[header + 30 + name_length + extra_length] = 0xFF
+    return bytes(content)
+
+
+def hidden_tail(path: Path, name: str, tail: int) -> bytes:
+    """The package with `tail` zero bytes deflated after entry `name`'s data, while both of its
+    headers still give that data's own size and checksum."""
+    with ZipFile(path) as source:
+        entries = {info.filename: source.read(info) for info in source.infolist()}
+    out = BytesIO()
+    with ZipFile(out, "w", ZIP_DEFLATED) as target:
+        for entry, data in entries.items():
+            target.writestr(entry, data + bytes(tail) if entry == name else data)
+    content = bytearray(out.getvalue())
+    data = entries[name]
+    honest = zlib.crc32(data).to_bytes(4, "little"), len(data).to_bytes(4, "little")
+    with ZipFile(BytesIO(bytes(content))) as package:
+        local = package.getinfo(name).header_offset  # its crc at +14, its size at +22
+    content[local + 14 : local + 18], content[local + 22 : local + 26] = honest
+    central = content.find(b"PK\x01\x02")  # a central record: crc at +16, size at +24
+    while content[central + 46 : central + 46 + len(name)] != name.encode():
+        central = content.find(b"PK\x01\x02", central + 4)
+    content[central + 16 : central + 20], content[central + 24 : central + 28] = honest
+    return bytes(content)
+
+
+@contextmanager
+def within(seconds: float):
+    """Fail the block with TimeoutError once it runs past `seconds`, rather than hang."""
+
+    def expire(signum, frame):
+        raise TimeoutError(f"took more than {seconds} s")
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def test_a_wrong_sheet_dimension_converts_as_before(tmp_path) -> None:
+    path = workbook_file(tmp_path / "simulated.xlsx")
+    wrong = repack(
+        path,
+        "xl/worksheets/sheet1.xml",
+        lambda xml: re.sub(rb'<dimension ref="[^"]+"/>', b'<dimension ref="A1:XFD200000"/>', xml),
+    )
+    assert wrong != path.read_bytes() and convert(wrong, path.name) == read(path)
+
+
+def test_a_sheet_spanning_a1_to_xfd200000_a_wide_csv_and_a_large_package_are_refused_quickly(
+    tmp_path,
+) -> None:
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet["A1"], sheet["XFD200000"] = "Parameter", "W"
+    spread = tmp_path / "spread.xlsx"
+    workbook.save(spread)
+    # 1,001 columns by 1,999 rows pads to 2,000,999 cells; one row fewer would convert.
+    wide = tmp_path / "wide.csv"
+    wide.write_text("Parameter" + "," * 1000 + "\n" + "Mass\n" * 1998)
+    large = word_file(tmp_path / "large.docx")
+    with ZipFile(large, "a", ZIP_DEFLATED) as package:
+        package.writestr("word/media/padding.bin", bytes(33 * 1024 * 1024))
+    for path in (spread, wide, large):
+        with within(5), pytest.raises(ValueError, match="^unsupported format$"):
+            read(path)
+    narrower = tmp_path / "narrower.csv"
+    narrower.write_text("Parameter" + "," * 1000 + "\n" + "Mass\n" * 1997)
+    assert read(narrower)
+
+
+def test_data_hidden_after_an_entrys_declared_size_is_never_inflated(tmp_path) -> None:
+    path = word_file(tmp_path / "simulated.docx")
+    expected = read(path)
+    lying = hidden_tail(path, "word/document.xml", 64 * 1024 * 1024)
+    tracemalloc.start()
+    try:
+        assert convert(lying, path.name) == expected
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 16 * 1024 * 1024
+
+
+def test_one_malformed_file_per_format_is_an_unsupported_format(tmp_path) -> None:
+    """A cell span without its value, a slide without its shape tree, a cut-off sheet, a PDF
+    whose root is no catalog and an unclosed CSV quote, plus a package in bzip2, a damaged deflate
+    stream and a PDF stream in an unknown filter: each parser's error, never a crash."""
+    slide = b'<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>'
+    # The root is a page tree; /Size past pypdf's 10,000-object root search makes it give up
+    # with LimitReachedError, a PyPdfError that is no PdfReadError.
+    pdf = b"%PDF-1.4\n1 0 obj\n<</Type/Pages/Kids[]/Count 0>>\nendobj\n"
+    pdf += (
+        b"xref\n0 2\n0000000000 65535 f \n0000000009 00000 n \n"
+        b"trailer\n<</Size 1000000/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % len(pdf)
+    )
+    malformed = {
+        "simulated.docx": repack(
+            word_file(tmp_path / "simulated.docx"),
+            "word/document.xml",
+            lambda xml: xml.replace(b"<w:tc>", b"<w:tc><w:tcPr><w:gridSpan/></w:tcPr>", 1),
+        ),
+        "simulated.pptx": repack(
+            slides_file(tmp_path / "simulated.pptx"), "ppt/slides/slide1.xml", lambda _: slide
+        ),
+        "simulated.xlsx": repack(
+            workbook_file(tmp_path / "simulated.xlsx"),
+            "xl/worksheets/sheet1.xml",
+            lambda xml: xml[: len(xml) // 2],
+        ),
+        "simulated.pdf": pdf,
+        "simulated.csv": b'Parameter,"Value\n',
+    }
+    bzip2 = BytesIO()
+    with (
+        ZipFile(word_file(tmp_path / "bzip2.docx")) as source,
+        ZipFile(bzip2, "w", ZIP_BZIP2) as target,
+    ):
+        for info in source.infolist():
+            target.writestr(info.filename, source.read(info))
+    damaged = {
+        "bzip2.docx": bzip2.getvalue(),
+        "damaged.docx": corrupted(word_file(tmp_path / "damaged.docx"), "word/document.xml"),
+        "filtered.pdf": pdf_file(tmp_path / "filtered.pdf", pages=1)
+        .read_bytes()
+        .replace(b"/FlateDecode", b"/UnknownCode"),
+    }
+    for name, content in (malformed | damaged).items():
+        with pytest.raises(ValueError, match="^unsupported format$"):
+            convert(content, name)

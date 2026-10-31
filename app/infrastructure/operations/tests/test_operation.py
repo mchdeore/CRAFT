@@ -78,6 +78,37 @@ def test_operation_validation_is_strict(settings: Settings) -> None:
         assert client.get("/api/probe/not-a-uuid").json()["code"] == "invalid_input"
 
 
+def test_json_bodies_stop_at_four_mib(settings: Settings) -> None:
+    """A body past 4 MiB is refused (413): unread when its Content-Length says so, else as it
+    streams. Exactly 4 MiB is read. An operation without input still takes no body and refuses
+    a small one as input."""
+
+    @operation(PUBLIC, post="/body-probe")
+    def body(caller: Caller, request: ProbeInput) -> None:
+        return None
+
+    @operation(PUBLIC, post="/no-input-probe")
+    def no_input(caller: Caller) -> None:
+        return None
+
+    limit = 4 * 1024 * 1024
+    full = b'{"value": 7' + b" " * (limit - 12) + b"}"
+    oversized = b'{"username": "' + b"x" * 5 * 1024 * 1024 + b'", "password": "x"}'
+    streamed = (oversized[at : at + 65536] for at in range(0, len(oversized), 65536))
+    app = create_app(settings)
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
+        assert client.post("/api/body-probe", content=full).status_code == 204
+        assert client.post("/api/body-probe", content=full + b" ").status_code == 413
+        assert client.post("/api/session", content=oversized).status_code == 413
+        assert client.post("/api/session", content=streamed).status_code == 413
+        declared = {"Content-Length": str(5 * 1024 * 1024)}
+        assert client.post("/api/session", content=b"{}", headers=declared).status_code == 413
+        assert client.post("/api/no-input-probe").status_code == 204
+        assert client.post("/api/no-input-probe", content=b"{}").status_code == 400
+        assert client.post("/api/no-input-probe", content=oversized).status_code == 413
+    app.state.engine.dispose()
+
+
 def test_operation_curl_without_session(
     settings: Settings, tmp_path: Path, last_call_id: int
 ) -> None:

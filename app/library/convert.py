@@ -3,11 +3,18 @@
 import csv
 import logging
 import re
+import zlib
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import PurePath
-from zipfile import BadZipFile, ZipFile
+from xml.etree.ElementTree import ParseError
+from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
+
+# Untrusted files stay bounded: an Office package unpacks to at most MAX_UNPACKED bytes, and a
+# workbook or CSV holds at most MAX_CELLS cells once every row is as wide as its sheet's widest.
+MAX_UNPACKED = 32 * 1024 * 1024
+MAX_CELLS = 2_000_000
 
 
 @dataclass(frozen=True)
@@ -400,11 +407,16 @@ def workbook_document(content: bytes) -> list[Block]:
 
     workbook = load_workbook(BytesIO(content), read_only=True, data_only=True, keep_links=False)
     blocks = []
+    cells = 0
     try:
         for sheet in workbook.worksheets:
-            rows = [
-                [cell_text(value) for value in row] for row in sheet.iter_rows(values_only=True)
-            ]
+            sheet.reset_dimensions()  # a wrong <dimension> would pad every row to its range
+            rows, width = [], 0
+            for row in sheet.iter_rows(values_only=True):
+                rows.append([cell_text(value) for value in row])
+                width = max(width, len(row))
+                padded(rows, width, cells)  # refused while reading, before rows pile up
+            cells = padded(rows, width, cells)
             sheet_regions(blocks, rows, sheet.title)
     finally:
         workbook.close()
@@ -417,16 +429,51 @@ def csv_document(content: bytes, filename: str) -> list[Block]:
         dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
     except csv.Error:
         dialect = csv.excel
-    rows = [list(row) for row in csv.reader(StringIO(text), dialect, strict=True)]
+    rows, width = [], 0
+    for row in csv.reader(StringIO(text), dialect, strict=True):
+        rows.append(row)
+        width = max(width, len(row))
+        padded(rows, width)  # refused while reading, before rows pile up
     blocks = []
     sheet_regions(blocks, rows, PurePath(filename).name)
     return blocks
 
 
+def padded(rows: list[list[str]], width: int, counted: int = 0) -> int:
+    """`counted` plus these rows' cells with every row, empty or not, as wide as the widest (at
+    least one cell). More than MAX_CELLS is refused."""
+    cells = counted + len(rows) * max(width, 1)
+    if cells > MAX_CELLS:
+        raise ValueError("unsupported format")
+    return cells
+
+
+def unpacked(content: bytes) -> bytes:
+    """The Office package stored uncompressed, refused past MAX_UNPACKED bytes. Each entry is read
+    a megabyte at a time and never past the size it declares, so data hidden after that is never
+    inflated; compressions other than deflate, and encryption, are refused."""
+    copy, total = BytesIO(), 0
+    with ZipFile(BytesIO(content)) as package, ZipFile(copy, "w", ZIP_STORED) as stored:
+        for info in package.infolist():
+            if info.compress_type not in (ZIP_STORED, ZIP_DEFLATED) or info.flag_bits & 0x1:
+                raise ValueError("unsupported format")
+            with package.open(info) as source, stored.open(info.filename, "w") as target:
+                while chunk := source.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > MAX_UNPACKED:
+                        raise ValueError("unsupported format")
+                    target.write(chunk)
+    return copy.getvalue()
+
+
 def convert(content: bytes, filename: str) -> list[Block]:
     """Read only the declared format; no Office formula, link, macro or script runs."""
+    from docx.exceptions import PythonDocxError
+    from docx.opc.exceptions import OpcError
+    from docx.oxml.exceptions import XmlchemyError
     from lxml.etree import XMLSyntaxError
-    from pypdf.errors import PdfReadError
+    from pptx.exc import PythonPptxError
+    from pypdf.errors import PyPdfError
 
     suffix = PurePath(filename).suffix.lower()
     office = {
@@ -443,7 +490,7 @@ def convert(content: bytes, filename: str) -> list[Block]:
                     or entry not in package.namelist()
                 ):
                     raise ValueError("unsupported format")
-            return reader(content)
+            return reader(unpacked(content))
         if suffix == ".pdf":
             if not content.startswith(b"%PDF-"):
                 raise ValueError("unsupported format")
@@ -458,6 +505,21 @@ def convert(content: bytes, filename: str) -> list[Block]:
         if str(error) == "no text layer":
             raise
         raise ValueError("unsupported format") from None
-    except (BadZipFile, UnicodeDecodeError, csv.Error, KeyError, XMLSyntaxError, PdfReadError):
+    except (
+        BadZipFile,
+        UnicodeDecodeError,
+        csv.Error,
+        KeyError,
+        RecursionError,
+        NotImplementedError,
+        zlib.error,
+        ParseError,
+        XMLSyntaxError,
+        PyPdfError,
+        PythonPptxError,
+        PythonDocxError,
+        OpcError,
+        XmlchemyError,
+    ):
         raise ValueError("unsupported format") from None
     raise ValueError("unsupported format")
