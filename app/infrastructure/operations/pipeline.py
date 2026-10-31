@@ -29,6 +29,8 @@ from app.infrastructure.requests import current_request_id
 from app.infrastructure.shapes import FieldError, Health, RawFile, json_response
 
 log = get_logger("craft.operations")
+# Every JSON body endpoint reads itself; inputs that declare max_bytes and uploads keep theirs.
+JSON_BODY_LIMIT = 4 * 1024 * 1024
 
 
 class ApprovalRequired(ApiError):
@@ -207,17 +209,31 @@ def checked(operation: Operation, caller: Caller, value: Any) -> Any:
     return checked_input(operation, checked_access(operation, caller), value)
 
 
+async def bounded_body(request: Request, limit: int) -> bytes:
+    """The request body, refused as TooLarge once it passes `limit`."""
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > limit:
+            raise TooLarge()
+        content.extend(chunk)
+    return bytes(content)
+
+
+async def json_body(request: Request) -> bytes:
+    """A body endpoint reads itself: refused unread when its Content-Length passes the limit."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > JSON_BODY_LIMIT:
+        raise TooLarge()
+    return await bounded_body(request, JSON_BODY_LIMIT)
+
+
 class RawHttpFile:
     def __init__(self, request: Request, limit: int):
         self.request = request
         self.limit = limit
 
     async def read(self):
-        content = bytearray()
-        async for chunk in self.request.stream():
-            if len(content) + len(chunk) > self.limit:
-                raise TooLarge()
-            content.extend(chunk)
+        content = await bounded_body(self.request, self.limit)
         simulated = self.request.headers.get("x-simulated", "false").lower()
         if simulated not in {"true", "false"}:
             raise InvalidInput()
@@ -225,7 +241,7 @@ class RawHttpFile:
             dict(self.request.query_params)
             | dict(self.request.path_params)
             | {
-                "content": bytes(content),
+                "content": content,
                 "fileName": self.request.headers.get("x-file-name", ""),
                 "mediaType": self.request.headers.get("content-type", "").split(";", 1)[0].lower(),
                 "simulated": simulated == "true",
@@ -238,18 +254,14 @@ class JsonHttpInput:
         self.request, self.limit = request, limit
 
     async def read(self):
-        content = bytearray()
-        async for chunk in self.request.stream():
-            if len(content) + len(chunk) > self.limit:
-                raise TooLarge()
-            content.extend(chunk)
+        content = await bounded_body(self.request, self.limit)
         try:
             value = msgspec.json.decode(content)
         except msgspec.DecodeError:
-            return bytes(content)
+            return content
         if isinstance(value, dict):
             return dict(self.request.query_params) | value | dict(self.request.path_params)
-        return bytes(content)
+        return content
 
 
 def raw_file(operation: Operation) -> bool:
@@ -438,7 +450,7 @@ def endpoint(operation: Operation) -> Any:
                             values[name] = msgspec.json.decode(values[name].encode())
                         except msgspec.DecodeError:
                             pass
-                body = await request.body()
+                body = await json_body(request)
                 if body:
                     try:
                         decoded = msgspec.json.decode(body)
@@ -448,8 +460,8 @@ def endpoint(operation: Operation) -> Any:
                         values.update(request.path_params)
                     except (msgspec.DecodeError, ValueError):
                         values = body
-            elif await request.body():
-                values = await request.body()
+            elif body := await json_body(request):
+                values = body  # refused as input: the operation takes none
             if inspect.isasyncgenfunction(wrapper):
                 iterator = wrapper(caller, values or None)
                 try:
