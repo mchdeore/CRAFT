@@ -61,14 +61,38 @@ def decode(operation: Operation, value: Any) -> Any:
         if value is None:
             value = {}
         if isinstance(value, operation.input):
-            return msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
-        if isinstance(value, (bytes, bytearray)):
-            return msgspec.json.decode(value, type=operation.input)
-        return msgspec.convert(value, operation.input, strict=True)
+            request = msgspec.json.decode(msgspec.json.encode(value), type=operation.input)
+        elif isinstance(value, (bytes, bytearray)):
+            request = msgspec.json.decode(value, type=operation.input)
+        else:
+            request = msgspec.convert(value, operation.input, strict=True)
     except (msgspec.ValidationError, msgspec.DecodeError, TypeError, ValueError):
         raise InvalidInput(
             fields=[FieldError(path="$", message="Input does not match the declared fields.")]
         ) from None
+    if contains_nul(request):
+        raise InvalidInput(
+            fields=[FieldError(path="$", message="Text must not contain NUL characters.")]
+        )
+    return request
+
+
+def contains_nul(value: Any) -> bool:
+    """Whether a decoded string anywhere in `value` holds NUL, which PostgreSQL text refuses.
+    Bytes are not text. A loop, not recursion: msgspec decodes JSON nested thousands deep."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if "\x00" in item:
+                return True
+        elif isinstance(item, msgspec.Struct):
+            pending.extend(msgspec.structs.astuple(item))
+        elif isinstance(item, dict):
+            pending.extend(item.items())
+        elif isinstance(item, (list, tuple, set, frozenset)):
+            pending.extend(item)
+    return False
 
 
 def validate_output(operation: Operation, value: Any) -> Any:
@@ -257,7 +281,7 @@ class JsonHttpInput:
         content = await bounded_body(self.request, self.limit)
         try:
             value = msgspec.json.decode(content)
-        except msgspec.DecodeError:
+        except ValueError:  # DecodeError, or UnicodeDecodeError for invalid UTF-8 in a string
             return content
         if isinstance(value, dict):
             return dict(self.request.query_params) | value | dict(self.request.path_params)

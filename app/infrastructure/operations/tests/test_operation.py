@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, ClassVar
 from uuid import UUID, uuid4
 
 import msgspec
@@ -76,6 +76,65 @@ def test_operation_validation_is_strict(settings: Settings) -> None:
                 probe(caller, body)
         assert client.post("/api/probe", content=b"{").json()["code"] == "invalid_input"
         assert client.get("/api/probe/not-a-uuid").json()["code"] == "invalid_input"
+
+
+class LimitedProbe(Shape):
+    max_bytes: ClassVar[int] = 1024
+    text: str
+
+
+def test_malformed_json_is_invalid_input_when_an_input_reads_its_own_body(
+    settings: Settings,
+) -> None:
+    """An input with max_bytes reads its own body. Invalid UTF-8 inside a string is malformed
+    JSON there too, not an internal error."""
+
+    @operation(PUBLIC, post="/limited-probe")
+    def limited(caller: Caller, request: LimitedProbe) -> None:
+        return None
+
+    app = create_app(settings)
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
+        for body in [b"{", b'{"text": "\xff"}']:
+            response = client.post("/api/limited-probe", content=body)
+            assert response.status_code == 400 and response.json()["code"] == "invalid_input"
+    app.state.engine.dispose()
+
+
+class TextProbe(Shape):
+    text: str
+    spec: dict[str, Any] = {}
+    data: bytes = b""
+
+
+def test_text_holding_nul_is_refused_before_the_handler(settings: Settings) -> None:
+    """PostgreSQL text refuses NUL, so a request whose decoded strings hold one is invalid input
+    on every transport. An escaped backslash before u0000 is plain text, and bytes are not text."""
+    seen = []
+
+    @operation(PUBLIC, post="/text-probe")
+    def text_probe(caller: Caller, request: TextProbe) -> None:
+        seen.append(request)
+
+    app = create_app(settings)
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
+        for body in [
+            b'{"text": "a\\u0000b"}',
+            b'{"text": "", "spec": {"rows": [{"label": "\\u0000"}]}}',
+            b'{"text": "", "spec": {"\\u0000": 1}}',
+        ]:
+            response = client.post("/api/text-probe", content=body)
+            assert response.status_code == 400 and response.json()["code"] == "invalid_input"
+        escaped = client.post("/api/text-probe", content=b'{"text": "a\\\\u0000b"}')
+        assert escaped.status_code == 204
+    with pytest.raises(InvalidInput):
+        text_probe(trusted(app), {"text": "a\x00b"})
+    text_probe(trusted(app), TextProbe(text="", data=b"\x00"))
+    assert [(request.text, request.data) for request in seen] == [
+        ("a\\u0000b", b""),
+        ("", b"\x00"),
+    ]
+    app.state.engine.dispose()
 
 
 def test_json_bodies_stop_at_four_mib(settings: Settings) -> None:
