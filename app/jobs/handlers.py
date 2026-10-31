@@ -1,5 +1,5 @@
-"""Background jobs: list, read, retry and stop them. The plain functions below are for other
-features, which authorize the job first."""
+"""Background jobs: list, read and stop them. The plain functions below are for other features,
+which authorize the job first."""
 
 from typing import Annotated, Literal
 
@@ -66,12 +66,6 @@ def read_job(caller: Caller, request: JobRef) -> Job:
     return Job(**data, progress=JobProgress(**progress) if progress else None)
 
 
-@operation(SIGNED_IN, post="/jobs/{jobId}/retry")
-def retry_job(caller: Caller, request: JobRef) -> Job:
-    """Run a failed, canceled or stopped job again as a new job."""
-    return Job(**service.retry(caller, int(request.job_id)))
-
-
 @operation(SIGNED_IN, post="/jobs/{jobId}/cancel")
 def cancel_job(caller: Caller, request: JobRef) -> Job:
     """Cancel a queued job, or ask a running one to stop (it shows as stopping)."""
@@ -81,11 +75,6 @@ def cancel_job(caller: Caller, request: JobRef) -> Job:
 def active_job(session, lock: str) -> int | None:
     """The queued or running job holding a lock key (see Job.lock)."""
     return service.active(session, lock)
-
-
-def running_jobs(session, kind: str, requested_by) -> int:
-    """Queued and running jobs of one kind for one requester; serializes concurrent callers."""
-    return service.running_count(session, kind, requested_by)
 
 
 def job_state(session, job_id: int) -> str | None:

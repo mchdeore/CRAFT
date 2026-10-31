@@ -78,9 +78,9 @@ def operation(
         wrapper.__dict__["__operation__"] = registered
         registry[registered.name] = registered
         if job is not None:
-            from app.infrastructure.operations.jobs import register
+            from app.infrastructure.queue import register_job
 
-            register(registered)
+            register_job(registered)
         return wrapper
 
     return decorate

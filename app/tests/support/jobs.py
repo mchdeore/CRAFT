@@ -14,29 +14,26 @@ from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.database.engine import make_engine, make_sessions
 from app.infrastructure.operations import Job, operation
 from app.infrastructure.operations.jobs import current_job, enqueue, report_progress, should_abort
-from app.infrastructure.queue import PermanentError, TransientError
 from app.infrastructure.shapes import Shape
+
+
+class GeneratedFailure(Exception):
+    """A test job's failure, recorded by its class name."""
 
 
 class Sleep(Shape):
     seconds: float = 0
-    fail: str | None = None
-    times: int = 1
+    fail: bool = False
     key: str = ""
 
 
 @operation(SIGNED_IN, job=Job(queue="interactive", lock=lambda request: request.key))
 async def sleep(caller: Caller, request: Sleep) -> None:
-    """Sleep on the first attempt only; fail `times` attempts transiently or permanently."""
-    job = current_job.get()
-    assert job is not None
-    attempt = job.attempt
-    if attempt == 1:
-        await asyncio.sleep(request.seconds)
-    if request.fail == "transient" and attempt <= request.times:
-        raise TransientError(retry_after=0)
-    if request.fail == "permanent":
-        raise PermanentError()
+    """Sleep, then fail when asked to."""
+    assert current_job.get() is not None
+    await asyncio.sleep(request.seconds)
+    if request.fail:
+        raise GeneratedFailure()
 
 
 @operation(SIGNED_IN, job=Job(queue="bulk"))
@@ -45,7 +42,7 @@ async def bulk(caller: Caller, request: Sleep) -> None:
     await asyncio.sleep(request.seconds)
 
 
-@operation(SIGNED_IN, job=Job(queue="agent", retry=False))
+@operation(SIGNED_IN, job=Job(queue="agent"))
 async def agent(caller: Caller) -> None:
     """Finish at once in the agent queue."""
 
@@ -71,7 +68,7 @@ class Count(Shape):
     seconds: float = 0
 
 
-@operation(SIGNED_IN, job=Job(queue="interactive", retry=False, notify=True))
+@operation(SIGNED_IN, job=Job(queue="interactive", notify=True))
 def counted(caller: Caller, request: Count) -> None:
     """Report progress on every step, wait `seconds` (stopping when asked to), then finish or
     fail when asked to."""
@@ -83,14 +80,12 @@ def counted(caller: Caller, request: Count) -> None:
             raise JobAborted()
         time.sleep(0.05)
     if request.fail:
-        raise PermanentError()
+        raise GeneratedFailure()
 
 
 @pytest.fixture
 def jobs(settings, owner_engine, monkeypatch):
     monkeypatch.setattr(queue, "POLL_SECONDS", 0.1)
-    for name in ("interactive", "bulk"):
-        monkeypatch.setitem(queue.WAITS, name, (0, 0, 0))
     with owner_engine.connect() as connection:
         newest = connection.execute(
             text("select coalesce(max(id), 0) from procrastinate_jobs")

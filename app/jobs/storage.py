@@ -80,19 +80,6 @@ def active(session: Session, lock: str) -> int | None:
     ).scalar_one_or_none()
 
 
-def running_count(session: Session, kind: str, requested_by: str) -> int:
-    """Queued and running jobs of one kind for one requester, after serializing on them."""
-    key = f"count:{kind}:{requested_by}"
-    session.execute(text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key})
-    return session.execute(
-        text(
-            "select count(*) from procrastinate_jobs where task_name = :kind"
-            " and status in ('todo', 'doing') and args->>'requested_by' = :user"
-        ),
-        {"kind": kind, "user": requested_by},
-    ).scalar_one()
-
-
 def save_progress(session: Session, job_id: int, done: int, total: int, note: str | None) -> None:
     """Insert or replace the job's one progress row."""
     statement = insert(job_progress).values(job_id=job_id, done=done, total=total, note=note)

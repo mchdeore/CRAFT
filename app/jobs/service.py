@@ -1,6 +1,6 @@
-"""Defer, read, retry and cancel jobs; a caller sees their own jobs, managers see all."""
+"""Defer, read and cancel jobs; a caller sees their own jobs, managers see all."""
 
-from typing import Any
+from typing import Any, get_args
 
 from sqlalchemy.orm import Session
 
@@ -16,20 +16,17 @@ def manager(caller: Caller) -> bool:
     return bool(caller.roles & PERMISSIONS["library.manage"])
 
 
-def defer(session: Session, kind: str, args: dict, requested_by: Any = None) -> int:
+def defer(
+    session: Session, kind: str, args: dict, requested_by: Any = None, lock: str | None = None
+) -> int:
     """Queue one job in the caller's transaction; a held lock key returns the active job."""
     declared = queue.find(kind)
-    if declared is None:
+    if declared is None or declared.job is None:
         raise NotFound()
-    lock = (declared.lock_key(args) or None) if declared.lock_key else None
     if lock is not None and (existing := storage.active(session, lock)) is not None:
         return existing
     values = args | ({"requested_by": str(requested_by)} if requested_by is not None else {})
-    return storage.defer(session, declared.queue, kind, values, lock)
-
-
-def running_count(session: Session, kind: str, requested_by: Any) -> int:
-    return storage.running_count(session, kind, str(requested_by))
+    return storage.defer(session, declared.job.queue, kind, values, lock)
 
 
 def active(session: Session, lock: str) -> int | None:
@@ -110,21 +107,6 @@ def page(caller: Caller, state: str | None, offset: int, limit: int) -> dict[str
     }
 
 
-def retry(caller: Caller, job_id: int) -> dict[str, Any]:
-    """A failed, canceled or stopped job runs again as a new job with the same arguments."""
-    assert caller.sessions is not None
-    with unit_of_work(caller.sessions) as session:
-        row = _owned(session, caller, job_id)
-        declared = queue.find(row["kind"])
-        if declared is None or not declared.retry:
-            raise Conflict()
-        if row["state"] not in {"failed", "canceled", "stopped"}:
-            raise Conflict()
-        args = {key: value for key, value in row["args"].items() if key != "requested_by"}
-        new = defer(session, row["kind"], args, row["requested_by"])
-        return shape(storage.read(session, new))
-
-
 def cancel(caller: Caller, job_id: int) -> dict[str, Any]:
     assert caller.sessions is not None
     with unit_of_work(caller.sessions) as session:
@@ -141,6 +123,9 @@ def _seconds(value) -> float | None:
 def health(sessions, *, since_seconds: float = 3600.0) -> dict[str, Any]:
     """Counts plus last-hour wait/run percentiles and busy workers."""
     from app.infrastructure.queue import STALLED_SECONDS
+    from app.jobs.handlers import JobState  # handlers imports this module
+
+    states = get_args(JobState)
 
     with unit_of_work(sessions, read_only=True) as session:
         rows = storage.counts(session)
@@ -162,13 +147,13 @@ def health(sessions, *, since_seconds: float = 3600.0) -> dict[str, Any]:
             "peak_queued": 0,
             "saturated_seconds": 0.0,
         }
-        | dict.fromkeys(STATES, 0)
+        | dict.fromkeys(states, 0)
         for name in QUEUES
     }
     for row in rows:
         entry = queues.setdefault(
             row["queue"],
-            {"queue": row["queue"], "oldest_queued_seconds": None} | dict.fromkeys(STATES, 0),
+            {"queue": row["queue"], "oldest_queued_seconds": None} | dict.fromkeys(states, 0),
         )
         entry[row["state"]] = row["jobs"]
         if row["state"] == "queued" and row["oldest"] is not None:
@@ -263,6 +248,3 @@ def report(sessions, *, since_seconds: float = 86400.0) -> dict[str, Any]:
                 row["jobs"]
             )
     return {"since_seconds": since_seconds, "queues": list(by_queue.values())}
-
-
-STATES = ("queued", "scheduled", "started", "stopping", "finished", "failed", "canceled", "stopped")

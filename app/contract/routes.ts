@@ -21,7 +21,6 @@ export interface Routes {
   "GET /health/queue": { response: T.QueueHealth }; // example: queue-health.json
   "GET /api/jobs": { query: T.JobPageRequest; response: T.JobPage }; // example: job-page.json
   "GET /api/jobs/:jobId": { response: T.Job }; // example: job.json
-  "POST /api/jobs/:jobId/retry": { response: T.Job }; // example: job.json
   "POST /api/jobs/:jobId/cancel": { response: T.Job }; // example: job.json
   "GET /api/notifications": { query: T.NotificationPageRequest; response: T.Notification[] }; // example: notifications.json
   "POST /api/notifications/:id/read": { response: T.Notification }; // example: notification.json
