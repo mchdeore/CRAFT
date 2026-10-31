@@ -569,6 +569,10 @@ def check_citation(caller: Caller, request):
 
 
 def checked_citation(caller: Caller, handle):
+    """Check a citation against its stored version without converting the original: `changed`
+    when the original's SHA-256 is no longer the stored version's, or when the stored block no
+    longer holds the quote. Returns the status, the live source, the stored block and the quote
+    it holds (None when the source is withdrawn or the block doesn't hold the quote)."""
     import hashlib
 
     from app.library.citation import quote
@@ -578,8 +582,9 @@ def checked_citation(caller: Caller, handle):
         raise InvalidInput()
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:
-        item, version, _ = readable_version(session, caller, handle.item, handle.version)
+        _, version, _ = readable_version(session, caller, handle.item, handle.version)
         access = document_access(session, caller)
+        block = next(iter(storage.blocks(session, version["id"], handle.block, handle.block)), None)
     provider = source_provider(settings)
     live = source_item(provider, handle.item)
     if not access.readable(live):
@@ -588,63 +593,35 @@ def checked_citation(caller: Caller, handle):
         raise NotFound()
     latest = max(row["version"] for row in live["versions"])
     if live["deleted_at"] is not None:
-        return CitationStatus(status="withdrawn", latest_version=latest), live, None
-    original_version = next(
-        (row for row in live["versions"] if row["version"] == handle.version), None
-    )
-    if original_version is None:
+        return CitationStatus(status="withdrawn", latest_version=latest), live, block, None
+    if not any(row["version"] == handle.version for row in live["versions"]):
         raise NotFound()
-    source = source_content(provider, handle.item, handle.version)
-    source_sha256 = hashlib.sha256(source).digest()
-    filename = original_version.get("file_name", item["path"])
-    try:
-        blocks = convert_request(source, filename)
-    except (ValueError, UnicodeDecodeError):
-        return CitationStatus(status="changed", latest_version=latest), live, source_sha256
-    selected = next((block for block in blocks if block.block == handle.block), None)
-    actual = quote(selected.text, handle.locator, selected.locator) if selected else None
-    correct = (
-        actual is not None and hashlib.sha256(actual.encode()).hexdigest() == handle.quote_sha256
+    cited = quote(block["text"], handle.locator, block["locator"]) if block else None
+    if cited is not None and hashlib.sha256(cited.encode()).hexdigest() != handle.quote_sha256:
+        cited = None
+    original = source_content(provider, handle.item, handle.version)
+    unchanged = hashlib.sha256(original).digest() == bytes(version["sha256"])
+    status = (
+        "changed"
+        if not unchanged or cited is None
+        else "newer_version"
+        if latest > handle.version
+        else "current"
     )
-    return (
-        CitationStatus(
-            status="changed"
-            if not correct
-            else "newer_version"
-            if latest > handle.version
-            else "current",
-            latest_version=latest,
-        ),
-        live,
-        source_sha256,
-    )
+    return CitationStatus(status=status, latest_version=latest), live, block, cited
 
 
 def prepare_source(caller: Caller, handle) -> PreparedSource:
-    import hashlib
-
-    from app.library.citation import quote
-
-    status, live, actual_sha256 = checked_citation(caller, handle)
+    status, live, block, _ = checked_citation(caller, handle)
     if status.status != "current":
         raise Conflict()
+    assert block is not None  # a current citation's quote came from its stored block
     sessions, settings = scope(caller)
     with unit_of_work(sessions, read_only=True) as session:
         item, version, versions = readable_source_version(
             session, caller, handle.item, handle.version, live
         )
-        if (
-            versions[-1]["version"] != handle.version
-            or actual_sha256 != bytes(version["sha256"])
-            or handle.simulated != item["simulated"]
-        ):
-            raise Conflict()
-        rows = storage.blocks(session, version["id"], handle.block, handle.block)
-        if not rows:
-            raise Conflict()
-        block = rows[0]
-        actual = quote(block["text"], handle.locator, block["locator"])
-        if actual is None or hashlib.sha256(actual.encode()).hexdigest() != handle.quote_sha256:
+        if versions[-1]["version"] != handle.version or handle.simulated != item["simulated"]:
             raise Conflict()
         return PreparedSource(
             provider_root=settings.provider_root,

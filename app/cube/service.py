@@ -400,13 +400,13 @@ def get_value_evidence(caller, request):
         dictionary = storage.dictionary(session)
     selected = state.with_sources([row], state.sources(caller))[0]
     value = value_shape(selected, dictionary)
-    status = library.citation_status(caller, value.citation)
+    status, quote = library.citation_evidence(caller, value.citation)
     if value.withdrawn or status == "withdrawn":
         status = "withdrawn"
         value = msgspec.structs.replace(value, kind="unknown", low=None, high=None, withdrawn=True)
         quote = ""
-    else:
-        quote = library.citation_quote(caller, value.citation)
+    elif quote is None:
+        raise NotFound()
     conversion = "No numeric source value."
     if (
         not value.withdrawn
