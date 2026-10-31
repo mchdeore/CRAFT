@@ -109,6 +109,23 @@ def test_sign_in_links_by_email_and_sets_only_the_session_cookie(site, owner_eng
     assert (str(row.idp_tenant_id), row.idp_object_id) == (str(identity.TENANT), oid)
 
 
+def test_signing_in_again_ends_the_earlier_session(site, owner_engine) -> None:
+    username, password, _ = site.provider.account(email=f"{uuid4().hex[:8]}@example.org")
+    with site.provider.sessions() as session:
+        email = identity.storage.account(session, username)["email"]
+    craft_user(site, owner_engine, email)
+    sign_in(site, username, password)
+    earlier = site.browser.cookies["__Host-craft_session"]
+
+    assert sign_in(site, username, password).headers["location"] == "/after"
+
+    assert site.browser.get("/api/me").status_code == 200
+    # The browser holds only the new cookie; a copy of the earlier one must not sign anyone in.
+    site.browser.cookies.clear()
+    site.browser.cookies.set("__Host-craft_session", earlier)
+    assert site.browser.get("/api/me").status_code == 401
+
+
 def test_a_disabled_account_gets_no_access(site, owner_engine) -> None:
     username, password, _ = site.provider.account(email=f"{uuid4().hex[:8]}@example.org")
     with site.provider.sessions() as session:

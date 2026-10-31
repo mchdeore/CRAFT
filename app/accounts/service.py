@@ -50,9 +50,12 @@ def change(caller: Caller, request, remove: bool) -> None:
 
 
 def open_session(caller: Caller, session, user) -> None:
-    """A new browser session for `user` in the caller's transaction; the cookie is set on reply."""
+    """A new browser session for `user` in the caller's transaction; the cookie is set on reply.
+    It replaces the browser's current cookie, whose session is revoked as a sign-out."""
     assert caller.settings is not None
     at = access.now()
+    if caller.auth_session_id is not None:
+        storage.revoke_sessions(session, caller.user_id, at, "sign_out", caller.auth_session_id)
     raw, cookie = new_token()
     identifier = session.execute(
         storage.auth_sessions.insert()
