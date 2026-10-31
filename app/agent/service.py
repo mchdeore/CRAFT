@@ -244,6 +244,11 @@ def events_after(caller, run, segment, after):
         return storage.events_after(session, run, segment, after)
 
 
+def newest_event(caller, run, segment, through):
+    with unit_of_work(scope(caller), read_only=True) as session:
+        return storage.newest_event(session, run, segment, through)
+
+
 def run_job_state(caller, run) -> str | None:
     """The state of the run's queued or running job; None once it has ended."""
     from app.jobs.handlers import active_job, job_state

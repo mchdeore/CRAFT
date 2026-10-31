@@ -28,7 +28,8 @@ POLL_SECONDS = 1.0
 CHECK_EVERY = 5
 # A run no agent worker has taken by then fails rather than waiting.
 QUEUED_SECONDS = 60
-TERMINAL = {"RUN_FINISHED", "RUN_ERROR"}
+# The events a stream ends with; the worker's own CRAFT_ERROR is sent as RUN_ERROR.
+TERMINAL = {"RUN_FINISHED", "RUN_ERROR", "CRAFT_ERROR"}
 
 
 def error_for(code: str) -> ApiError:
@@ -117,8 +118,8 @@ async def follow(caller, run, segment, after, *, raise_errors) -> AsyncGenerator
                 if event["type"] == "CRAFT_ERROR":
                     _note(caller, code=event["code"])
                     error = error_for(event["code"])
-                    if raise_errors:
-                        raise error
+                    if raise_errors and not sent:
+                        raise error  # nothing was sent yet: the POST answers with the error
                     yield AGUIEvent(type="RUN_ERROR", code=error.code, message=type(error).message)
                     return
                 if event["type"] == "RUN_ERROR":
@@ -130,6 +131,11 @@ async def follow(caller, run, segment, after, *, raise_errors) -> AsyncGenerator
             if rows:
                 idle = 0
                 continue
+            if not sent:
+                newest = await run_in_threadpool(service.newest_event, caller, run, segment, after)
+                if newest is not None and newest["type"] in TERMINAL:
+                    # Re-attached at or past the end of a stream that already ended.
+                    return
             idle += 1
             lost = loop.time() > deadline
             if idle % CHECK_EVERY == 0:

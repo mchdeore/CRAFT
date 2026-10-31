@@ -558,11 +558,11 @@ def trickling(answers):
     return reply
 
 
-def replay(chat, run):
-    """The run's events from the first, following it until it ends."""
+def replay(chat, run, after=0):
+    """The run's events after the first `after`, following it until it ends."""
 
     async def execute():
-        events = run_events(chat["caller"], RunEventsRef(run=run, after=0))
+        events = run_events(chat["caller"], RunEventsRef(run=run, after=after))
         return [msgspec.to_builtins(event) async for event in events]
 
     return asyncio.run(execute())
@@ -615,6 +615,25 @@ def test_a_stop_while_merged_text_is_written_writes_it_once(chat, monkeypatch):
         release.set()
     kinds = [event["type"] for event in replay(chat, data.run_id)]
     assert kinds.count("TEXT_MESSAGE_CONTENT") == 1 and kinds[-1] == "RUN_ERROR"
+
+
+def test_a_failure_after_the_first_event_still_ends_the_stream_with_run_error(chat, monkeypatch):
+    """The run's closing history save fails, so the worker records its failure after events
+    were sent: the stream ends with RUN_ERROR, as its replay does, and nothing follows it."""
+    save = runtime.conversations.append_for_run
+
+    def append_for_run(caller, appended):
+        if any(message["role"] != "user" for message in appended.messages):
+            raise RuntimeError("generated history failure")
+        return save(caller, appended)
+
+    monkeypatch.setattr(runtime.conversations, "append_for_run", append_for_run)
+    data = request(chat)
+    streamed = collect(chat["caller"], data)
+    failed = {"type": "RUN_ERROR", "code": "internal_error", "message": "Internal error."}
+    assert streamed[0]["type"] == "RUN_STARTED" and streamed[-1] == failed
+    assert replay(chat, data.run_id) == streamed
+    assert replay(chat, data.run_id, after=len(streamed)) == []
 
 
 def test_a_run_answers_its_newest_user_message_and_stores_only_it(chat):

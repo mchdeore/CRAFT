@@ -1,5 +1,6 @@
 """Authenticated, read-only durable recovery from real SQL and native pauses."""
 
+import time
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -569,3 +570,26 @@ def test_native_recovered_decision_still_requires_explicit_authoritative_resume(
         )
         assert len(durable_rows(context)["notes"]) == int(approve)
         assert http.post("/api/agent/runs", json=resume).status_code in {404, 409}
+
+
+def test_a_reattach_at_the_recovered_last_event_ends_at_once(context, native_pause):
+    """lastEvent is the re-attach point: once the stream has paused at its approval, or
+    finished, a re-attach there or past it answers an empty event stream at once."""
+    run, approval = native_pause["run"], native_pause["approval"]
+
+    def reattach_at_the_end(http, status):
+        recovered = read_recovery(http, context)
+        assert recovered["status"] == status
+        for after in (recovered["lastEvent"], recovered["lastEvent"] + 5):
+            started = time.monotonic()
+            response = http.get(f"/api/agent/runs/{run}/events", params={"after": after})
+            assert events(response) == []
+            assert time.monotonic() - started < 1
+
+    resume = native_pause["body"] | {"messages": [], "resume": {"approvalId": str(approval)}}
+    with runtime_client(context) as http:
+        reattach_at_the_end(http, "paused")
+        decided = http.post(f"/api/approvals/{approval}/decision", json={"approve": False})
+        assert decided.status_code == 200
+        assert events(http.post("/api/agent/runs", json=resume))[-1]["type"] == "RUN_FINISHED"
+        reattach_at_the_end(http, "finished")

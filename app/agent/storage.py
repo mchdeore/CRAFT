@@ -180,6 +180,20 @@ def events_after(session: Session, run, segment, after, limit=200):
     )
 
 
+def newest_event(session: Session, run, segment, through):
+    """The newest of the segment's first `through` events, or None."""
+    return session.execute(
+        select(agent_run_events.c.event)
+        .where(
+            agent_run_events.c.run_id == run,
+            agent_run_events.c.segment == segment,
+            agent_run_events.c.seq <= through,
+        )
+        .order_by(agent_run_events.c.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def last_event(session: Session, run):
     """The number of events in the run's newest segment."""
     newest = (
