@@ -12,9 +12,9 @@
 # after. verify leaves out the tables that must start
 # empty, since the call log and credentials grow with use. CRAFT_SEED picks another set (one without a
 # manifest, such as cube-v1, restores unchecked). The set's accounts have no passwords: give one
-# with `craft id users reset-password <username>`.
-# To start over: empty the database (deploy/README.md, Stop, then Start) and the provider folder,
-# then run this again.
+# through the same forward, with `CRAFT_DATABASE_PORT=55432 uv run craft id users reset-password <username>`.
+# To start over: `helm uninstall craft`, `kubectl delete pvc data-craft-postgres-0`, empty the
+# provider folder, then Start again (deploy/README.md) and run this.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 action=seed

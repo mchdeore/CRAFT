@@ -57,4 +57,4 @@ members = []
 testpaths = ["tests"]
 pythonpath = ["src", "../.."]
 addopts = "-q --import-mode=importlib"
-markers = ["docker: requires the workspace image and Docker daemon"]
+markers = ["slow: takes more than about a second; runs only in scripts/check full"]
