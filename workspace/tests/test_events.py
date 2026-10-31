@@ -69,6 +69,43 @@ def test_a_cell_run_logs_count_timing_and_outcome_but_never_code_or_output(monke
     assert secret not in json.dumps(line)
 
 
+def test_a_cell_run_parses_only_its_status_and_input_and_holds_its_write(monkeypatch, capsys):
+    from jupyter_client.session import Session
+
+    monkeypatch.setenv("JUPYTERHUB_USER", USER)
+    session = Session(key=b"generated-key")
+    request = session.msg_header("execute_request")
+
+    def frames(kind, content, raw=None):
+        parts = session.serialize(session.msg(kind, content=content, parent=request))
+        if raw is not None:  # an output's content, signed like any other but never parsed
+            parts[-1] = raw
+            parts[1] = session.sign(parts[2:])
+        return parts
+
+    async def path_of(kernel_id):
+        return "work/fit.ipynb"
+
+    async def run():
+        cells = craft_events.Cells("k1", path_of)
+        for parts in [
+            frames("status", {"execution_state": "busy"}),
+            frames("execute_input", {"code": "x = 1", "execution_count": 7}),
+            frames("display_data", {}, raw=b"\xff not JSON"),
+            frames("status", {"execution_state": "idle"}),
+        ]:
+            cells.feed(session, parts)
+        (write,) = cells.writes  # the loop alone holds only a weak reference
+        await write
+        await asyncio.sleep(0)
+        assert not cells.writes
+
+    asyncio.run(run())
+    (line,) = lines(capsys)
+    assert line["kind"] == "cell.execute" and line["execution_count"] == 7
+    assert line["outcome"] == "ok"
+
+
 def test_lines_use_crafts_log_shape(capsys):
     craft_events.write("kernel.start", kernel_id="k1", outcome="success")
     (line,) = lines(capsys)

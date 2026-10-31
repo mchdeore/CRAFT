@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 # Jupyter Server is in the workspace image, not in CRAFT's own environment.
 from jupyter_server.base.handlers import APIHandler  # pyright: ignore[reportMissingImports]
@@ -57,6 +58,13 @@ async def preview(name: str) -> bytes:
     return cached.read_bytes()
 
 
+def disposition(name: str) -> str:
+    """``inline`` with the PDF's name: an ASCII fallback, then the exact name (RFC 6266)."""
+    filename = Path(name).stem + ".pdf"
+    fallback = "".join(c if " " <= c <= "~" and c not in '"\\' else "_" for c in filename)
+    return f"inline; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
 class PreviewHandler(APIHandler):
     @web.authenticated
     async def get(self):
@@ -70,7 +78,7 @@ class PreviewHandler(APIHandler):
         except Exception:
             raise web.HTTPError(502, "The preview could not be rendered") from None
         self.set_header("Content-Type", "application/pdf")
-        self.set_header("Content-Disposition", f'inline; filename="{Path(name).stem}.pdf"')
+        self.set_header("Content-Disposition", disposition(name))
         self.set_header("Cache-Control", "no-store")
         self.finish(pdf)
 

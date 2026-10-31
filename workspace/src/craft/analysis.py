@@ -156,10 +156,11 @@ class VegaChart:
 def vega(spec: dict[str, Any], *, save_as: str | Path | None = None):
     """Render a Vega-Lite spec without network access; returns a chart or saved path.
 
-    Data must be inline (``data.values``). ``save_as`` ending in ``.svg`` also saves
-    the spec beside it as ``.vl.json`` and its rows as ``.csv``; ``.png`` saves an image.
+    Data must be inline (``data.values``); vl-convert, given no allowed base URLs, refuses
+    to load any. ``save_as`` ending in ``.svg`` also saves the spec beside it as ``.vl.json``
+    and its rows as ``.csv``; ``.png`` saves an image.
     """
-    if "url" in json.dumps(spec.get("data", {})):
+    if "url" in (spec.get("data") or {}):  # the clearest message for the usual mistake
         raise ValueError("Give chart data inline as data.values; URLs are not loaded")
     convert = import_module("vl_convert")
     result = VegaChart(spec, convert.vegalite_to_svg(spec, allowed_base_urls=[]))

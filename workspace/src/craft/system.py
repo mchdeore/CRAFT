@@ -8,6 +8,7 @@ missing and how to install it. The kernel's guard refuses program launches, so
 import importlib.util
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -130,8 +131,19 @@ def _access_status() -> str:
 
 
 def _launch(command: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """Run in a process group of its own, so a timeout also stops what the tool started, such
+    as LibreOffice's soffice.bin, which would otherwise keep its profile locked."""
     with _guard_paused():
-        return subprocess.run(command, capture_output=True, timeout=timeout)
+        with subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True
+        ) as process:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+                raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 @contextmanager

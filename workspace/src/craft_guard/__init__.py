@@ -12,6 +12,7 @@ import os
 import socket
 import sys
 import threading
+from time import monotonic
 
 _BLOCKED_PROCESS_EVENTS = frozenset(
     {
@@ -30,6 +31,10 @@ _SOCKET_EVENTS = frozenset(
 )
 _NAME_EVENTS = frozenset({"socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyname_ex"})
 
+# A refused connection on the API's port looks the API host up again, at most this often: the
+# kernel outlives the address it resolved at start (the API's Service can move).
+REFRESH_SECONDS = 30
+
 MESSAGE = (
     "Outbound access is blocked in the CRAFT workspace. "
     "Use the craft access points, such as craft.search or craft.cube.find."
@@ -41,10 +46,11 @@ _installed = False
 
 
 class _Endpoint:
-    __slots__ = ("addresses", "host", "port")
+    __slots__ = ("addresses", "host", "port", "resolved")
 
     def __init__(self, host: str, port: int, addresses: frozenset[str]):
         self.host, self.port, self.addresses = host, port, addresses
+        self.resolved = monotonic()
 
 
 # Named endpoints: "api" from CRAFT_API_URL and "bridge" during a bound agent run.
@@ -59,7 +65,14 @@ def _address_allowed(address: object) -> bool:
     if not isinstance(address, tuple) or len(address) < 2:
         return False  # Unix sockets and unknown address forms
     host, port = str(address[0]), address[1]
-    return any(port == e.port and host in e.addresses for e in list(_endpoints.values()))
+    if any(port == e.port and host in e.addresses for e in list(_endpoints.values())):
+        return True
+    api = _endpoints.get("api")
+    if api is None or port != api.port or monotonic() - api.resolved < REFRESH_SECONDS:
+        return False
+    allow("api", api.host, api.port)
+    refreshed = _endpoints.get("api")  # revoked meanwhile: None
+    return refreshed is not None and host in refreshed.addresses
 
 
 def _name_allowed(host: object) -> bool:
@@ -103,7 +116,7 @@ def installed() -> bool:
 
 
 def allow(name: str, host: str, port: int) -> None:
-    """Permit one named endpoint, resolving its host name once."""
+    """Permit one named endpoint, resolving its host name now."""
     addresses: set[str] = set()
     try:
         ipaddress.ip_address(host)

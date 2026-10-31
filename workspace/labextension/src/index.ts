@@ -9,6 +9,8 @@ const TYPES = [
   { name: 'craft-xlsx', extensions: ['.xlsx'] },
   { name: 'craft-pptx', extensions: ['.pptx'] }
 ];
+const POLL_MS = 3000; // how often an open preview checks whether its file was saved
+const opened = new Map<string, MainAreaWidget<IFrame>>(); // one preview per path
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'craft-preview:plugin',
@@ -39,6 +41,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
 };
 
 function open(app: JupyterFrontEnd, path: string): void {
+  const existing = opened.get(path);
+  if (existing) {
+    app.shell.activateById(existing.id);
+    return;
+  }
   const frame = new IFrame({ sandbox: ['allow-same-origin', 'allow-scripts'] });
   const widget = new MainAreaWidget({ content: frame });
   widget.id = `craft-preview-${path}`;
@@ -46,6 +53,9 @@ function open(app: JupyterFrontEnd, path: string): void {
   widget.title.closable = true;
   let shown = '';
   const refresh = async () => {
+    if (document.hidden) {
+      return; // a background tab asks nothing; the next tick after it shows catches up
+    }
     try {
       const model = await app.serviceManager.contents.get(path, { content: false });
       if (model.last_modified !== shown) {
@@ -57,8 +67,12 @@ function open(app: JupyterFrontEnd, path: string): void {
       // The file was moved or removed; keep the last preview.
     }
   };
-  const timer = window.setInterval(refresh, 1000);
-  widget.disposed.connect(() => window.clearInterval(timer));
+  const timer = window.setInterval(refresh, POLL_MS);
+  opened.set(path, widget);
+  widget.disposed.connect(() => {
+    window.clearInterval(timer);
+    opened.delete(path);
+  });
   void refresh();
   app.shell.add(widget, 'main', { mode: 'split-right' });
 }

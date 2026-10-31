@@ -19,6 +19,8 @@ CONTENTS = "https://events.jupyter.org/jupyter_server/contents_service/v1"
 KERNELS = "https://events.jupyter.org/jupyter_server/kernel_actions/v1"
 FILE_ACTIONS = {"save", "rename", "copy", "delete"}  # reads ("get") aren't logged
 READS = {"GET", "HEAD", "OPTIONS"}
+# The IOPub messages whose content a cell run reads; outputs, which can be large, stay unparsed.
+READ_CONTENT = {"status", "execute_input"}
 
 
 def _jupyter_server_extension_points():
@@ -70,6 +72,16 @@ class Cells:
         self.kernel_id = kernel_id
         self.path_of = path_of  # async kernel ID -> notebook path, or None
         self.runs: dict[str, dict[str, Any]] = {}
+        self.writes: set[asyncio.Future] = set()  # the loop keeps only weak references
+
+    def feed(self, session: Any, parts: list) -> None:
+        """One IOPub message from the kernel, parsed only as far as a cell run needs."""
+        _, fed = session.feed_identities(parts)
+        msg = session.deserialize(fed, content=False)
+        msg["content"] = (
+            session.unpack(msg["content"]) if msg["header"]["msg_type"] in READ_CONTENT else {}
+        )
+        self.message(msg)
 
     def message(self, msg: dict[str, Any]) -> None:
         parent = msg.get("parent_header") or {}
@@ -88,7 +100,9 @@ class Cells:
         elif kind == "status" and content.get("execution_state") == "idle":
             run = self.runs.pop(request)
             if "count" in run:
-                asyncio.ensure_future(self._write(run))
+                write = asyncio.ensure_future(self._write(run))
+                self.writes.add(write)
+                write.add_done_callback(self.writes.discard)
 
     async def _write(self, run: dict[str, Any]) -> None:
         write(
@@ -123,12 +137,8 @@ def _load_jupyter_server_extension(serverapp) -> None:
         session = Session(config=kernel.session.config, key=kernel.session.key)
         cells = Cells(kernel_id, path_of)
 
-        def received(parts: list) -> None:
-            _, fed = session.feed_identities(parts)
-            cells.message(session.deserialize(fed))
-
         streams[kernel_id] = kernel.connect_iopub()
-        streams[kernel_id].on_recv(received)
+        streams[kernel_id].on_recv(lambda parts: cells.feed(session, parts))
 
     def stop_watching_activity(kernel_id: str) -> None:
         stop_watching(kernel_id)

@@ -284,6 +284,116 @@ def test_word_and_slides_round_trip(root):
     assert "second" in slides[1]["text"]
 
 
+def fake_soffice(tmp_path, monkeypatch, body):
+    """LibreOffice as a shell script running ``body``; its arguments land in the returned file."""
+    from craft import system
+
+    arguments, script = tmp_path / "soffice-arguments", tmp_path / "soffice"
+    script.write_text(f'#!/bin/sh\necho "$@" > "{arguments}"\n{body}\n')
+    script.chmod(0o755)
+    monkeypatch.setitem(system._found, "soffice", str(script))
+    return arguments
+
+
+def test_a_conversion_that_makes_no_pdf_fails_and_each_process_has_its_profile(
+    root, tmp_path, monkeypatch
+):
+    import os
+
+    import craft
+
+    arguments = fake_soffice(tmp_path, monkeypatch, "exit 0")  # exits 0 having converted nothing
+    (root / "memo.docx").write_bytes(b"generated")
+    with pytest.raises(RuntimeError, match="made no PDF of memo.docx"):
+        craft.docs.to_pdf("memo.docx")
+    assert f"/craft-office-profile-{os.getpid()} " in arguments.read_text()
+
+
+def test_a_conversion_past_its_time_stops_everything_it_started(root, tmp_path, monkeypatch):
+    import time
+
+    import craft
+
+    child = tmp_path / "child.pid"
+    fake_soffice(tmp_path, monkeypatch, f'sleep 60 & echo $! > "{child}"; wait')
+    (root / "memo.docx").write_bytes(b"generated")
+    with pytest.raises(subprocess.TimeoutExpired):
+        craft.docs.to_pdf("memo.docx", timeout=0.5)
+    pid, deadline = child.read_text().strip(), time.monotonic() + 5
+    while time.monotonic() < deadline:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", pid], capture_output=True, text=True)
+        if not state.stdout.strip() or state.stdout.strip().startswith("Z"):
+            return  # gone, or dead and not yet reaped
+        time.sleep(0.05)
+    pytest.fail("what LibreOffice started outlived its timeout")
+
+
+def test_vega_charts_take_inline_data_naming_urls_and_load_none(root):
+    import craft
+
+    encoding = {
+        "x": {"field": "source", "type": "nominal"},
+        "y": {"field": "url_count", "type": "quantitative"},
+    }
+    inline = {"data": {"values": [{"source": "curl", "url_count": 3}]}, "mark": "bar"}
+    chart = craft.vega({**inline, "encoding": encoding})
+    assert isinstance(chart, craft.analysis.VegaChart) and "<svg" in chart.svg
+    remote = {"data": {"url": "https://example.com/rows.csv"}, "mark": "bar", "encoding": encoding}
+    with pytest.raises(ValueError, match="inline"):
+        craft.vega(remote)
+    with pytest.raises(ValueError, match="not allowed"):  # nested data: vl-convert loads none
+        craft.vega({"layer": [remote]})
+
+
+GUARD_REFRESH_PROBE = """
+import socket
+import craft_guard
+assert craft_guard.installed()
+server = socket.socket()
+server.bind(("127.0.0.1", 0))
+server.listen()
+port = server.getsockname()[1]
+answers, lookups, clock = ["127.0.0.2"], [], [1000.0]
+
+def resolve(host, port, *args, **kwargs):  # the cluster's DNS for the API's Service
+    lookups.append(host)
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (answers[0], port))]
+
+def connect():
+    attempt = socket.socket()
+    try:
+        attempt.connect(("127.0.0.1", port))
+        return "connected"
+    except craft_guard.OutboundBlocked:
+        return "blocked"
+    finally:
+        attempt.close()
+
+socket.getaddrinfo = resolve
+craft_guard.monotonic = lambda: clock[0]
+craft_guard.allow("api", "craft-api", port)
+answers[0] = "127.0.0.1"  # the Service moved
+assert connect() == "blocked" and lookups == ["craft-api"], lookups  # too soon to look again
+clock[0] += craft_guard.REFRESH_SECONDS
+assert connect() == "connected" and lookups == ["craft-api"] * 2, lookups
+assert connect() == "connected" and lookups == ["craft-api"] * 2, lookups
+print("refreshed")
+"""
+
+
+def test_the_guard_looks_up_a_moved_api_again_at_most_every_30_seconds():
+    result = subprocess.run(
+        [sys.executable, "-c", GUARD_REFRESH_PROBE],
+        env={"CRAFT_GUARD": "1", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(__import__("pathlib").Path(__file__).parents[1] / "src"),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refreshed"
+
+
 GUARD_PROBE = """
 import socket, subprocess, sys
 import craft_guard
