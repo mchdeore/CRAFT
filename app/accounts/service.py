@@ -49,7 +49,7 @@ def change(caller: Caller, request, remove: bool) -> None:
             insert_grant(session, user, request.mission, request.silo)
 
 
-def open_session(caller: Caller, session, user) -> list:
+def open_session(caller: Caller, session, user) -> None:
     """A new browser session for `user` in the caller's transaction; the cookie is set on reply."""
     assert caller.settings is not None
     at = access.now()
@@ -66,18 +66,15 @@ def open_session(caller: Caller, session, user) -> list:
         )
         .returning(storage.auth_sessions.c.id)
     ).scalar_one()
-    assigned = storage.roles_for(session, user)
     context = current_call.get()
     if context is not None:
-        context.caller = replace(
-            caller, user_id=user, roles=frozenset(assigned), auth_session_id=identifier
-        )
+        roles = frozenset(storage.roles_for(session, user))
+        context.caller = replace(caller, user_id=user, roles=roles, auth_session_id=identifier)
     session_cookie(
         cookie,
         caller.settings.session_absolute_hours * 3600,
         cross_origin_browser=caller.settings.cross_origin_browser,
     )
-    return assigned
 
 
 FLOW_LIFETIME = timedelta(minutes=10)
@@ -235,15 +232,13 @@ def sign_out(caller: Caller) -> None:
 
 
 def add(caller: Caller, request) -> None:
-    if caller.sessions is None or caller.settings is None:
+    if caller.sessions is None:
         raise NotFound()
     email = request.email.strip().lower()
     if not email:
         raise InvalidInput()
     with unit_of_work(caller.sessions) as session:
-        if storage.account(session, request.username.lower()) or (
-            email and storage.by_email(session, email)
-        ):
+        if storage.account(session, request.username.lower()) or storage.by_email(session, email):
             raise Conflict()
         user = session.execute(
             storage.users.insert()
