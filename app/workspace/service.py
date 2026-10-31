@@ -1,7 +1,6 @@
 """Reach only the caller's own workspace through the Hub; no endpoint comes from a request.
 
-Whole-notebook runs go through a ``NotebookRunner`` (``app/infrastructure/notebook_runs.py``),
-so this module knows nothing about Kubernetes Jobs or Docker containers.
+Whole-notebook runs are Kubernetes Jobs (``app/infrastructure/notebook_jobs.py``).
 """
 
 from datetime import UTC, datetime
@@ -9,9 +8,8 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-from app.infrastructure import hub, workspaces
+from app.infrastructure import hub, notebook_jobs, workspaces
 from app.infrastructure.errors import Conflict, InvalidInput, NotFound
-from app.infrastructure.notebook_runs import NotebookRunner
 
 
 def _hub(caller) -> hub.JupyterHub:
@@ -148,17 +146,15 @@ async def run_notebook(caller, path: str) -> dict[str, Any]:
 
 
 async def notebook_job(caller, path: str, output: str) -> None:
-    """Run one owned notebook unattended through this deployment's backend (the queued job)."""
+    """Run one owned notebook unattended as a Kubernetes Job (the queued job)."""
     notebook = PurePosixPath(_name(path))
     folder = "" if str(notebook.parent) == "." else str(notebook.parent)
-    await (await _runner(caller)).run(folder, notebook.name, output)
+    await _runner(caller).run(folder, notebook.name, output)
 
 
-async def _runner(caller) -> NotebookRunner:
-    """A Kubernetes Job on the local cluster; the Docker sandbox under Compose."""
-    from app.infrastructure import notebook_jobs, notebook_sandbox
-
+def _runner(caller) -> notebook_jobs.JobRunner:
+    """A Job on the worker's own cluster; outside a cluster the run fails with run_failed."""
     cluster = notebook_jobs.in_cluster()
-    if cluster is not None:
-        return notebook_jobs.JobRunner(cluster, caller.settings.notebook_image, caller.user_id)
-    return notebook_sandbox.SandboxRunner(await _target(caller), caller.settings.notebook_image)
+    if cluster is None:
+        raise notebook_jobs.RunError("run_failed")
+    return notebook_jobs.JobRunner(cluster, caller.settings.notebook_image, caller.user_id)

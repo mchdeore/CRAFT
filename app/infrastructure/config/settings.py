@@ -10,8 +10,8 @@ from app.identity.settings import IdentitySettings
 from app.infrastructure.config.env import read_env
 
 PREFIX = "CRAFT_"
-# Setup, Compose and tests only; scripts/seed reads CRAFT_SEED, the tests CRAFT_TEST_DATABASE.
-OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account", "seed", "test_database"}
+# Setup and tests only; scripts/seed reads CRAFT_SEED, the tests CRAFT_TEST_DATABASE.
+OTHER_TOOLS = {"db_admin_password", "owner_db_password", "seed", "test_database"}
 QUEUES = ("agent", "interactive", "bulk")
 # Jobs at once per queue, sized for the proof of concept's 10 people at a time: a chat turn
 # and a task-mode run each (agent), a notebook run each (interactive), and a little background

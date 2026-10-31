@@ -84,12 +84,6 @@ def test_mcp_target_has_safe_loopback_validation(value):
     assert safe
 
 
-def test_compose_mcp_account_is_not_an_application_setting() -> None:
-    settings = Settings.from_env({**VALID, "CRAFT_MCP_ACCOUNT": "synthetic-account"})
-    assert settings.database_name == "craft_dev"
-    assert not hasattr(settings, "mcp_account")
-
-
 def test_cross_origin_browser_mode_is_opt_in() -> None:
     assert Settings.from_env(VALID).cross_origin_browser is False
 

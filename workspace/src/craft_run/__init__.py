@@ -24,7 +24,8 @@ WORK = Path("/work")  # run: the notebook's folder, read-only, with outputs/ wri
 OUT = Path("/out")  # run: the run folder
 RUNS = ".craft-runs"
 STALE_SECONDS = 24 * 3600
-# The app's copies are in app/infrastructure/notebook_runs.py; this package can't import it.
+# The app's copy of TOTAL_SECONDS is in app/infrastructure/notebook_jobs.py; this package can't
+# import it.
 TOTAL_SECONDS = 15 * 60
 CELL_SECONDS = 120
 CREATED = ".created-outputs"  # prepare made the folder's outputs/, so collect may remove it
