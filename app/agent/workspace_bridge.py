@@ -1,7 +1,8 @@
 """Private per-run MCP transport; the root controller supplies serving and kernels.
 
-Serve this HTTP-only ASGI app on a root-owned 127.0.0.1 ephemeral socket inside
-``run()``. This component opens no socket and supplies no standalone login.
+Serve this HTTP-only ASGI app inside ``run()`` on an ephemeral socket the root controller
+owns: the API pod's own address on the cluster, 127.0.0.1 off it. This component opens no
+socket and supplies no standalone login.
 """
 
 import asyncio
@@ -26,7 +27,7 @@ from app.agent.workspace_session import RunBoundSession
 
 _UNAVAILABLE = "Run-bound native capability is unavailable."
 _APPROVAL = "This native capability requires the CRAFT approval/resume path."
-_HOSTS = ["127.0.0.1", "localhost", "host.docker.internal"]
+_HOSTS = ["127.0.0.1", "localhost"]
 
 
 @dataclass(frozen=True, slots=True)

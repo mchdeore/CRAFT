@@ -61,4 +61,5 @@ ENV PATH=/opt/notebook/bin:$PATH \
 USER workspace:workspace
 WORKDIR /workspace
 EXPOSE 8888
-CMD ["jupyter", "lab", "--config=/opt/craft-user-workspace/jupyter_server_config.py"]
+# No CMD: the Hub (singleuser.cmd in deploy/jupyterhub/values.yaml) and the notebook Job each pass
+# their own command.

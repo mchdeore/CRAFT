@@ -24,6 +24,7 @@ from app.tests.support.workspace import bound, prepared_run
 
 KERNEL = "00000000-0000-4000-8000-000000000001"
 NOTEBOOK = "notebooks/analysis.ipynb"
+BRIDGE_HOST = "10.42.0.17"  # the API pod's own address, as on the cluster
 
 
 def lifecycle_module():
@@ -211,7 +212,7 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
             recorded.sockets.append(self)
 
         def bind(self, address):
-            assert address == ("127.0.0.1", bridge_port)
+            assert address == (BRIDGE_HOST, bridge_port)
             self.address = address
             if recorded.failure == "bind":
                 raise OSError("generated occupied bridge port")
@@ -226,7 +227,7 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
             pass
 
         def getsockname(self):
-            return ("127.0.0.1", bridge_port or 42424)
+            return (BRIDGE_HOST, bridge_port or 42424)
 
         def close(self):
             self.closed = True
@@ -378,7 +379,7 @@ def owned_controller(lifecycle, run, *, bridge_port=0):
     from app.agent.workspace_session import RunBoundSession
 
     target = lifecycle.JupyterTarget(
-        "http://127.0.0.1:9998/", "generated-jupyter-token", KERNEL, "host.docker.internal"
+        "http://127.0.0.1:9998/", "generated-jupyter-token", KERNEL, BRIDGE_HOST
     )
     if bridge_port:
         target = replace(target, bridge_port=bridge_port)
@@ -414,9 +415,9 @@ def test_controller_provisions_silently_and_native_sdk_uses_the_borrowed_budget(
             try:
                 instructions = await controller.start()
                 assert NOTEBOOK in instructions and KERNEL in instructions
-                assert "host.docker.internal" not in instructions
-                assert recorded.sockets[0].address == ("127.0.0.1", bridge_port)
-                assert sdk._binding.url == f"http://host.docker.internal:{bridge_port or 42424}/mcp"
+                assert recorded.sockets[0].address == (BRIDGE_HOST, bridge_port)
+                assert sdk._binding.url == f"http://{BRIDGE_HOST}:{bridge_port or 42424}/mcp"
+                assert BRIDGE_HOST not in instructions
                 assert sdk._binding.run_id == str(run.parent.caller.run_id)
                 assert sdk._binding.deadline <= session._deadline + 0.005
                 assert session._middleware is middleware and middleware.budget is run.budget
@@ -800,7 +801,7 @@ def test_fixed_bridge_port_collision_never_falls_back_and_releases_owner(monkeyp
             retry, _, _ = owned_controller(lifecycle, run, bridge_port=54301)
             try:
                 await retry.start()
-                assert sdk._binding.url == "http://host.docker.internal:54301/mcp"
+                assert sdk._binding.url == f"http://{BRIDGE_HOST}:54301/mcp"
             finally:
                 await retry.close()
             assert sdk._binding is None and all(sock.closed for sock in recorded.sockets)

@@ -15,7 +15,7 @@ MANIFEST = ".craft-starter.json"
 
 def start(volume, settings):
     """Run the shipped config as a server start on this volume; returns its globals."""
-    environment = {"USER_ROOT": str(volume.resolve()), "JUPYTER_TOKEN": "generated-private-token"}
+    environment = {"USER_ROOT": str(volume.resolve()), "JUPYTERHUB_API_TOKEN": "generated-token"}
     with patch.dict(os.environ, environment, clear=True):
         return runpy.run_path(str(CONFIG), init_globals={"get_config": lambda: settings})
 

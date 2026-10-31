@@ -34,7 +34,7 @@ _channel_logger = logging.Logger("craft.kernel-actions", level=logging.CRITICAL 
 
 def bridge_host_allowed(host: str) -> bool:
     """Loopback names, or a private address: the API pod's own on the cluster."""
-    if host in {"127.0.0.1", "localhost", "host.docker.internal"}:
+    if host in {"127.0.0.1", "localhost"}:
         return True
     try:
         return ipaddress.ip_address(host).is_private
@@ -318,35 +318,6 @@ async def write_notebook(target: JupyterTarget, path: str, notebook: dict[str, A
     async with jupyter_http(target) as http:
         await _ensure_folders(http, path)
         hub.checked(await http.put(_contents(path), json={"type": "notebook", "content": notebook}))
-
-
-async def read_folder(target: JupyterTarget, folder: str, limit: int) -> dict[str, bytes]:
-    """Every visible file under one owned folder, relative to it; at most ``limit`` bytes."""
-    found: dict[str, bytes] = {}
-    size = 0
-    async with jupyter_http(target) as http:
-        pending = [folder]
-        while pending:
-            current = pending.pop()
-            listing = await http.get(_contents(current) if current else "api/contents/")
-            for entry in hub.checked(listing).json().get("content") or []:
-                if entry["name"].startswith("."):
-                    continue
-                if entry["type"] == "directory":
-                    pending.append(entry["path"])
-                    continue
-                size += entry.get("size") or 0
-                if size > limit:
-                    raise ValueError("The notebook folder is too large")
-                item = await http.get(
-                    _contents(entry["path"]), params={"format": "base64", "type": "file"}
-                )
-                content = base64.b64decode(hub.checked(item).json()["content"])
-                size += len(content) - (entry.get("size") or 0)
-                if size > limit:
-                    raise ValueError("The notebook folder is too large")
-                found[entry["path"][len(folder) + 1 :] if folder else entry["path"]] = content
-    return found
 
 
 async def exists(target: JupyterTarget, path: str) -> bool:
