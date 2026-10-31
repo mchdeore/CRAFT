@@ -16,7 +16,7 @@ QUESTION = "What is the peak power?"
 @pytest.fixture
 def library(journey, cube_source):
     """cube_source's budget document, and chat turns whose tools read its library."""
-    with serve_runs(journey.owner, cube_source["settings"]):
+    with serve_runs(journey, cube_source["settings"]):
         yield cube_source
 
 

@@ -137,7 +137,7 @@ def test_a_person_runs_a_notebook_in_the_background_stops_a_run_and_retries_a_fa
     assert read_job(http, first) == queued
 
     # The worker stops only after every run has ended: stopping it sooner would cut a run short.
-    with worker(journey.owner, settings, ["interactive"]):
+    with worker(journey, settings, ["interactive"]):
         # A worker takes the run, and it finishes.
         done = polled(http, first)
         assert done == queued | {

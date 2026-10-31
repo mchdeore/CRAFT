@@ -171,17 +171,20 @@ def journey(app: FastAPI, owner_engine: Engine) -> Iterator[Journey]:
 
 
 @contextmanager
-def worker(owner: Engine, settings: Settings, queues: list[str]) -> Iterator[None]:
-    """A worker on the queues that takes only this journey's jobs: one an earlier test left
-    queued is cancelled first. Afterwards the rows it leaves with no person on them go: its
-    queue samples and the calls that rang a bell. Leave it only once its jobs have ended."""
+def worker(journey: Journey, settings: Settings, queues: list[str]) -> Iterator[None]:
+    """A worker on the queues for the journey: a job someone else left queued (a test that
+    stopped short) is cancelled first, so it runs only the journey's. Afterwards the rows it
+    leaves with no person on them go: its queue samples and the calls that rang a bell. Leave it
+    only once the journey's jobs have ended."""
+    owner = journey.owner
     with owner.begin() as connection:
         connection.execute(
             text(
                 "update procrastinate_jobs set status = 'cancelled'"
                 " where status = 'todo' and queue_name = any(:queues)"
+                " and not coalesce(args->>'requested_by', '') = any(:users)"
             ),
-            {"queues": queues},
+            {"queues": queues, "users": [str(user) for user in journey.users]},
         )
         sample = connection.execute(select(func.max(queue_samples.c.id))).scalar_one() or 0
         call = connection.execute(select(func.max(call_log.c.id))).scalar_one() or 0
@@ -205,21 +208,20 @@ def worker(owner: Engine, settings: Settings, queues: list[str]) -> Iterator[Non
 
 
 @contextmanager
-def serve_runs(owner: Engine, settings: Settings) -> Iterator[Settings]:
-    """Chat turns with these settings: the agent's tools on a live server, and an agent
-    worker. Yields the runs' settings."""
+def serve_runs(journey: Journey, settings: Settings) -> Iterator[Settings]:
+    """Chat turns for the journey with these settings: the agent's tools on a live server, and
+    an agent worker. Yields the runs' settings."""
     server = create_app(settings)  # never a TestClient on it: that would take its /mcp
     try:
         with live_server(server):
-            with worker(owner, server.state.settings, ["agent"]):
+            with worker(journey, server.state.settings, ["agent"]):
                 yield server.state.settings
     finally:
         server.state.engine.dispose()
 
 
 @pytest.fixture
-def runs(owner_engine: Engine, settings: Settings) -> Iterator[Settings]:
-    """Chat turns with the test settings. Request it after `journey`, so the worker stops
-    before the journey's rows go."""
-    with serve_runs(owner_engine, settings) as configured:
+def runs(journey: Journey, settings: Settings) -> Iterator[Settings]:
+    """Chat turns for the journey with the test settings; they stop before its rows go."""
+    with serve_runs(journey, settings) as configured:
         yield configured
