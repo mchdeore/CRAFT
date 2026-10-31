@@ -93,7 +93,6 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/library/documents/:item/compare` | —; query `{ fromVersion: number; toVersion: number }` | `VersionDiff` | signed in; live resource access | `compare_versions` |
 | `GET /health/live` | — | `Health` | public | — |
 | `GET /health/ready` | — | `Health` | public | — |
-| `GET /health/queue` | — | `QueueHealth` | public | — |
 | `GET /api/jobs` | —; query `JobPageRequest` | `JobPage` | signed in; own jobs (administrator: all) | — |
 | `GET /api/jobs/:jobId` | — | `Job` | signed in; own job (administrator: any) | — |
 | `POST /api/jobs/:jobId/cancel` | — | `Job` | signed in; own job (administrator: any) | — |

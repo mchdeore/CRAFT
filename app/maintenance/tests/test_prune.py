@@ -4,7 +4,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.infrastructure.access import Caller
 from app.infrastructure.database.engine import make_engine, make_sessions
@@ -105,3 +105,94 @@ def prune_once_and_check(settings, owner_engine, user, now, jobs, refs):
             select(notifications.c.ref_id).where(notifications.c.user_id == user)
         ).scalars()
         assert sorted(refs_left) == sorted([new, unread])
+
+
+def test_prune_keeps_a_month_of_jobs_and_samples_and_three_of_traffic(settings, owner_engine):
+    """Ended jobs (with their errors) and queue samples go 30 days after they end or are taken,
+    traffic counts after 90. A job's age is its end: one queued long before still stays."""
+    now = datetime.now(UTC)
+    task = "tests.history_" + uuid4().hex
+    month, hour = timedelta(days=30), timedelta(hours=1)
+    jobs = {}
+    with owner_engine.begin() as connection:
+        for name, ended in (("old", now - month - hour), ("recent", now - month + hour)):
+            job = connection.execute(
+                text(
+                    "insert into procrastinate_jobs (queue_name, task_name, status, attempts)"
+                    " values ('bulk', :task, 'failed', 1) returning id"
+                ),
+                {"task": task},
+            ).scalar_one()
+            # Queued 40 days ago (the insert's own 'deferred' event), then ended.
+            connection.execute(
+                text("update procrastinate_events set at = :at where job_id = :job"),
+                {"job": job, "at": now - timedelta(days=40)},
+            )
+            connection.execute(
+                text(
+                    "insert into procrastinate_events (job_id, type, at)"
+                    " values (:job, 'failed', :at)"
+                ),
+                {"job": job, "at": ended},
+            )
+            connection.execute(
+                text(
+                    "insert into job_attempt_errors (job_id, attempt, error) values (:job, 1, 'x')"
+                ),
+                {"job": job},
+            )
+            jobs[name] = job
+        samples = [
+            connection.execute(
+                text(
+                    "insert into queue_samples (sampled_at, queue, queued, running,"
+                    " workers_alive, concurrency) values (:at, 'bulk', 0, 0, 1, 1) returning id"
+                ),
+                {"at": at},
+            ).scalar_one()
+            for at in (now - month - hour, now - month + hour)
+        ]
+        for at in (now - 3 * month - hour, now - 3 * month + hour):
+            connection.execute(
+                text(
+                    "insert into traffic_log (at, operation, method, bytes_in, bytes_out,"
+                    " duration_ms) values (:at, :task, 'GET', 0, 0, 1)"
+                ),
+                {"at": at, "task": task},
+            )
+    engine = make_engine(settings)
+    try:
+        prune.__operation__.run(Caller(sessions=make_sessions(engine), settings=settings))
+        with owner_engine.connect() as connection:
+            left = {
+                table: set(connection.execute(text(query), {"task": task}).scalars())
+                for table, query in {
+                    "jobs": "select id from procrastinate_jobs where task_name = :task",
+                    "traffic": "select extract(day from now() - at)::int from traffic_log"
+                    " where operation = :task",
+                }.items()
+            }
+            errors = connection.execute(
+                text("select job_id from job_attempt_errors where job_id = any(:ids)"),
+                {"ids": list(jobs.values())},
+            ).scalars()
+            kept_samples = connection.execute(
+                text("select id from queue_samples where id = any(:ids)"), {"ids": samples}
+            ).scalars()
+            assert left["jobs"] == set(errors) == {jobs["recent"]}
+            assert list(kept_samples) == samples[1:] and left["traffic"] == {89}
+    finally:
+        engine.dispose()
+        with owner_engine.begin() as connection:
+            connection.execute(
+                text("delete from job_attempt_errors where job_id = any(:ids)"),
+                {"ids": list(jobs.values())},
+            )
+            for query in (
+                "delete from procrastinate_jobs where task_name = :task",
+                "delete from traffic_log where operation = :task",
+            ):
+                connection.execute(text(query), {"task": task})
+            connection.execute(
+                text("delete from queue_samples where id = any(:ids)"), {"ids": samples}
+            )

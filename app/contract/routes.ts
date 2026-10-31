@@ -18,7 +18,6 @@ export interface Routes {
   "GET /api/library/documents/:item/compare": { query: { fromVersion: number; toVersion: number }; response: T.VersionDiff }; // example: version-diff.json
   "GET /health/live": { response: T.Health }; // example: health-live.json
   "GET /health/ready": { response: T.Health }; // example: health-ready.json
-  "GET /health/queue": { response: T.QueueHealth }; // example: queue-health.json
   "GET /api/jobs": { query: T.JobPageRequest; response: T.JobPage }; // example: job-page.json
   "GET /api/jobs/:jobId": { response: T.Job }; // example: job.json
   "POST /api/jobs/:jobId/cancel": { response: T.Job }; // example: job.json

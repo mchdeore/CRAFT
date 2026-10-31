@@ -79,29 +79,6 @@ export type NotificationKind = "job_done" | "job_failed" | "run_done" | "run_wai
 export interface NotificationPageRequest { unread?: boolean; limit?: number }
 /** `refKind` and `refId` name a job (GET /api/jobs/:jobId) or a run. Clients poll; there is no push. */
 export interface Notification { id: Id; kind: NotificationKind; refKind: "job" | "run"; refId: string; createdAt: string; readAt: string | null }
-export interface QueueCounts {
-  queue: string;
-  queued: number;
-  scheduled: number;
-  started: number;
-  stopping: number;
-  finished: number;
-  failed: number;
-  canceled: number;
-  stopped: number;
-  oldestQueuedSeconds: number | null;
-  waitP50Seconds?: number | null;
-  waitP95Seconds?: number | null;
-  waitMaxSeconds?: number | null;
-  runP50Seconds?: number | null;
-  runP95Seconds?: number | null;
-  runMaxSeconds?: number | null;
-  busyWorkers?: number;
-  concurrency?: number;
-  peakQueued?: number;
-  saturatedSeconds?: number;
-}
-export interface QueueHealth { queues: QueueCounts[]; dead: number }
 export interface LibraryDocument { item: string; version: number; title: string; path: string; tags: Tags; summary: string; summaryKind: "extract" | "generated"; outline: { block: number; headingPath: string }[]; versions: { version: number; sha256: string; indexedAt: string }[]; simulated: boolean; classification: Classification; deleted: boolean }
 export interface ChunkRange { item: string; version: number; fromBlock: number; toBlock: number }
 export interface ExploreInput { handle: CitationHandle; before?: number; after?: number; query?: string }

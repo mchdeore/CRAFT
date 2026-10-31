@@ -11,7 +11,7 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -399,5 +399,14 @@ def test_no_password_token_or_content_reaches_rows_logs_or_error_bodies(
     assert not any(secret in output for secret in secrets)
 
 
-def test_the_app_can_only_append(owner_engine) -> None:
-    assert_grants(owner_engine, {"traffic_log": {"INSERT"}})
+def test_the_app_appends_and_prunes_by_time_only(owner_engine) -> None:
+    assert_grants(owner_engine, {"traffic_log": {"INSERT", "DELETE"}})
+    with owner_engine.connect() as connection:
+        readable = connection.execute(
+            text(
+                "select attname from pg_attribute where attrelid = 'traffic_log'::regclass"
+                " and attnum > 0 and not attisdropped"
+                " and has_column_privilege('craft_app', 'traffic_log', attname, 'SELECT')"
+            )
+        ).scalars()
+        assert list(readable) == ["at"]

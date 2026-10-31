@@ -11,7 +11,7 @@ from uuid import UUID
 import anyio
 import msgspec
 from sqlalchemy import UUID as Uuid
-from sqlalchemy import BigInteger, Column, DateTime, Identity, Index, Integer, Table, Text
+from sqlalchemy import BigInteger, Column, DateTime, Identity, Index, Integer, Table, Text, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.database.metadata import metadata
@@ -67,10 +67,19 @@ class Counted(Protocol):
     def workspace_token_id(self) -> UUID | None: ...
 
 
+def prune(session: Session, days: int) -> None:
+    """Delete traffic counted over `days` days ago (craft_app may read only `at`)."""
+    session.execute(
+        traffic_log.delete().where(
+            traffic_log.c.at < func.now() - func.make_interval(0, 0, 0, days)
+        )
+    )
+
+
 def record(sessions: sessionmaker[Session], row: Traffic) -> None:
     """Where every count goes: one traffic_log row in its own short transaction."""
     with unit_of_work(sessions) as session:
-        # inline(): no RETURNING for the new id, which craft_app (insert only) may not read.
+        # inline(): no RETURNING for the new id, which craft_app may not read (it reads only at).
         session.execute(traffic_log.insert().inline().values(**msgspec.structs.asdict(row)))
 
 

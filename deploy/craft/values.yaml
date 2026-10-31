@@ -61,8 +61,8 @@ api:
   memory: 1Gi
   cpu: 100m
 
-# One Deployment per worker, each with its queues and jobs at once per queue
-# (app/infrastructure/queue.py).
+# One Deployment per worker, each with its queues. A worker has one concurrency number, the
+# largest of its queues' values below (app/infrastructure/queue.py).
 # inApiPod: the worker runs inside the API's pod instead, sharing its localhost, because chat
 # turns call the API's MCP on 127.0.0.1 (CRAFT_MCP_URL must be a loopback address).
 # Notebook runs (interactive queue) need their own worker: it holds the Job-creating account.

@@ -52,7 +52,6 @@ def test_samples_and_report_match_known_jobs(settings, jobs, owner_engine, monke
     try:
         sessions = make_sessions(engine)
         report = service.report(sessions, since_seconds=3600)
-        health = service.health(sessions, since_seconds=3600)
     finally:
         engine.dispose()
 
@@ -62,11 +61,9 @@ def test_samples_and_report_match_known_jobs(settings, jobs, owner_engine, monke
     assert kind["outcomes"].get("finished", 0) >= 3
     assert kind["wait_p50_seconds"] is not None
     assert kind["run_p50_seconds"] is not None
+    assert interactive["wait_p50_seconds"] is not None
+    assert interactive["run_p50_seconds"] is not None
     assert interactive["peak_queued"] >= 0
-
-    health_row = next(row for row in health["queues"] if row["queue"] == "interactive")
-    assert health_row["wait_p50_seconds"] is not None
-    assert health_row["run_p50_seconds"] is not None
 
     # Direct sample insert proves saturation counting for a known window.
     monkeypatch.setattr(queue, "SAMPLE_SECONDS", 30.0)

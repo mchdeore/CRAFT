@@ -1,6 +1,6 @@
 """Defer, read and cancel jobs; a caller sees their own jobs, managers see all."""
 
-from typing import Any, get_args
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -96,6 +96,12 @@ def prune_progress(session: Session, days: int) -> None:
     storage.prune_progress(session, days)
 
 
+def prune_history(session: Session, job_days: int, sample_days: int) -> None:
+    """Delete jobs that ended `job_days` ago, with their errors, and older queue samples."""
+    storage.prune_ended(session, job_days)
+    storage.prune_samples(session, sample_days)
+
+
 def page(caller: Caller, state: str | None, offset: int, limit: int) -> dict[str, Any]:
     assert caller.sessions is not None
     owner = None if manager(caller) else str(caller.user_id)
@@ -118,64 +124,6 @@ def cancel(caller: Caller, job_id: int) -> dict[str, Any]:
 
 def _seconds(value) -> float | None:
     return None if value is None else round(float(value), 3)
-
-
-def health(sessions, *, since_seconds: float = 3600.0) -> dict[str, Any]:
-    """Counts plus last-hour wait/run percentiles and busy workers."""
-    from app.infrastructure.queue import STALLED_SECONDS
-    from app.jobs.handlers import JobState  # handlers imports this module
-
-    states = get_args(JobState)
-
-    with unit_of_work(sessions, read_only=True) as session:
-        rows = storage.counts(session)
-        percentiles = {row["queue"]: row for row in storage.job_percentiles(session, since_seconds)}
-        samples = {row["queue"]: row for row in storage.sample_stats(session, since_seconds)}
-        alive = storage.workers_alive(session, STALLED_SECONDS)
-    queues = {
-        name: {
-            "queue": name,
-            "oldest_queued_seconds": None,
-            "wait_p50_seconds": None,
-            "wait_p95_seconds": None,
-            "wait_max_seconds": None,
-            "run_p50_seconds": None,
-            "run_p95_seconds": None,
-            "run_max_seconds": None,
-            "busy_workers": 0,
-            "concurrency": 0,
-            "peak_queued": 0,
-            "saturated_seconds": 0.0,
-        }
-        | dict.fromkeys(states, 0)
-        for name in QUEUES
-    }
-    for row in rows:
-        entry = queues.setdefault(
-            row["queue"],
-            {"queue": row["queue"], "oldest_queued_seconds": None} | dict.fromkeys(states, 0),
-        )
-        entry[row["state"]] = row["jobs"]
-        if row["state"] == "queued" and row["oldest"] is not None:
-            entry["oldest_queued_seconds"] = round(float(row["oldest"]), 1)
-    for name, entry in queues.items():
-        stats = percentiles.get(name)
-        if stats is not None:
-            entry["wait_p50_seconds"] = _seconds(stats["wait_p50"])
-            entry["wait_p95_seconds"] = _seconds(stats["wait_p95"])
-            entry["wait_max_seconds"] = _seconds(stats["wait_max"])
-            entry["run_p50_seconds"] = _seconds(stats["run_p50"])
-            entry["run_p95_seconds"] = _seconds(stats["run_p95"])
-            entry["run_max_seconds"] = _seconds(stats["run_max"])
-        sample = samples.get(name)
-        if sample is not None:
-            entry["busy_workers"] = int(sample["workers_alive"] or 0)
-            entry["concurrency"] = int(sample["concurrency"] or 0)
-            entry["peak_queued"] = int(sample["peak_queued"] or 0)
-            entry["saturated_seconds"] = float(sample["saturated_seconds"] or 0)
-        elif alive:
-            entry["busy_workers"] = int(alive)
-    return {"queues": list(queues.values()), "dead": sum(q["failed"] for q in queues.values())}
 
 
 def report(sessions, *, since_seconds: float = 86400.0) -> dict[str, Any]:

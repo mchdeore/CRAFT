@@ -113,6 +113,33 @@ def prune_progress(session: Session, days: int) -> None:
     )
 
 
+def prune_ended(session: Session, days: int) -> None:
+    """Delete jobs that ended over `days` days ago, with their errors (their events cascade, and
+    Procrastinate's own trigger unlinks a schedule's pointer to one)."""
+    session.execute(
+        text(
+            "with ended as ("
+            "  delete from procrastinate_jobs job"
+            "   where job.status in ('succeeded', 'failed', 'cancelled', 'aborted')"
+            "     and (select max(at) from procrastinate_events e where e.job_id = job.id"
+            "            and e.type in ('succeeded', 'failed', 'cancelled', 'aborted'))"
+            "         < now() - make_interval(days => :days)"
+            "  returning job.id)"
+            " delete from job_attempt_errors where job_id in (select id from ended)"
+        ),
+        {"days": days},
+    )
+
+
+def prune_samples(session: Session, days: int) -> None:
+    """Delete queue samples taken over `days` days ago."""
+    session.execute(
+        queue_samples.delete().where(
+            queue_samples.c.sampled_at < func.now() - func.make_interval(0, 0, 0, days)
+        )
+    )
+
+
 def defer(session: Session, queue: str, kind: str, args: dict, lock: str | None) -> int:
     """Insert one job; workers hear of it by NOTIFY when the transaction commits."""
     return session.execute(
@@ -164,18 +191,6 @@ def cancel_queued(session: Session, job_id: int) -> bool:
         text("select procrastinate_cancel_job_v1(:id, false, false)"), {"id": job_id}
     ).scalar_one()
     return cancelled is not None
-
-
-def counts(session: Session):
-    return list(
-        session.execute(
-            text(
-                "select queue, state, count(*) as jobs,"
-                " extract(epoch from now() - min(enqueued_at)) as oldest"
-                " from job_overview group by queue, state"
-            )
-        ).mappings()
-    )
 
 
 def sample_queues(session: Session, queues: list[str], concurrency: int, stalled: float) -> None:
@@ -323,13 +338,3 @@ def sample_stats(session: Session, since_seconds: float, sample_seconds: float =
             {"since": since_seconds, "step": sample_seconds},
         ).mappings()
     )
-
-
-def workers_alive(session: Session, stalled: float) -> int:
-    return session.execute(
-        text(
-            "select count(*) from procrastinate_workers"
-            " where last_heartbeat > now() - make_interval(secs => :stalled)"
-        ),
-        {"stalled": stalled},
-    ).scalar_one()

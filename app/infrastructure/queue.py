@@ -2,7 +2,8 @@
 
 Three queues, one worker each: `agent` (chat turns), `interactive` (someone is waiting) and
 `bulk` (long batch work), so a long job never holds up a person. Every worker runs the same
-image and command, `craft worker`, with CRAFT_WORKER_QUEUES and per-queue concurrency settings.
+image and command, `craft worker`, with CRAFT_WORKER_QUEUES. A worker has one concurrency
+number: the largest of its queues' CRAFT_WORKER_CONCURRENCY_* settings.
 Job arguments are JSON and hold IDs only: never document text, prompts or tokens. A job is
 never retried: one whose worker dies is marked failed.
 """
