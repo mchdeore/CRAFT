@@ -17,3 +17,11 @@ def read_env() -> dict[str, str]:
                 values[key.strip()] = value.strip()
     values.update(os.environ)
     return values
+
+
+def owner_password() -> str:
+    """craft_owner's password, for migrations and owner tools; exits when it is empty."""
+    password = read_env().get("CRAFT_OWNER_DB_PASSWORD")
+    if not password:
+        raise SystemExit("bad setting: CRAFT_OWNER_DB_PASSWORD is required")
+    return password

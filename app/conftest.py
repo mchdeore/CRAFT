@@ -9,13 +9,14 @@ from alembic.config import Config
 from argon2 import PasswordHasher
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import URL, Engine, create_engine, func, select
+from sqlalchemy import Engine, create_engine, func, select
 
 from app import create_app, load_operations
 from app.accounts import service as accounts
 from app.identity import service as identity
-from app.infrastructure.config.env import read_env
+from app.infrastructure.config.env import owner_password, read_env
 from app.infrastructure.config.settings import Settings
+from app.infrastructure.database.engine import database_url
 from app.infrastructure.operations.storage import call_log
 from app.infrastructure.paths import ROOT
 from app.tests.support import model as scripted_model
@@ -75,15 +76,7 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 @pytest.fixture(scope="session")
 def owner_engine(settings: Settings) -> Iterator[Engine]:
     """craft_owner on the test database: sets up tables a test needs (S0 has no migrations)."""
-    url = URL.create(
-        "postgresql+psycopg",
-        username="craft_owner",
-        password=read_env()["CRAFT_OWNER_DB_PASSWORD"],
-        host=settings.database_host,
-        port=settings.database_port,
-        database=TEST_DATABASE,
-    )
-    engine = create_engine(url)
+    engine = create_engine(database_url(settings, "craft_owner", owner_password(), TEST_DATABASE))
     yield engine
     engine.dispose()
 

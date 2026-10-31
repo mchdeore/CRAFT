@@ -12,21 +12,6 @@ from app.infrastructure.config.env import read_env
 PREFIX = "CRAFT_"
 # Setup, Compose and tests only; scripts/seed reads CRAFT_SEED, the tests CRAFT_TEST_DATABASE.
 OTHER_TOOLS = {"db_admin_password", "owner_db_password", "mcp_account", "seed", "test_database"}
-# Settings of the deleted indexer, RQ queue, dev page and process manager; older .env files may
-# still set them.
-RETIRED = {
-    "model_ocr",
-    "ocr_max_bytes",
-    "index_max_bytes",
-    "ocr_attempt_limit",
-    "ocr_retry_seconds",
-    "queue_url",
-    "queue_name",
-    "dev_page",
-    "process_root",
-    # Replaced by per-queue CRAFT_WORKER_CONCURRENCY_AGENT / _INTERACTIVE / _BULK.
-    "worker_concurrency",
-}
 QUEUES = ("agent", "interactive", "bulk")
 # Jobs at once per queue, sized for the proof of concept's 10 people at a time: a chat turn
 # and a task-mode run each (agent), a notebook run each (interactive), and a little background
@@ -101,7 +86,7 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
             name: value
             for key, value in source.items()
             if key.startswith(PREFIX)
-            and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS | IDENTITY | RETIRED
+            and (name := key.removeprefix(PREFIX).lower()) not in OTHER_TOOLS | IDENTITY
         }
         try:
             settings = msgspec.convert(raw, cls, strict=False)

@@ -131,18 +131,15 @@ def test_disabled_cross_origin_browser_mode_retains_local_origin() -> None:
 
 
 def test_worker_queues_and_retired_settings() -> None:
-    configured = Settings.from_env(
-        {
-            **VALID,
-            "CRAFT_WORKER_QUEUES": "bulk, agent",
-            "CRAFT_OCR_MAX_BYTES": "2048",
-            "CRAFT_PROCESS_ROOT": ".local/runtime/processes",
-        }
-    )
+    configured = Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "bulk, agent"})
     assert configured.queue_names() == ["bulk", "agent"]
     with pytest.raises(SystemExit) as stopped:
         Settings.from_env({**VALID, "CRAFT_WORKER_QUEUES": "agent,urgent"})
     assert "worker_queues" in str(stopped.value) and "urgent" not in str(stopped.value)
+    # A setting an older .env still holds stops startup and is named, its value never.
+    with pytest.raises(SystemExit) as stopped:
+        Settings.from_env({**VALID, "CRAFT_OCR_MAX_BYTES": "2048"})
+    assert str(stopped.value) == "bad setting: ocr_max_bytes: invalid configuration"
 
 
 def test_chart_and_env_example_list_every_setting() -> None:
