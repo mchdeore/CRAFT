@@ -9,11 +9,11 @@ operation pipeline gives each kind of caller what the table says.
 - http: the route's method; `-` when only server code calls the operation.
 - tool: `read` for the agent's read tools; a tool that changes something shows its effect
   (`data`, `external`), which an MCP caller such as the agent may use only once a person
-  approves the call or under a notebook grant; `none` for `ask_agent`, which only MCP clients
-  call; `-` for an operation that is no tool.
+  approves the call or under a notebook grant; `none` for `ask_agent`, a tool the agent itself
+  never gets; `-` for an operation that is no tool.
 - workspace, mcp: `yes` when a personal token of that kind may call it: the read tools, and
-  also `accounts.me` for a workspace token or `ask_agent` for an MCP token. A token gets 403
-  anywhere else.
+  also `accounts.me` for a workspace token or `ask_agent` for an MCP token. A workspace token
+  signs in at /api and an MCP token at /mcp; there, a row without `yes` answers 403.
 """
 
 MATRIX = """
@@ -103,6 +103,7 @@ library.read_facets                     signed_in        -       -         -    
 library.read_revision                   signed_in        GET     -         -          -
 library.relations                       signed_in        GET     read      yes        yes
 library.search                          signed_in        POST    read      yes        yes
+maintenance.prune                       public           -       -         -          -
 notes.delete_note                       signed_in        DELETE  data      -          -
 notes.list_notes                        signed_in        GET     read      yes        yes
 notes.read_note                         signed_in        GET     read      yes        yes
@@ -121,6 +122,7 @@ tools.list_capabilities                 signed_in        GET     read      yes  
 tools.make_chart                        signed_in        POST    read      yes        yes
 workspace.edit_granted_notebook         signed_in        POST    external  -          -
 workspace.edit_notebook                 signed_in        POST    external  -          -
+workspace.notebook_run                  signed_in        -       -         -          -
 workspace.read_workspace                signed_in        GET     -         -          -
 workspace.run_code                      signed_in        POST    external  -          -
 workspace.run_in_granted_notebook       signed_in        POST    external  -          -

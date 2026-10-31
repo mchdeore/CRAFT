@@ -12,6 +12,7 @@ from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.pipeline import checked_access, token_allowed
 from app.infrastructure.operations.registry import Operation, registry, tool_operations
+from app.infrastructure.queue import JOB_MODULES, job_operations
 from app.tests.access_matrix import MATRIX
 from app.tests.support import people
 from app.tests.support.accounts import ORIGIN, sign_in
@@ -30,17 +31,21 @@ def line(name: str, row: Row) -> str:
     return f"{name:<40}{row.access:<17}{row.http:<8}{row.tool:<10}{row.workspace:<11}{row.mcp}"
 
 
-GOLDEN = {name: Row(*columns) for name, *columns in map(str.split, MATRIX.strip().splitlines()[1:])}
+ROWS = [line.split() for line in MATRIX.strip().splitlines()[1:]]
+GOLDEN = {name: Row(*columns) for name, *columns in ROWS}
 
 
 @pytest.fixture(scope="module")
 def operations() -> dict[str, Operation]:
-    """The app's operations, without the probes tests declare."""
+    """The operations the app and its workers declare, without the probes tests declare."""
     load_operations()
+    # JOBS keeps every job, even one a test's registry restore has taken out of the registry.
+    declared = registry | job_operations()
+    modules = {*OPERATION_MODULES, *JOB_MODULES}
     return {
         name: operation
-        for name, operation in sorted(registry.items())
-        if (operation.run or operation.function).__module__ in OPERATION_MODULES
+        for name, operation in sorted(declared.items())
+        if (operation.run or operation.function).__module__ in modules
     }
 
 
@@ -58,9 +63,13 @@ def test_the_matrix_lists_every_operation_as_the_registry_declares_it(operations
     }
     changed = [line(name, row) for name, row in declared.items() if GOLDEN.get(name) != row]
     gone = [name for name in GOLDEN if name not in declared]
-    assert not changed and not gone, "\n".join(
-        ["access_matrix.py differs from the registry; review, then write these rows:", *changed]
+    names = [name for name, *_ in ROWS]
+    twice = sorted({name for name in names if names.count(name) > 1})
+    assert not changed and not gone and not twice, "\n".join(
+        ["access_matrix.py differs from the registry; review, then replace or add these rows:"]
+        + changed
         + [f"and remove {name}" for name in gone]
+        + [f"and list {name} once" for name in twice]
     )
 
 
