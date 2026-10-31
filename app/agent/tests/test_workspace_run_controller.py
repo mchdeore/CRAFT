@@ -377,9 +377,7 @@ def fake_boundaries(monkeypatch, lifecycle, *, failure=None, bridge_port=0):
 def owned_controller(lifecycle, run, *, bridge_port=0):
     from app.agent.workspace_session import RunBoundSession
 
-    target = lifecycle.JupyterTarget(
-        "http://127.0.0.1:9998/", "generated-jupyter-token", KERNEL, "host.docker.internal"
-    )
+    target = lifecycle.JupyterTarget("http://127.0.0.1:9998/", "generated-jupyter-token", KERNEL)
     if bridge_port:
         target = replace(target, bridge_port=bridge_port)
     middleware = lifecycle.WorkspaceToolCallMiddleware(
@@ -414,9 +412,9 @@ def test_controller_provisions_silently_and_native_sdk_uses_the_borrowed_budget(
             try:
                 instructions = await controller.start()
                 assert NOTEBOOK in instructions and KERNEL in instructions
-                assert "host.docker.internal" not in instructions
                 assert recorded.sockets[0].address == ("127.0.0.1", bridge_port)
-                assert sdk._binding.url == f"http://host.docker.internal:{bridge_port or 42424}/mcp"
+                assert sdk._binding.url == f"http://127.0.0.1:{bridge_port or 42424}/mcp"
+                assert sdk._binding.url not in instructions
                 assert sdk._binding.run_id == str(run.parent.caller.run_id)
                 assert sdk._binding.deadline <= session._deadline + 0.005
                 assert session._middleware is middleware and middleware.budget is run.budget
@@ -800,7 +798,7 @@ def test_fixed_bridge_port_collision_never_falls_back_and_releases_owner(monkeyp
             retry, _, _ = owned_controller(lifecycle, run, bridge_port=54301)
             try:
                 await retry.start()
-                assert sdk._binding.url == "http://host.docker.internal:54301/mcp"
+                assert sdk._binding.url == "http://127.0.0.1:54301/mcp"
             finally:
                 await retry.close()
             assert sdk._binding is None and all(sock.closed for sock in recorded.sockets)

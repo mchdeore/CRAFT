@@ -168,7 +168,7 @@ def _unbind_run(binding_id: str) -> bool:
 
 def _bridge_host(host: str | None) -> bool:
     """Loopback names, or a private address: the CRAFT API pod's own on the cluster."""
-    if host in {"127.0.0.1", "localhost", "host.docker.internal"}:
+    if host in {"127.0.0.1", "localhost"}:
         return True
     try:
         return ipaddress.ip_address(host or "").is_private

@@ -26,7 +26,7 @@ from app.agent.workspace_session import RunBoundSession
 
 _UNAVAILABLE = "Run-bound native capability is unavailable."
 _APPROVAL = "This native capability requires the CRAFT approval/resume path."
-_HOSTS = ["127.0.0.1", "localhost", "host.docker.internal"]
+_HOSTS = ["127.0.0.1", "localhost"]
 
 
 @dataclass(frozen=True, slots=True)

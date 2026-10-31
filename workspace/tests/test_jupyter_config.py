@@ -15,8 +15,6 @@ from unittest.mock import patch
 def generated_config(origin):
     config = SimpleNamespace(
         ServerApp=SimpleNamespace(),
-        IdentityProvider=SimpleNamespace(),
-        PasswordIdentityProvider=SimpleNamespace(),
         FileContentsManager=SimpleNamespace(),
         Application=SimpleNamespace(),
     )
@@ -25,7 +23,7 @@ def generated_config(origin):
             os.environ,
             {
                 "USER_ROOT": str(Path(directory).resolve()),
-                "JUPYTER_TOKEN": "generated-private-token",
+                "JUPYTERHUB_API_TOKEN": "generated-server-token",
                 "CRAFT_UI_ORIGIN": origin,
             },
             clear=True,
@@ -68,8 +66,7 @@ class JupyterConfigTest(unittest.TestCase):
                 os.environ,
                 {
                     "USER_ROOT": str(root),
-                    "JUPYTER_TOKEN": "generated-private-token",
-                    "JUPYTER_PASSWORD_HASH": "",
+                    "JUPYTERHUB_API_TOKEN": "generated-server-token",
                     "CRAFT_UI_ORIGIN": "http://127.0.0.1:5173",
                 },
             ):
@@ -87,46 +84,29 @@ class JupyterConfigTest(unittest.TestCase):
                 self.assertNotIn("generated-info", output.getvalue())
                 self.assertIn("generated-warning", output.getvalue())
 
-    def test_configured_password_authenticates_without_removing_token(self):
-        if any(util.find_spec(name) is None for name in ("jupyter_server", "traitlets")):
-            self.skipTest("Optional JupyterLab dependencies are absent; run in the lab environment")
-        ServerApp = import_module("jupyter_server.serverapp").ServerApp
-        Config = import_module("traitlets.config").Config
-        passwd = import_module("jupyter_server.auth.security").passwd
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            with patch.dict(
-                os.environ,
-                {
-                    "USER_ROOT": str(root),
-                    "JUPYTER_TOKEN": "generated-private-token",
-                    "JUPYTER_PASSWORD_HASH": passwd("generated-correct-password"),
-                    "CRAFT_UI_ORIGIN": "http://127.0.0.1:5173",
-                },
-            ):
-                config = Config()
-                runpy.run_path(
-                    str(Path(__file__).parents[1] / "jupyter_server_config.py"),
-                    init_globals={"get_config": lambda: config},
-                )
-                application = ServerApp(config=config)
-                provider = application.identity_provider_class(config=config, parent=application)
-                self.assertTrue(provider.passwd_check("generated-correct-password"))
-                self.assertFalse(provider.passwd_check("generated-wrong-password"))
-                self.assertEqual(provider.token, "generated-private-token")
-
 
 if __name__ == "__main__":
     unittest.main()
 
 
 class HubConfigTest(unittest.TestCase):
-    def test_under_the_hub_no_token_is_needed_and_the_control_server_gets_its_own(self):
+    def test_without_the_hubs_token_the_config_refuses_even_a_jupyter_token(self):
+        with tempfile.TemporaryDirectory() as root:
+            environment = {
+                "USER_ROOT": str(Path(root).resolve()),
+                "JUPYTER_TOKEN": "generated-private-token",  # the token mode before the Hub
+            }
+            with patch.dict(os.environ, environment, clear=True):
+                with self.assertRaisesRegex(ValueError, "JUPYTERHUB_API_TOKEN"):
+                    runpy.run_path(
+                        str(Path(__file__).parents[1] / "jupyter_server_config.py"),
+                        init_globals={"get_config": SimpleNamespace},
+                    )
+
+    def test_under_the_hub_no_token_is_set_and_the_control_server_gets_its_own(self):
         settings = SimpleNamespace(
             ServerApp=SimpleNamespace(),
             IdentityProvider=SimpleNamespace(),
-            PasswordIdentityProvider=SimpleNamespace(),
             FileContentsManager=SimpleNamespace(),
             Application=SimpleNamespace(),
         )

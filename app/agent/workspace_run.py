@@ -231,7 +231,7 @@ class WorkspaceRunController:
             self._resources.callback(listener.close)
             # On the cluster the person's pod connects to this pod's own address (bridge_host);
             # the network policy lets only workspace pods reach it, with the run's bearer.
-            loopback = {"127.0.0.1", "localhost", "host.docker.internal"}
+            loopback = {"127.0.0.1", "localhost"}
             listen = self._target.bridge_host
             if listen in loopback:
                 listen = "127.0.0.1"

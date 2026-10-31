@@ -257,7 +257,7 @@ def test_close_cancels_inflight_native_call_and_joins_transport_resources():
     asyncio.run(execute())
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "host.docker.internal"])
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
 def test_only_explicit_local_host_aliases_are_available(host):
     async def execute():
         async with running() as (_, bridge):
