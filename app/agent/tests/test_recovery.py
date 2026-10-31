@@ -8,13 +8,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app import create_app
 from app.agent import handlers, model, storage
-from app.agent.service import RUN_LOCK
+from app.agent.service import CANCELLED, RUN_LOCK
 from app.approvals import service as approval_service
 from app.infrastructure.access import SIGNED_IN
 from app.infrastructure.database.metadata import metadata
@@ -195,6 +195,21 @@ def run_locked(context, run):
     """The run still has a queued or running job, which makes a new start or resume a 409."""
     with Session(context["owner"]) as session:
         return active_job(session, RUN_LOCK + str(run)) is not None
+
+
+def reattach(http, run):
+    """The run's newest stream from its first event, as a returning client reads it."""
+    return events(http.get(f"/api/agent/runs/{run}/events", params={"after": 0}))
+
+
+def refused(http, context, run, *bodies):
+    """Each POST is refused before it records or queues anything: re-attaching still replays
+    the run's stream, and lastEvent still counts it."""
+    stream = reattach(http, run)
+    for body in bodies:
+        assert http.post("/api/agent/runs", json=body).status_code == 409
+        assert reattach(http, run) == stream
+        assert read_recovery(http, context)["lastEvent"] == len(stream)
 
 
 def repeated_read(http, context, monkeypatch):
@@ -593,3 +608,51 @@ def test_a_reattach_at_the_recovered_last_event_ends_at_once(context, native_pau
         assert decided.status_code == 200
         assert events(http.post("/api/agent/runs", json=resume))[-1]["type"] == "RUN_FINISHED"
         reattach_at_the_end(http, "finished")
+
+
+def test_a_refused_start_or_resume_leaves_the_run_and_its_stream(context, native_pause):
+    run, start = native_pause["run"], native_pause["body"]
+    resume = {
+        "threadId": start["threadId"],
+        "runId": start["runId"],
+        "messages": [],
+        "resume": {"approvalId": str(native_pause["approval"])},
+    }
+    with runtime_client(context) as http:
+        # A second start, and a resume while the approval is still pending.
+        refused(http, context, run, start, resume)
+        decision = f"/api/approvals/{native_pause['approval']}/decision"
+        assert http.post(decision, json={"approve": False}).status_code == 200
+        # Another approval, and a resume that brings its own answer.
+        forged = {"approvalId": str(native_pause["approval"]), "approved": True}
+        refused(
+            http,
+            context,
+            run,
+            resume | {"resume": {"approvalId": str(uuid4())}},
+            resume | {"resume": forged},
+        )
+        assert events(http.post("/api/agent/runs", json=resume))[-1]["type"] == "RUN_FINISHED"
+        # A replayed resume, and a start of the finished run.
+        refused(http, context, run, resume, start)
+    with context["owner"].connect() as connection:
+        queued = connection.execute(
+            text("select count(*) from procrastinate_jobs where args->'input'->>'run' = :run"),
+            {"run": str(run)},
+        ).scalar_one()
+    assert queued == 2  # the start and the resume
+
+
+def test_cancelling_a_paused_run_ends_its_stream_with_the_cancel(
+    context, native_pause, recovery_http
+):
+    """The cancel takes the place of the RUN_FINISHED the run paused with, so re-attaching
+    from the start ends with run_cancelled and lastEvent still counts the stream."""
+    run = native_pause["run"]
+    paused = reattach(recovery_http, run)
+    assert paused[-1]["outcome"]["type"] == "interrupt"
+    assert recovery_http.post(f"/api/agent/runs/{run}/cancel").status_code == 204
+    cancelled = reattach(recovery_http, run)
+    assert cancelled == paused[:-1] + [CANCELLED]
+    recovered = read_recovery(recovery_http, context)
+    assert (recovered["status"], recovered["lastEvent"]) == ("cancelled", len(cancelled))

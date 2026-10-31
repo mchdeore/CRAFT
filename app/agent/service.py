@@ -35,9 +35,18 @@ def recovery(caller, request):
             ended_at=row["ended_at"].isoformat() if row["ended_at"] is not None else None,
             approval_id=approval_id,
             approval_status=approval_status,
-            can_resume=status == "paused" and approval_status in {"approved", "rejected"},
+            can_resume=_resumable(row),
             last_event=storage.last_event(session, row["run_id"]) if row["run_id"] else None,
         )
+
+
+def _resumable(row) -> bool:
+    """A paused run resumes once the approval it waits on is decided."""
+    return (
+        row["status"] == "paused"
+        and row["approval_id"] is not None
+        and row["approval_status"] in {"approved", "rejected"}
+    )
 
 
 def start(caller, request, version):
@@ -60,17 +69,9 @@ def start(caller, request, version):
 
 def resume(caller, request):
     """The paused run's state, the answer to its approval, and its mode."""
-    from uuid import UUID
-
     from app.approvals.handlers import ApprovalRef, read_approval
 
-    payload = request.resume
-    if not isinstance(payload, dict) or set(payload) != {"approvalId"}:
-        raise Conflict()
-    try:
-        identifier = UUID(payload["approvalId"])
-    except (ValueError, TypeError, AttributeError):
-        raise Conflict() from None
+    identifier = _answered_approval(request)
     approval = read_approval(caller, ApprovalRef(id=identifier))
     if approval.run_id != request.run_id or approval.conversation_id != request.thread_id:
         raise NotFound()
@@ -88,6 +89,17 @@ def resume(caller, request):
         mode = storage.resume(session, caller.user_id, request.run_id)
     answer = {"approved": approval.status == "approved"}
     return state, {"interrupts": [{"id": pending[0]["interrupt"], "value": answer}]}, mode
+
+
+def _answered_approval(request) -> UUID:
+    """The approval a resume answers; a resume carrying anything else is refused."""
+    payload = request.resume
+    if not isinstance(payload, dict) or set(payload) != {"approvalId"}:
+        raise Conflict()
+    try:
+        return UUID(payload["approvalId"])
+    except (ValueError, TypeError, AttributeError):
+        raise Conflict() from None
 
 
 def finish(
@@ -206,11 +218,30 @@ def queue_run(caller, request, read_only: bool) -> tuple[int, int]:
     with unit_of_work(scope(caller)) as session:
         if active_job(session, RUN_LOCK + str(request.run_id)) is not None:
             raise Conflict()
+        _require_runnable(session, caller.user_id, request)
         segment = storage.add_segment(
             session, caller.user_id, request.run_id, request.thread_id, msgspec.to_builtins(stored)
         )
         job = AgentRunJob(run=request.run_id, segment=segment, read_only=read_only)
         return segment, enqueue(session, caller, agent_run, job)
+
+
+def _require_runnable(session, user, request) -> None:
+    """Refuse an input the run can't take before it is recorded or queued, so the run keeps its
+    stream; the worker checks again. A start needs a run that hasn't started (one cancelled
+    while still queued hasn't), and a resume the decided approval the paused run waits on,
+    which GET /conversations/{id}/run shows as canResume."""
+    found = storage.recovery(session, user, request.thread_id)
+    if found is None:
+        raise NotFound()
+    if request.resume is None:
+        refused = storage.started(session, request.run_id)
+    else:
+        approval = _answered_approval(request)
+        waiting = (found["run_id"], found["approval_id"]) == (request.run_id, approval)
+        refused = not (waiting and _resumable(found))
+    if refused:
+        raise Conflict()
 
 
 def asked_job(caller, job_id: int) -> tuple[str, UUID, int] | None:
@@ -260,7 +291,8 @@ def run_job_state(caller, run) -> str | None:
 
 def cancel_run(caller, run) -> None:
     """Stop the run's job; one still queued ends here, a running one ends on its worker. A
-    paused run, which has no job, ends here too, and its pending approval is rejected."""
+    paused run, which has no job, ends here too: its pending approval is rejected, and the
+    cancel ends its stream in place of the RUN_FINISHED it paused with."""
     from app.approvals.handlers import reject_pending
     from app.jobs.handlers import active_job, cancel_job_by_id
 
@@ -270,7 +302,7 @@ def cancel_run(caller, run) -> None:
             reject_pending(session, caller.user_id, run)
             segment = storage.owned_segment(session, caller.user_id, run)
             if segment is not None:
-                storage.append_event(session, run, segment, CANCELLED)
+                storage.replace_end(session, run, segment, CANCELLED)
             return
         segment = storage.owned_segment(session, caller.user_id, run)
         if segment is None:

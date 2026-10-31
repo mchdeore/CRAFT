@@ -157,9 +157,11 @@ def test_browser_cannot_inject_history(chat, monkeypatch):
 
 def test_chat_stream_owner_and_run_limits(chat):
     data = request(chat)
-    collect(chat["caller"], data)
+    first = collect(chat["caller"], data)
     with pytest.raises(Conflict):
         collect(chat["caller"], data)
+    # The second start is refused before it is recorded, so the run keeps its stream.
+    assert replay(chat, data.run_id) == first
     with pytest.raises(NotFound):
         collect(replace(chat["caller"], user_id=uuid4()), request(chat))
     table = m.metadata.tables["agent_runs"]

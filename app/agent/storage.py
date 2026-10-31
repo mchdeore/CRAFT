@@ -165,6 +165,18 @@ def append_event(session: Session, run, segment, event) -> int:
     return seq
 
 
+def replace_end(session: Session, run, segment, event) -> None:
+    """End the segment with `event` in place of its RUN_FINISHED, so the stream still has one
+    end: a paused run that is cancelled ends with the cancel."""
+    finished = agent_run_events.c.event.op("->>", return_type=Text)("type") == "RUN_FINISHED"
+    session.execute(
+        agent_run_events.delete().where(
+            agent_run_events.c.run_id == run, agent_run_events.c.segment == segment, finished
+        )
+    )
+    append_event(session, run, segment, event)
+
+
 def events_after(session: Session, run, segment, after, limit=200):
     return list(
         session.execute(
@@ -303,6 +315,12 @@ def _refuse_second_task(session: Session, user) -> None:
         raise RateLimited()
 
 
+def started(session: Session, run) -> bool:
+    """Whether the run has started; a run starts once."""
+    found = session.execute(select(agent_runs.c.id).where(agent_runs.c.id == run)).first()
+    return found is not None
+
+
 def start(session: Session, user, conversation, identifier, model, version, mode="chat"):
     _lock_account(session, user)
     conversations = metadata.tables["conversations"]
@@ -319,7 +337,7 @@ def start(session: Session, user, conversation, identifier, model, version, mode
         from app.infrastructure.errors import NotFound
 
         raise NotFound()
-    if session.execute(select(agent_runs.c.id).where(agent_runs.c.id == identifier)).first():
+    if started(session, identifier):
         raise Conflict()
     active = agent_runs.c.status.in_(["running", "paused"])
     if session.execute(
