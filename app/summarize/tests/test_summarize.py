@@ -205,7 +205,7 @@ def test_summarize_auth_origin_ownership_matrix(cube_source, monkeypatch):
     with TestClient(cube_source["app"], base_url="https://testserver") as http:
         headers = {"Origin": "https://testserver"}
         assert http.post("/api/summarize", json=request, headers=headers).status_code == 401
-        assert cube_source["sign_in"](http).status_code == 200
+        cube_source["sign_in"](http)
         assert http.post("/api/summarize", json=request).status_code == 403
         assert (
             http.post(
@@ -362,7 +362,7 @@ def test_summarize_foreign_admin_and_disabled(cube_source, monkeypatch):
             asyncio.run(summary.selected(cube_source["caller"], request))
         assert not called
         with TestClient(cube_source["app"], base_url="https://testserver") as http:
-            assert cube_source["sign_in"](http).status_code == 200
+            cube_source["sign_in"](http)
             headers = {"Origin": "https://testserver"}
             assert http.post("/api/summarize", json=request, headers=headers).status_code == 404
             assert not called
@@ -460,7 +460,7 @@ def test_http_upload_and_failure_logging_chain(cube_source, monkeypatch, capsys,
     configure_logging("DEBUG", output)
     marker = hashlib.sha256(b"simulated failure marker").hexdigest()
     with TestClient(cube_source["app"], base_url="https://testserver") as http:
-        assert cube_source["sign_in"](http).status_code == 200
+        cube_source["sign_in"](http)
         with cube_source["owner"].connect() as connection:
             before = connection.execute(select(func.max(call_log.c.id))).scalar_one() or 0
         headers = {"Origin": "https://testserver"}

@@ -32,7 +32,6 @@ def site(settings, provider: Provider, owner_engine, monkeypatch):  # noqa: F811
         oidc_client_id=provider.client_id,
         oidc_client_secret=provider.secret,
         oidc_redirect_uri=REDIRECT,
-        local_password_signin=False,
     )
     app = create_app(configured)
     created = []
@@ -84,6 +83,15 @@ def test_sign_in_links_by_email_and_sets_only_the_session_cookie(site, owner_eng
     assert done.status_code == 302 and done.headers["location"] == "/after"
     assert site.browser.cookies.get("__Host-craft_session")
     assert not site.browser.cookies.get("__Host-craft_signin")
+    set_cookies = done.headers.get_list("set-cookie")
+    (cookie,) = [c for c in set_cookies if c.startswith("__Host-craft_session=")]
+    attributes = {
+        part.strip().partition("=")[0].lower(): part.strip().partition("=")[2]
+        for part in cookie.split(";")[1:]
+    }
+    assert {"secure", "httponly", "samesite", "path"} <= set(attributes)
+    assert attributes["samesite"].lower() == "lax" and attributes["path"] == "/"
+    assert "domain" not in attributes
     me = site.browser.get("/api/me").json()
     assert me["id"] == str(user) and me["email"] == email
     with owner_engine.connect() as connection:
@@ -119,13 +127,13 @@ def test_return_to_stays_on_allowed_origins(site) -> None:
         assert return_target(site.settings, value) == "/"
 
 
-def test_password_sign_in_is_off(site) -> None:
+def test_there_is_no_password_sign_in(site) -> None:
     response = site.browser.post(
         "/api/session",
         json={"username": "x", "password": "y"},
         headers={"Origin": site.settings.allowed_origins.split(",")[0]},
     )
-    assert response.status_code == 404
+    assert response.status_code == 404  # only DELETE /api/session, signing out, is left
 
 
 def forged(site, flow, **changes):

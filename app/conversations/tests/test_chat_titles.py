@@ -10,7 +10,7 @@ from app import create_app
 @pytest.mark.parametrize("rename", [False, True], ids=["create", "rename"])
 def test_whitespace_only_title_is_rejected_without_mutation(chat, title, rename):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         headers = {"Origin": "https://testserver"}
         path = "/api/conversations/" + str(chat["thread"])
         before = http.get("/api/conversations").json()
@@ -30,7 +30,7 @@ def test_whitespace_only_title_is_rejected_without_mutation(chat, title, rename)
 )
 def test_nonblank_title_is_preserved_exactly(chat, title):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         headers = {"Origin": "https://testserver"}
         created = http.post("/api/conversations", json={"title": title}, headers=headers)
         assert created.status_code == 200
@@ -51,7 +51,7 @@ def test_nonblank_title_is_preserved_exactly(chat, title):
 
 def test_default_conversation_title_remains_valid(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         created = http.post("/api/conversations", json={}, headers={"Origin": "https://testserver"})
         assert created.status_code == 200
         assert created.json()["title"] == "New conversation"

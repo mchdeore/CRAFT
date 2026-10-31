@@ -127,7 +127,7 @@ def test_reference_requires_signed_in_caller():
 def test_reference_http_auth_and_wire_schemas(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
         assert http.get("/api/tools").status_code == 401
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         response = http.get("/api/tools")
         assert response.status_code == 200
         expected = msgspec.to_builtins(list_tools(chat["caller"]))

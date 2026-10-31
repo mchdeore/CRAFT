@@ -100,7 +100,7 @@ def test_mcp_invalid_token_refused(token):
         ]
     )
     with TestClient(create_app(token["settings"]), base_url="https://testserver") as client:
-        assert token["sign_in"](client).status_code == 200
+        token["sign_in"](client)
         cookie = client.cookies.get("__Host-craft_session")
     assert rpc(token, cookie=cookie) == 401
     runs, users = m.metadata.tables["agent_runs"], m.metadata.tables["users"]
@@ -214,7 +214,7 @@ def test_mcp_http_python_permissions_and_logging_agree(token):
         )
     python = get_document(token["trusted"], DocumentRef(item=identifier))
     with TestClient(create_app(token["settings"]), base_url="https://testserver") as client:
-        assert token["sign_in"](client).status_code == 200
+        token["sign_in"](client)
         http = client.get("/api/library/documents/" + identifier)
 
     forged = str(uuid4())
@@ -263,7 +263,7 @@ def test_mcp_http_python_permissions_and_logging_agree(token):
     with pytest.raises(NotFound):
         get_document(token["trusted"], DocumentRef(item=identifier))
     with TestClient(create_app(token["settings"]), base_url="https://testserver") as client:
-        assert token["sign_in"](client).status_code == 200
+        token["sign_in"](client)
         assert client.get("/api/library/documents/" + identifier).status_code == 404
     denied = asyncio.run(read())
     assert denied.isError and denied.structuredContent is not None

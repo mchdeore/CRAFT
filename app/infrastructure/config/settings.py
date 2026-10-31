@@ -41,8 +41,6 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     )
     session_idle_hours: Annotated[int, msgspec.Meta(gt=0)] = 8
     session_absolute_hours: Annotated[int, msgspec.Meta(gt=0)] = 12
-    sign_in_attempts_per_minute: Annotated[int, msgspec.Meta(gt=0)] = 5
-    password_min_length: Annotated[int, msgspec.Meta(ge=1)] = 12
     allowed_origins: str = "http://localhost:8000"
     cross_origin_browser: bool = False
     model_main: str = "gpt-5.4"
@@ -73,8 +71,6 @@ class Settings(msgspec.Struct, frozen=True, kw_only=True, forbid_unknown_fields=
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
     oidc_redirect_uri: str = "http://localhost:8000/api/auth/callback"
-    # Username and password straight to craft-app (POST /api/session): tests only.
-    local_password_signin: bool = False
     app_db_password: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

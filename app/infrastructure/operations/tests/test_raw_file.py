@@ -8,12 +8,12 @@ import msgspec
 from fastapi.testclient import TestClient
 
 from app import create_app
-from app.accounts import service as accounts
 from app.infrastructure.access import SIGNED_IN, Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.errors import TooLarge
 from app.infrastructure.operations import operation
 from app.infrastructure.shapes import RawFile, Shape
+from app.tests.support.accounts import sign_in
 
 
 class FileStats(Shape):
@@ -37,7 +37,6 @@ def test_raw_transport_and_auth(settings, owner_engine):
         )
 
     username = "raw_" + uuid4().hex
-    password = uuid4().hex
     users = m.metadata.tables["users"]
     with owner_engine.begin() as connection:
         user = connection.execute(
@@ -47,11 +46,6 @@ def test_raw_transport_and_auth(settings, owner_engine):
         ).scalar_one()
         connection.execute(
             m.metadata.tables["user_roles"].insert().values(user_id=user, role="member")
-        )
-        connection.execute(
-            m.metadata.tables["local_credentials"]
-            .insert()
-            .values(user_id=user, password_hash=accounts.PASSWORDS.hash(password))
         )
     configured = msgspec.structs.replace(settings, allowed_origins="https://testserver")
     app = create_app(configured)
@@ -66,12 +60,7 @@ def test_raw_transport_and_auth(settings, owner_engine):
             assert http.post("/api/raw-probe", content=data, headers=headers).status_code == 401
             huge = b"x" * (RawFile.max_bytes + 1)
             assert http.post("/api/raw-probe", content=huge, headers=headers).status_code == 401
-            signed = http.post(
-                "/api/session",
-                json={"username": username, "password": password},
-                headers={"Origin": "https://testserver"},
-            )
-            assert signed.status_code == 200
+            sign_in(http, user)
             assert (
                 http.post(
                     "/api/raw-probe",
@@ -118,7 +107,7 @@ def test_raw_transport_and_auth(settings, owner_engine):
             raise AssertionError("Oversized input was accepted.")
     finally:
         with owner_engine.begin() as connection:
-            for name in ["auth_sessions", "local_credentials", "user_roles"]:
+            for name in ["auth_sessions", "user_roles"]:
                 table = m.metadata.tables[name]
                 connection.execute(table.delete().where(table.c.user_id == user))
             connection.execute(users.delete().where(users.c.id == user))

@@ -18,8 +18,8 @@ from app.infrastructure.operations import operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.operations.storage import call_log
 from app.infrastructure.shapes import Shape
+from app.tests.support.accounts import sign_in
 
-PASSWORD = "synthetic-workspace-password"
 ORIGIN = "http://localhost:8000"
 
 
@@ -30,7 +30,6 @@ class Nested(Shape):
 @pytest.fixture
 def account(settings, owner_engine):
     snapshot = registry.copy()
-    service.ATTEMPTS.clear()
 
     @operation(SIGNED_IN)
     def internal_probe(caller: Caller) -> Nested:
@@ -48,19 +47,13 @@ def account(settings, owner_engine):
             .values(username=username, display_name="Test")
             .returning(storage.users.c.id)
         ).scalar_one()
-        connection.execute(
-            storage.local_credentials.insert().values(
-                user_id=user, password_hash=service.PASSWORDS.hash(PASSWORD)
-            )
-        )
         connection.execute(storage.user_roles.insert().values(user_id=user, role="member"))
     app = create_app(settings)
     with (
         TestClient(app, base_url="https://testserver", headers={"Origin": ORIGIN}) as browser,
         TestClient(app, base_url="https://testserver") as python,
     ):
-        signed_in = browser.post("/api/session", json={"username": username, "password": PASSWORD})
-        assert signed_in.status_code == 200
+        sign_in(browser, user)
         yield SimpleNamespace(id=user, browser=browser, python=python)
     registry.clear()
     registry.update(snapshot)
@@ -69,7 +62,6 @@ def account(settings, owner_engine):
         for table in [
             storage.workspace_tokens,
             storage.auth_sessions,
-            storage.local_credentials,
             storage.user_roles,
         ]:
             connection.execute(table.delete().where(table.c.user_id == user))

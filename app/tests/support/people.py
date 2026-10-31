@@ -1,5 +1,4 @@
-"""Generated people: a user with roles and a password, removed with the rows tied to it by
-foreign key."""
+"""Generated people: a user with roles, removed with the rows tied to it by foreign key."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -9,7 +8,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import ColumnElement, Engine, Table, or_, select, tuple_
 from sqlalchemy.schema import sort_tables
 
-from app.accounts import service as accounts
 from app.infrastructure.database.metadata import metadata
 
 
@@ -17,16 +15,13 @@ from app.infrastructure.database.metadata import metadata
 class Person:
     id: UUID
     username: str
-    password: str
 
 
 @contextmanager
-def person(
-    engine: Engine, roles: tuple[str, ...] = ("member",), password: str | None = None
-) -> Iterator[Person]:
-    """A user with these roles and a password credential. On exit the user is deleted with every
-    row that references it by foreign key, directly or through other rows, and its runs' events."""
-    username, password = "person_" + uuid4().hex, password or uuid4().hex
+def person(engine: Engine, roles: tuple[str, ...] = ("member",)) -> Iterator[Person]:
+    """A user with these roles. On exit the user is deleted with every row that references it by
+    foreign key, directly or through other rows, and its runs' events."""
+    username = "person_" + uuid4().hex
     users = metadata.tables["users"]
     with engine.begin() as connection:
         user = connection.execute(
@@ -38,13 +33,8 @@ def person(
             connection.execute(
                 metadata.tables["user_roles"].insert().values(user_id=user, role=role)
             )
-        connection.execute(
-            metadata.tables["local_credentials"]
-            .insert()
-            .values(user_id=user, password_hash=accounts.PASSWORDS.hash(password))
-        )
     try:
-        yield Person(user, username, password)
+        yield Person(user, username)
     finally:
         remove(engine, user)
 

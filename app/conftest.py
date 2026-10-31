@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, func, select
 
 from app import create_app, load_operations
-from app.accounts import service as accounts
 from app.identity import service as identity
 from app.infrastructure.config.env import owner_password, read_env
 from app.infrastructure.config.settings import Settings
@@ -35,19 +34,16 @@ DATABASE_KEYS = {"CRAFT_APP_DB_PASSWORD", "CRAFT_DATABASE_HOST", "CRAFT_DATABASE
 def settings() -> Settings:
     env = read_env()
     source = {key: env[key] for key in DATABASE_KEYS & env.keys()} | scripted_model.ENVIRONMENT
-    return msgspec.structs.replace(
-        Settings.from_env(source), database_name=TEST_DATABASE, local_password_signin=True
-    )
+    return msgspec.structs.replace(Settings.from_env(source), database_name=TEST_DATABASE)
 
 
 @pytest.fixture(scope="session", autouse=True)
 def scripted() -> Iterator[None]:
-    """Tests answer from the scripted model, never the configured one, and hash passwords
-    cheaply. Tests that store a password hash it with `accounts.PASSWORDS`."""
+    """Tests answer from the scripted model, never the configured one, and craft-id hashes
+    passwords cheaply."""
     cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
     with pytest.MonkeyPatch.context() as patch:
         scripted_model.install(patch)
-        patch.setattr(accounts, "PASSWORDS", cheap)
         patch.setattr(identity, "PASSWORDS", cheap)
         yield
 

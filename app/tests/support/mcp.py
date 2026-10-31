@@ -37,7 +37,7 @@ def account(chat):
         ) as browser,
         TestClient(app, base_url="https://testserver") as python,
     ):
-        assert chat["sign_in"](browser).status_code == 200
+        chat["sign_in"](browser)
 
         def issue(kind="mcp", **body):
             response = browser.post(

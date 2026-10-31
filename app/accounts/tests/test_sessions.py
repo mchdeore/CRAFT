@@ -1,4 +1,5 @@
-"""Real cookie sessions exercise expiry, revocation, Origin and trusted role scope."""
+"""Real cookie sessions exercise expiry, revocation, Origin and trusted role scope. Tests sign in
+as the provider's callback does (`sign_in`); test_oidc.py covers the callback itself."""
 
 import base64
 import hashlib
@@ -7,13 +8,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
 from app import create_app
 from app.accounts import service, storage
-from app.accounts.handlers import ResetPassword, UserRef, disable, reset
+from app.accounts.handlers import UserRef, disable, end_sessions
 from app.infrastructure import access
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.errors import Forbidden
@@ -21,7 +21,7 @@ from app.infrastructure.logging import configure_logging
 from app.infrastructure.operations import operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.operations.storage import call_log
-from app.tests.support.accounts import ORIGIN, PASSWORD, login
+from app.tests.support.accounts import ORIGIN, sign_in
 
 
 def session_row(owner_engine, user):
@@ -37,53 +37,18 @@ def session_row(owner_engine, user):
         )
 
 
-def test_sign_in_sets_host_cookie(account, owner_engine) -> None:
-    response = login(account)
-    assert response.status_code == 200
-    token = response.cookies.get("__Host-craft_session")
-    raw = base64.urlsafe_b64decode(token + "=" * ((-len(token)) % 4))
+def test_a_session_cookie_is_32_bytes_whose_digest_is_stored(account, owner_engine) -> None:
+    cookie = sign_in(account.client, account.id)
+    raw = base64.urlsafe_b64decode(cookie + "=" * ((-len(cookie)) % 4))
     assert len(raw) == 32
-    attrs = {
-        part.strip().partition("=")[0].lower(): part.strip().partition("=")[2]
-        for part in response.headers["set-cookie"].split(";")[1:]
-    }
-    assert {"secure", "httponly", "samesite", "path"} <= set(attrs)
-    assert attrs["samesite"].lower() == "lax" and attrs["path"] == "/" and "domain" not in attrs
-    row = session_row(owner_engine, account.id)
-    assert row["token_sha256"] == hashlib.sha256(raw).digest()
+    assert session_row(owner_engine, account.id)["token_sha256"] == hashlib.sha256(raw).digest()
     assert account.client.get("/api/account-probe").status_code == 200
-
-
-def test_wrong_user_and_wrong_password_look_the_same(account, owner_engine, monkeypatch) -> None:
-    verified = []
-    original = PasswordHasher.verify
-
-    def verify(self, hash, password):
-        verified.append(hash == service.dummy_hash())
-        return original(self, hash, password)
-
-    monkeypatch.setattr(PasswordHasher, "verify", verify)
-    a = login(account, username="unknown-" + uuid4().hex)
-    b = login(account, password="wrong")
-    assert (
-        (a.status_code, a.json()["code"], a.json()["message"])
-        == (b.status_code, b.json()["code"], b.json()["message"])
-        == (401, "not_signed_in", "Not signed in.")
-    )
-    assert any(verified)
-    with owner_engine.begin() as connection:
-        connection.execute(
-            storage.users.update()
-            .where(storage.users.c.id == account.id)
-            .values(disabled_at=access.now())
-        )
-    assert login(account).status_code == 401
 
 
 def test_session_expiry_and_throttled_keepalive(account, owner_engine, monkeypatch) -> None:
     clock = [datetime(2026, 1, 1, tzinfo=UTC)]
     monkeypatch.setattr(access, "now", lambda: clock[0])
-    assert login(account).status_code == 200
+    sign_in(account.client, account.id)
     row = session_row(owner_engine, account.id)
     assert row["idle_expires_at"] == clock[0] + timedelta(hours=8)
     assert row["expires_at"] == clock[0] + timedelta(hours=12)
@@ -101,16 +66,16 @@ def test_session_expiry_and_throttled_keepalive(account, owner_engine, monkeypat
     assert account.client.get("/api/account-probe").status_code == 401
 
 
-def test_sign_out_and_password_reset_revoke_sessions(account, owner_engine) -> None:
-    assert login(account).status_code == 200
+def test_signing_out_an_admin_sign_out_and_disabling_end_sessions(account, owner_engine) -> None:
+    sign_in(account.client, account.id)
     assert account.client.delete("/api/session").status_code == 204
     assert session_row(owner_engine, account.id)["revoked_reason"] == "sign_out"
     assert account.client.get("/api/account-probe").status_code == 401
-    login(account)
-    reset(account.admin, ResetPassword(username=account.username, password=PASSWORD + "-new"))
+    sign_in(account.client, account.id)
+    end_sessions(account.admin, UserRef(username=account.username))
+    assert session_row(owner_engine, account.id)["revoked_reason"] == "admin_sign_out"
     assert account.client.get("/api/account-probe").status_code == 401
-    service.ATTEMPTS.clear()
-    login(account, password=PASSWORD + "-new")
+    sign_in(account.client, account.id)
     disable(account.admin, UserRef(username=account.username))
     assert account.client.get("/api/account-probe").status_code == 401
     with owner_engine.connect() as connection:
@@ -198,7 +163,7 @@ def test_cross_origin_write_is_refused(account) -> None:
 
 
 def test_role_change_applies_next_request(account, owner_engine) -> None:
-    login(account)
+    sign_in(account.client, account.id)
     assert account.client.get("/api/account-admin").status_code == 403
     with owner_engine.begin() as connection:
         connection.execute(storage.user_roles.insert().values(user_id=account.id, role="admin"))
@@ -213,35 +178,28 @@ def test_role_change_applies_next_request(account, owner_engine) -> None:
     assert account.client.get("/api/account-admin").status_code == 403
 
 
-def test_sign_in_rate_limited_and_tokens_never_logged(account, owner_engine) -> None:
+def test_session_cookies_differ_and_are_never_logged(account, owner_engine) -> None:
     stream = io.StringIO()
     configure_logging("DEBUG", stream)
-    a = login(account)
-    b = login(account)
-    raw_a = a.cookies.get("__Host-craft_session")
-    raw_b = b.cookies.get("__Host-craft_session")
-    assert hashlib.sha256(raw_a.encode()).digest() != hashlib.sha256(raw_b.encode()).digest()
-    for _ in range(3):
-        login(account, password="wrong")
-    assert login(account).status_code == 429
-    leak = PASSWORD in stream.getvalue() or raw_a in stream.getvalue() or raw_b in stream.getvalue()
-    assert not leak
+    first = sign_in(account.client, account.id)
+    assert account.client.get("/api/account-probe").status_code == 200
+    second = sign_in(account.client, account.id)
+    assert account.client.get("/api/account-probe").status_code == 200
+    assert first != second
+    assert first not in stream.getvalue() and second not in stream.getvalue()
     with owner_engine.connect() as connection:
-        cells = (
+        rows = (
             connection.execute(select(call_log).where(call_log.c.user_id == account.id))
             .mappings()
             .all()
         )
-    leak = any(
-        PASSWORD in str(cell) or raw_a in str(cell) or raw_b in str(cell)
-        for row in cells
-        for cell in row.values()
+    assert rows and not any(
+        first in str(cell) or second in str(cell) for row in rows for cell in row.values()
     )
-    assert not leak
 
 
 def test_http_python_access_and_logging_agree(account, owner_engine) -> None:
-    login(account)
+    sign_in(account.client, account.id)
     caller = Caller(
         user_id=account.id,
         roles=frozenset({"member"}),
@@ -271,47 +229,6 @@ def test_http_python_access_and_logging_agree(account, owner_engine) -> None:
         http["auth_session_id"] is not None
         and str(http["request_id"]) == response.headers["x-request-id"]
     )
-
-
-def test_reset_during_password_verification_refuses_old_password(
-    account, owner_engine, monkeypatch
-) -> None:
-    original = PasswordHasher.verify
-    reset_once = []
-
-    def verify(self, hash, password):
-        verified = original(self, hash, password)
-        if verified and not reset_once:
-            reset_once.append(True)
-            reset(
-                account.admin,
-                ResetPassword(username=account.username, password=PASSWORD + "-replacement"),
-            )
-        return verified
-
-    monkeypatch.setattr(PasswordHasher, "verify", verify)
-    assert login(account).status_code == 401
-    with owner_engine.connect() as connection:
-        count = connection.execute(
-            select(storage.auth_sessions.c.id).where(storage.auth_sessions.c.user_id == account.id)
-        ).all()
-    assert len(count) == 0
-
-
-def test_reset_password_can_sign_in_without_an_unadopted_upper_limit(account) -> None:
-    password = "s" * 1001
-    reset(account.admin, ResetPassword(username=account.username, password=password))
-    assert login(account, password=password).status_code == 200
-
-
-def test_long_username_can_sign_in(account, owner_engine) -> None:
-    username = "synthetic_" + "u" * 101
-    with owner_engine.begin() as connection:
-        connection.execute(
-            storage.users.update().where(storage.users.c.id == account.id).values(username=username)
-        )
-    account.username = username
-    assert login(account).status_code == 200
 
 
 PAGES_ORIGIN = "https://pages.craft.test"
@@ -387,65 +304,40 @@ def test_enabled_browser_preflight_refuses_unconfigured_request(cross_origin_cli
         assert "access-control-allow-origin" not in response.headers
 
 
-def test_enabled_browser_login_and_logout_keep_cookie_security(account, cross_origin_client):
-    response = cross_origin_client.post(
-        "/api/session", json={"username": account.username, "password": PASSWORD}
-    )
-    assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
-    cookie = response.headers["set-cookie"].lower()
-    assert "samesite=none" in cookie and "secure" in cookie and "httponly" in cookie
-    assert "path=/" in cookie and "domain=" not in cookie
-    assert "set-cookie" not in response.headers["access-control-expose-headers"].lower()
+def test_enabled_browser_sign_out_keeps_cookie_security(account, cross_origin_client):
+    cookie = sign_in(cross_origin_client, account.id)
     identity = cross_origin_client.get("/api/account-probe")
     assert identity.status_code == 200 and identity.json()["id"] == str(account.id)
-    assert cross_origin_client.get("/api/me").status_code == 200
-    token = response.cookies.get("__Host-craft_session")
+    assert identity.headers["access-control-allow-origin"] == PAGES_ORIGIN
     signed_out = cross_origin_client.delete("/api/session")
     assert signed_out.status_code == 204
-    assert "samesite=none" in signed_out.headers["set-cookie"].lower()
-    assert "max-age=0" in signed_out.headers["set-cookie"].lower()
+    set_cookie = signed_out.headers["set-cookie"].lower()
+    assert "samesite=none" in set_cookie and "secure" in set_cookie and "httponly" in set_cookie
+    assert "path=/" in set_cookie and "domain=" not in set_cookie and "max-age=0" in set_cookie
+    assert "set-cookie" not in signed_out.headers["access-control-expose-headers"].lower()
     cross_origin_client.cookies.clear()
-    cross_origin_client.headers["Cookie"] = "__Host-craft_session=" + token
+    cross_origin_client.headers["Cookie"] = "__Host-craft_session=" + cookie
     revoked = cross_origin_client.get("/api/me")
     assert revoked.status_code == 401
     assert revoked.headers["access-control-allow-origin"] == PAGES_ORIGIN
 
 
-def test_enabled_browser_wrong_password_remains_readable_and_unauthenticated(
+def test_enabled_browser_origin_guard_refuses_a_foreign_sign_out(
     account, cross_origin_client, owner_engine
 ):
-    response = cross_origin_client.post(
-        "/api/session", json={"username": account.username, "password": "wrong"}
-    )
-    assert response.status_code == 401 and response.json()["code"] == "not_signed_in"
-    assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
-    assert "set-cookie" not in response.headers
-    assert cross_origin_client.get("/api/me").status_code == 401
-    with owner_engine.connect() as connection:
-        assert not connection.execute(
-            select(storage.auth_sessions.c.id).where(storage.auth_sessions.c.user_id == account.id)
-        ).all()
-
-
-def test_enabled_browser_origin_guard_still_refuses_login_without_mutation(
-    account, cross_origin_client, owner_engine
-):
+    sign_in(cross_origin_client, account.id)
     for origin in ("https://untrusted.craft.test", "null", None):
         if origin is None:
             cross_origin_client.headers.pop("Origin", None)
         else:
             cross_origin_client.headers["Origin"] = origin
-        response = cross_origin_client.post(
-            "/api/session", json={"username": account.username, "password": PASSWORD}
-        )
+        response = cross_origin_client.delete("/api/session")
         assert response.status_code == 403
         assert "access-control-allow-origin" not in response.headers
         assert "set-cookie" not in response.headers
-    with owner_engine.connect() as connection:
-        assert not connection.execute(
-            select(storage.auth_sessions.c.id).where(storage.auth_sessions.c.user_id == account.id)
-        ).all()
+    assert session_row(owner_engine, account.id)["revoked_at"] is None
+    cross_origin_client.headers["Origin"] = PAGES_ORIGIN
+    assert cross_origin_client.get("/api/me").status_code == 200
 
 
 def test_enabled_browser_fresh_roles_and_expiry(
@@ -453,12 +345,7 @@ def test_enabled_browser_fresh_roles_and_expiry(
 ):
     clock = [datetime(2026, 1, 1, tzinfo=UTC)]
     monkeypatch.setattr(access, "now", lambda: clock[0])
-    assert (
-        cross_origin_client.post(
-            "/api/session", json={"username": account.username, "password": PASSWORD}
-        ).status_code
-        == 200
-    )
+    sign_in(cross_origin_client, account.id)
     denied = cross_origin_client.get("/api/account-admin")
     assert (
         denied.status_code == 403 and denied.headers["access-control-allow-origin"] == PAGES_ORIGIN
@@ -482,32 +369,20 @@ def test_enabled_browser_fresh_roles_and_expiry(
 
 
 def test_enabled_browser_handled_errors_keep_exact_cors(account, cross_origin_client):
+    anonymous = cross_origin_client.get("/api/me")
+    sign_in(cross_origin_client, account.id)
     not_found = cross_origin_client.get("/api/no-such-fixture-route")
-    invalid = cross_origin_client.post("/api/session", json={"username": account.username})
-    assert not_found.status_code == 404 and invalid.status_code == 400
-    for response in (not_found, invalid):
+    invalid = cross_origin_client.patch("/api/me", json={"language": "de"})
+    forbidden = cross_origin_client.get("/api/account-admin")
+    responses = (anonymous, not_found, invalid, forbidden)
+    assert [response.status_code for response in responses] == [401, 404, 400, 403]
+    for response in responses:
         assert response.headers["access-control-allow-origin"] == PAGES_ORIGIN
         assert response.headers["access-control-allow-credentials"] == "true"
-    for _ in range(5):
-        cross_origin_client.post(
-            "/api/session", json={"username": account.username, "password": "wrong"}
-        )
-    limited = cross_origin_client.post(
-        "/api/session", json={"username": account.username, "password": PASSWORD}
-    )
-    assert (
-        limited.status_code == 429
-        and limited.headers["access-control-allow-origin"] == PAGES_ORIGIN
-    )
 
 
 def test_enabled_browser_can_update_its_owned_chat(account, cross_origin_client):
-    assert (
-        cross_origin_client.post(
-            "/api/session", json={"username": account.username, "password": PASSWORD}
-        ).status_code
-        == 200
-    )
+    sign_in(cross_origin_client, account.id)
     response = cross_origin_client.patch(
         "/api/conversations/" + str(account.conversation),
         json={"title": "Generated renamed conversation"},

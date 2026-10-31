@@ -37,7 +37,6 @@ export interface Routes {
   "GET /api/auth/login": { query: { returnTo?: string }; response: void }; // 302 to the identity provider
   "GET /api/auth/callback": { query: { code?: string; state?: string; error?: string }; response: void }; // the provider's redirect back; 302 onward
   "POST /api/auth/logout": { response: T.SignedOut }; // then send the browser to logoutUrl when it is set; example: signed-out.json
-  "POST /api/session": { body: T.SignIn; response: T.Me }; // tests only (CRAFT_LOCAL_PASSWORD_SIGNIN); example: session.json
   "DELETE /api/session": { response: void };
   "GET /api/me": { response: T.Me }; // example: me.json
   "PATCH /api/me": { body: T.MeChange; response: T.Me }; // example: me.json

@@ -46,7 +46,7 @@ def test_workspace_owner_content_and_state(chat, foreign_http, monkeypatch):
 
     monkeypatch.setattr(storage, "file_state", inspect_state)
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         result = upload(http, chat)
         assert result.status_code == 200 and result.json()["state"] == "ready"
         identifier = result.json()["id"]
@@ -95,7 +95,7 @@ def test_workspace_owner_content_and_state(chat, foreign_http, monkeypatch):
 @pytest.mark.slow
 def test_workspace_limits_archive_and_labels(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         assert upload(http, chat, b"x" * (RawFile.max_bytes + 1)).status_code == 413
         assert upload(http, chat, name="../../outside.txt").status_code == 400
         result = upload(http, chat, extra="?classification=protected-b")
@@ -128,7 +128,7 @@ def test_workspace_limits_archive_and_labels(chat):
 def test_workspace_download_logged_without_bytes(chat, capsys):
     marker = uuid4().hex
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         result = upload(http, chat, marker.encode(), marker + ".txt")
         assert result.status_code == 200
         identifier = result.json()["id"]

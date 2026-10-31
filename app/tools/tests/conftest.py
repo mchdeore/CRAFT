@@ -9,5 +9,5 @@ from app.tests.support.cube import cube_source as cube_source
 @pytest.fixture
 def chart_http(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         yield http

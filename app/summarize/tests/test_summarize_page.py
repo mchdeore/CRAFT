@@ -12,6 +12,8 @@ def test_summarize_page_persists_without_dev_mount(settings):
         result = http.get("/summarize")
         assert result.status_code == 200 and result.headers["content-type"].startswith("text/html")
         assert result.headers["x-content-type-options"] == "nosniff"
+        # People sign in at the identity provider; the page asks for no password.
+        assert "/api/auth/login" in result.text and 'type="password"' not in result.text
         assert "object-src 'none'" in result.headers["content-security-policy"]
         assert http.get("/summarize/handlers.py").status_code == 404
         assert http.get("/dev").status_code == 404

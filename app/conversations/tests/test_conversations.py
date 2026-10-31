@@ -15,7 +15,7 @@ from app.tests.support.contract import typescript_schema, validate_chat_events
 @pytest.mark.slow
 def test_conversations_persist_reload_messages_and_answers(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         created = http.post(
             "/api/conversations",
             json={"title": "Synthetic reload"},
@@ -28,7 +28,7 @@ def test_conversations_persist_reload_messages_and_answers(chat):
     data = msgspec.structs.replace(request(chat), thread_id=UUID(identifier))
     events = collect(chat["caller"], data)
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         saved = http.get("/api/conversations/" + identifier)
         assert saved.status_code == 200
         payload = saved.json()
@@ -70,7 +70,7 @@ def test_conversations_answer_retrieval_path(chat, capsys):
     events = collect(chat["caller"], first)
     collect(chat["caller"], request(chat))
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         saved = http.get("/api/conversations/" + str(chat["thread"])).json()
     records = [
         m["content"] for m in saved["messages"] if m.get("activityType") == "craft.retrieval"
@@ -114,7 +114,7 @@ def test_conversations_owner_and_titles(chat, foreign_http):
     from app.infrastructure.errors import NotFound
 
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         headers = {"Origin": "https://testserver"}
         for title in ["", "x" * 201]:
             assert (
@@ -141,7 +141,7 @@ def test_conversations_owner_and_titles(chat, foreign_http):
             == 200
         )
         assert http.delete("/api/session", headers=headers).status_code == 204
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         assert http.get("/api/conversations/" + str(chat["thread"])).json()["title"] == "Renamed"
     assert foreign_http.get("/api/conversations/" + str(chat["thread"])).status_code == 404
     assert (
@@ -159,7 +159,7 @@ def test_conversations_owner_and_titles(chat, foreign_http):
     service.start(chat["caller"], data, "synthetic")
     try:
         with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-            assert chat["sign_in"](http).status_code == 200
+            chat["sign_in"](http)
             assert (
                 http.patch(
                     "/api/conversations/" + str(chat["thread"]),
@@ -178,7 +178,7 @@ def test_conversations_owner_and_titles(chat, foreign_http):
 
 def test_conversations_group_assignment_and_restore(chat, foreign_http):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         headers = {"Origin": "https://testserver"}
         path = "/api/conversations/" + str(chat["thread"])
         grouped = http.patch(path, json={"groupName": "Planning"}, headers=headers)
@@ -233,7 +233,7 @@ def test_french_reply_carries_english_originals(chat):
     english = collect(chat["caller"], request(chat))
     assert not any(e.get("activityType") == "craft.originals" for e in english)
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         saved = http.get("/api/conversations/" + str(chat["thread"])).json()["messages"]
     assert [m["content"] for m in saved if m.get("activityType") == "craft.originals"] == [shown]
     records = {
@@ -251,7 +251,7 @@ def test_file_list_reads_no_file_bytes(chat):
     content = b"\0" * (20 * 1024 * 1024)
     app = create_app(chat["settings"])
     with TestClient(app, base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         uploaded = http.post(
             "/api/conversations/" + str(chat["thread"]) + "/files",
             content=content,
