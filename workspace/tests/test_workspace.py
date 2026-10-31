@@ -385,25 +385,8 @@ def test_a_failed_save_keeps_the_previous_file_and_leaves_nothing_behind(tmp_pat
 
 
 def test_the_preview_refuses_an_oversized_source_without_converting(tmp_path, monkeypatch):
-    import sys
-    from types import ModuleType
-
-    from craft import _root
-
-    # Jupyter Server lives only in the workspace image; stand in for the two names used.
-    handlers = ModuleType("jupyter_server.base.handlers")
-    handlers.APIHandler = object  # type: ignore[attr-defined]
-    utils = ModuleType("jupyter_server.utils")
-    utils.url_path_join = lambda *parts: "/".join(parts)  # type: ignore[attr-defined]
-    for name, module in {
-        "jupyter_server": ModuleType("jupyter_server"),
-        "jupyter_server.base": ModuleType("jupyter_server.base"),
-        "jupyter_server.base.handlers": handlers,
-        "jupyter_server.utils": utils,
-    }.items():
-        monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.delitem(sys.modules, "craft_preview", raising=False)
     import craft_preview
+    from craft import _root
 
     monkeypatch.setattr(_root, "USER_ROOT", tmp_path)
     monkeypatch.setattr(craft_preview, "MAX_BYTES", 10)

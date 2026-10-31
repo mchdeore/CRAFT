@@ -13,7 +13,8 @@ cd "$(dirname "$0")/.."
 mode=${1:-quick}
 [ "$mode" = quick ] || [ "$mode" = full ] || { echo "usage: scripts/check [full]" >&2; exit 2; }
 [ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
-export UV_NO_PROGRESS=1
+# Pyright is locked, so its wrapper needn't ask PyPI for a newer one: the checks stay offline.
+export UV_NO_PROGRESS=1 PYRIGHT_PYTHON_IGNORE_WARNINGS=1
 # The local cluster's Docker engine (Colima's craft-k8s profile) where it exists; else Docker's own.
 if [ -z "${DOCKER_CONTEXT:-}" ] && docker context inspect colima-craft-k8s >/dev/null 2>&1; then
   export DOCKER_CONTEXT=colima-craft-k8s
@@ -106,9 +107,10 @@ alter default privileges for role craft_owner in schema public grant usage on se
 SQL
 }
 
-changed() { # this branch changes paths matching $1, committed or not, against the last fetched origin/main
+changed() { # this branch changes paths matching $1, committed, uncommitted or new, against the last fetched origin/main
   # grep reads every name: -q could stop early and fail git with SIGPIPE under pipefail.
-  { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; } 2>/dev/null | grep "$1" >/dev/null
+  { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } \
+    2>/dev/null | grep "$1" >/dev/null
 }
 
 workspace_tests() { # in the workspace package's own environment, with the image's pins
