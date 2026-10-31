@@ -16,13 +16,16 @@ from app import create_app
 from app.accounts import oidc, storage
 from app.accounts.handlers import AccessApproval, approve
 from app.identity import service as identity
+from app.infrastructure import access
 from app.infrastructure.access import Caller
 from app.infrastructure.config.settings import Settings
 from app.tests.support.identity import PUBLIC, REDIRECT, Provider, keys, provider  # noqa: F401
 
 
 @pytest.fixture
-def site(settings, provider: Provider, owner_engine, monkeypatch):  # noqa: F811
+def site(settings, provider: Provider, owner_engine, monkeypatch, request):  # noqa: F811
+    """craft-app signing people in at a stand-in craft-id; `cross-origin` (indirect) turns on
+    credentialed cross-origin browsing."""
     monkeypatch.setattr(oidc, "http", provider.client)
     monkeypatch.setattr(oidc, "_metadata", {})
     monkeypatch.setattr(oidc, "_keys", {})
@@ -32,8 +35,11 @@ def site(settings, provider: Provider, owner_engine, monkeypatch):  # noqa: F811
         oidc_client_id=provider.client_id,
         oidc_client_secret=provider.secret,
         oidc_redirect_uri=REDIRECT,
-        local_password_signin=False,
     )
+    if getattr(request, "param", None) == "cross-origin":
+        configured = msgspec.structs.replace(
+            configured, cross_origin_browser=True, allowed_origins=PUBLIC
+        )
     app = create_app(configured)
     created = []
     with TestClient(app, base_url=PUBLIC, follow_redirects=False) as browser:
@@ -73,6 +79,7 @@ def sign_in(site, username, password, return_to="/after"):
     return site.browser.get(answer.headers["location"])
 
 
+@pytest.mark.parametrize("site", ["same-origin", "cross-origin"], indirect=True)
 def test_sign_in_links_by_email_and_sets_only_the_session_cookie(site, owner_engine) -> None:
     username, password, oid = site.provider.account(email=f"{uuid4().hex[:8]}@example.org")
     with site.provider.sessions() as session:
@@ -84,11 +91,43 @@ def test_sign_in_links_by_email_and_sets_only_the_session_cookie(site, owner_eng
     assert done.status_code == 302 and done.headers["location"] == "/after"
     assert site.browser.cookies.get("__Host-craft_session")
     assert not site.browser.cookies.get("__Host-craft_signin")
+    set_cookies = done.headers.get_list("set-cookie")
+    (cookie,) = [c for c in set_cookies if c.startswith("__Host-craft_session=")]
+    attributes = {
+        part.strip().partition("=")[0].lower(): part.strip().partition("=")[2]
+        for part in cookie.split(";")[1:]
+    }
+    assert {"secure", "httponly", "samesite", "path"} <= set(attributes)
+    # A frontend on another origin needs the cookie on its cross-site requests.
+    same_site = "none" if site.settings.cross_origin_browser else "lax"
+    assert attributes["samesite"].lower() == same_site and attributes["path"] == "/"
+    assert "domain" not in attributes
     me = site.browser.get("/api/me").json()
     assert me["id"] == str(user) and me["email"] == email
     with owner_engine.connect() as connection:
         row = connection.execute(select(storage.users).where(storage.users.c.id == user)).one()
     assert (str(row.idp_tenant_id), row.idp_object_id) == (str(identity.TENANT), oid)
+
+
+def test_a_disabled_account_gets_no_access(site, owner_engine) -> None:
+    username, password, _ = site.provider.account(email=f"{uuid4().hex[:8]}@example.org")
+    with site.provider.sessions() as session:
+        email = identity.storage.account(session, username)["email"]
+    user = craft_user(site, owner_engine, email)
+    with owner_engine.begin() as connection:
+        connection.execute(
+            storage.users.update()
+            .where(storage.users.c.id == user)
+            .values(disabled_at=access.now())
+        )
+
+    refused = sign_in(site, username, password)
+
+    assert refused.headers["location"] == "/?signIn=no-access"
+    assert not site.browser.cookies.get("__Host-craft_session")
+    with owner_engine.connect() as connection:
+        sessions = storage.auth_sessions
+        assert not connection.execute(select(sessions).where(sessions.c.user_id == user)).all()
 
 
 def test_unknown_person_gets_no_access_until_approved(site, owner_engine) -> None:
@@ -119,13 +158,13 @@ def test_return_to_stays_on_allowed_origins(site) -> None:
         assert return_target(site.settings, value) == "/"
 
 
-def test_password_sign_in_is_off(site) -> None:
+def test_there_is_no_password_sign_in(site) -> None:
     response = site.browser.post(
         "/api/session",
         json={"username": "x", "password": "y"},
         headers={"Origin": site.settings.allowed_origins.split(",")[0]},
     )
-    assert response.status_code == 404
+    assert response.status_code == 404  # only DELETE /api/session, signing out, is left
 
 
 def forged(site, flow, **changes):

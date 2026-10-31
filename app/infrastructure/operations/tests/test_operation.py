@@ -93,16 +93,16 @@ def test_json_bodies_stop_at_four_mib(settings: Settings) -> None:
 
     limit = 4 * 1024 * 1024
     full = b'{"value": 7' + b" " * (limit - 12) + b"}"
-    oversized = b'{"username": "' + b"x" * 5 * 1024 * 1024 + b'", "password": "x"}'
+    oversized = b'{"value": "' + b"x" * 5 * 1024 * 1024 + b'"}'
     streamed = (oversized[at : at + 65536] for at in range(0, len(oversized), 65536))
     app = create_app(settings)
     with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
         assert client.post("/api/body-probe", content=full).status_code == 204
         assert client.post("/api/body-probe", content=full + b" ").status_code == 413
-        assert client.post("/api/session", content=oversized).status_code == 413
-        assert client.post("/api/session", content=streamed).status_code == 413
+        assert client.post("/api/body-probe", content=oversized).status_code == 413
+        assert client.post("/api/body-probe", content=streamed).status_code == 413
         declared = {"Content-Length": str(5 * 1024 * 1024)}
-        assert client.post("/api/session", content=b"{}", headers=declared).status_code == 413
+        assert client.post("/api/body-probe", content=b"{}", headers=declared).status_code == 413
         assert client.post("/api/no-input-probe").status_code == 204
         assert client.post("/api/no-input-probe", content=b"{}").status_code == 400
         assert client.post("/api/no-input-probe", content=oversized).status_code == 413

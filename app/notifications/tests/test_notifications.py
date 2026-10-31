@@ -95,7 +95,7 @@ def test_a_job_notifies_once_and_the_write_is_a_logged_call(people, owner_engine
 def test_notification_routes_refuse_bad_requests(client, cube_source):
     assert client.get("/api/notifications").status_code == 401
     with TestClient(cube_source["app"], base_url="https://testserver") as http:
-        assert cube_source["sign_in"](http).status_code == 200
+        cube_source["sign_in"](http)
         assert http.get("/api/notifications?limit=0").status_code == 400
         assert http.get("/api/notifications?limit=101").status_code == 400
         assert http.get("/api/notifications?unread=true").json() == []

@@ -46,12 +46,12 @@ def main(argv: list[str] | None = None) -> None:
     users = commands.add_parser("users")
     users.add_argument(
         "action",
-        choices=["grant", "revoke", "add", "list", "promote", "reset", "disable", "approve"],
+        choices=["grant", "revoke", "add", "list", "promote", "sign-out", "disable", "approve"],
     )
     users.add_argument("username", nargs="?", help="for approve: the email")
     users.add_argument("mission", nargs="?")
     users.add_argument("--silo")
-    users.add_argument("--email", help="add: sign in at the identity provider with this email")
+    users.add_argument("--email", help="add: the email the account signs in with at the provider")
     users.add_argument("--as", dest="actor", default="admin")
     missions = commands.add_parser("missions")
     missions.add_argument("action", choices=["stage"])
@@ -203,8 +203,6 @@ def main(argv: list[str] | None = None) -> None:
                 origin="python",
             )
             if args.command == "users":
-                import getpass
-
                 from app.accounts import handlers
 
                 if args.action == "list":
@@ -219,15 +217,12 @@ def main(argv: list[str] | None = None) -> None:
                         ),
                     )
                 elif args.action == "add":
-                    if not args.username:
-                        parser.error("account required")
+                    if not args.username or not args.email:
+                        parser.error("account and --email required")
                     handlers.add(
                         caller,
                         handlers.NewUser(
-                            username=args.username,
-                            display_name=args.username,
-                            password=None if args.email else getpass.getpass("Password: "),
-                            email=args.email,
+                            username=args.username, display_name=args.username, email=args.email
                         ),
                     )
                 elif args.action == "approve":
@@ -237,21 +232,15 @@ def main(argv: list[str] | None = None) -> None:
                         caller, handlers.AccessApproval(email=args.username)
                     )
                     print(msgspec.json.encode(approved).decode())
-                elif args.action == "reset":
-                    if not args.username:
-                        parser.error("account required")
-                    handlers.reset(
-                        caller,
-                        handlers.ResetPassword(
-                            username=args.username, password=getpass.getpass("Password: ")
-                        ),
-                    )
                 else:
                     if not args.username:
                         parser.error("account required")
-                    (handlers.promote if args.action == "promote" else handlers.disable)(
-                        caller, handlers.UserRef(username=args.username)
-                    )
+                    act = {
+                        "promote": handlers.promote,
+                        "sign-out": handlers.end_sessions,
+                        "disable": handlers.disable,
+                    }[args.action]
+                    act(caller, handlers.UserRef(username=args.username))
             else:
                 from app.infrastructure.operations.registry import registry
 

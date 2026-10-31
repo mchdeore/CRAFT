@@ -6,12 +6,9 @@ image:
 
 # Settings come from one Secret made from .env (deploy/README.md). Each container reads only the
 # keys it needs, as compose passes them; a key missing from the Secret leaves the app's default.
-# This list and the fixed values in templates/_helpers.tpl pass every app setting except these,
-# which the chart leaves out on purpose (test_chart_and_env_example_list_every_setting checks):
-#   - CRAFT_LOCAL_PASSWORD_SIGNIN        # tests only; sign-in-cleanup removes the password path
-#   - CRAFT_SIGN_IN_ATTEMPTS_PER_MINUTE  # the same password path
-#   - CRAFT_PASSWORD_MIN_LENGTH          # the same password path
-#   - CRAFT_PROCESS_ROOT                 # the process manager, which the cluster doesn't run
+# This list and the fixed values in templates/_helpers.tpl pass every app setting
+# (test_chart_and_env_example_list_every_setting checks). A setting left out on purpose would be
+# listed here as `#   - CRAFT_NAME  # why`.
 secret: craft-env
 settings:
   - CRAFT_APP_DB_PASSWORD

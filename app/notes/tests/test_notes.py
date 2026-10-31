@@ -19,7 +19,7 @@ from app.notes.handlers import NoteRef, delete_note, read_note
 
 def test_notes_write_replace_list_read_delete(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         headers = {"Origin": "https://testserver"}
         first = http.put(
             "/api/notes",
@@ -65,7 +65,7 @@ def test_notes_owner_only(chat):
 
 def test_notes_limits(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         headers = {"Origin": "https://testserver"}
         for data in [
             {"title": "", "body": ""},

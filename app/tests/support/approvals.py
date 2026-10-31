@@ -21,6 +21,7 @@ from app.infrastructure.operations import DATA, operation
 from app.infrastructure.operations.registry import registry
 from app.infrastructure.shapes import Shape
 from app.tests.support import people
+from app.tests.support.accounts import sign_in
 from app.tests.support.chat import agent_worker
 from app.tests.support.model import ScriptedChatClient
 from app.tests.support.server import live_server
@@ -32,8 +33,8 @@ class MutationInput(Shape):
 
 @pytest.fixture
 def context(settings, owner_engine):
-    """A requester and a foreign person sharing one password, the requester's conversation with
-    a started run, and a tool operation that needs a decision; no decision is requested yet."""
+    """A requester and a foreign person, the requester's conversation with a started run, and a
+    tool operation that needs a decision; no decision is requested yet."""
     snapshot = registry.copy()
 
     @operation(SIGNED_IN, post="/decision-fixture", tool=True, effects=DATA)
@@ -44,12 +45,11 @@ def context(settings, owner_engine):
     operation_name = proposed_mutation.__operation__.name
     configured = msgspec.structs.replace(settings, allowed_origins="https://testserver")
     app = create_app(configured)
-    password = uuid4().hex
     conversations = metadata.tables["conversations"]
     try:
         with (
-            people.person(owner_engine, password=password) as requester,
-            people.person(owner_engine, password=password) as foreign,
+            people.person(owner_engine) as requester,
+            people.person(owner_engine) as foreign,
         ):
             with owner_engine.begin() as db:
                 conversation = db.execute(
@@ -90,7 +90,6 @@ def context(settings, owner_engine):
                     "owner": owner_engine,
                     "settings": configured,
                     "users": [(someone.id, someone.username) for someone in (requester, foreign)],
-                    "password": password,
                     "run": run,
                     "conversation": conversation,
                     "operation": operation_name,
@@ -103,12 +102,7 @@ def context(settings, owner_engine):
 
 
 def login(http, context, index=0):
-    response = http.post(
-        "/api/session",
-        json={"username": context["users"][index][1], "password": context["password"]},
-        headers={"Origin": "https://testserver"},
-    )
-    assert response.status_code == 200
+    sign_in(http, context["users"][index][0])
 
 
 def decision_call(context, response):

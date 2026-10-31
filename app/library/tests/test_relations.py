@@ -186,7 +186,7 @@ def test_the_route_checks_access_and_logs_the_call(cube_source):
     item = cube_source["item"]
     with TestClient(cube_source["app"], base_url="https://testserver") as http:
         assert http.get("/api/library/relations", params={"item": item}).status_code == 401
-        assert cube_source["sign_in"](http).status_code == 200
+        cube_source["sign_in"](http)
         response = http.get("/api/library/relations", params={"item": item})
         assert response.status_code == 200
         body = response.json()

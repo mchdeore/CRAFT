@@ -112,7 +112,6 @@ The workspace, draft, candidate submission and saved-view limits are described i
 | `GET /api/auth/login` | `returnTo?` (query) | `302` to the identity provider | public | — |
 | `GET /api/auth/callback` | the provider's `code`, `state` (query) | `302` to `returnTo`, or to `/?signIn=failed` or `/?signIn=no-access` | public | — |
 | `POST /api/auth/logout` | — | `SignedOut` | signed in | — |
-| `POST /api/session` | `SignIn` | `Me` | public; tests only (`CRAFT_LOCAL_PASSWORD_SIGNIN`) | — |
 | `DELETE /api/session` | — | `void` | signed in; live resource access | — |
 | `GET /api/me` | — | `Me` | signed in; live resource access | — |
 | `PATCH /api/me` | `MeChange` | `Me` | signed-in browser session or command line; the caller's own row only | — |

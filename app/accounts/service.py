@@ -1,17 +1,12 @@
-"""Short transactions for account administration, sign-in, browser sessions (resolve a cookie's
-digest to its account) and personal tokens (issue, list, revoke, and resolve a token's digest to
-its account)."""
+"""Short transactions for account administration, sign-in at the identity provider, browser
+sessions (resolve a cookie's digest to its account) and personal tokens (issue, list, revoke, and
+resolve a token's digest to its account)."""
 
 import hashlib
 import logging
-from collections import defaultdict, deque
 from dataclasses import replace
 from datetime import timedelta
-from functools import lru_cache
-from threading import Lock
 
-from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
@@ -26,7 +21,6 @@ from app.infrastructure.errors import (
     InvalidInput,
     NotFound,
     NotSignedIn,
-    RateLimited,
 )
 from app.infrastructure.grants import insert_grant, remove_grant
 from app.infrastructure.operations.context import current_call, session_cookie, signin_cookie
@@ -55,69 +49,7 @@ def change(caller: Caller, request, remove: bool) -> None:
             insert_grant(session, user, request.mission, request.silo)
 
 
-PASSWORDS = PasswordHasher()
-ATTEMPTS = defaultdict(deque)
-ATTEMPT_LOCK = Lock()
-
-
-@lru_cache(maxsize=1)
-def dummy_hash() -> str:
-    return PASSWORDS.hash("unused-synthetic-dummy-password")
-
-
-def sign_in(caller: Caller, request):
-    if caller.sessions is None or caller.settings is None:
-        raise NotSignedIn()
-    if not caller.settings.local_password_signin:
-        raise NotFound()  # people sign in at the identity provider (auth_login)
-    username = request.username.lower()
-    at = access.now()
-    with ATTEMPT_LOCK:
-        attempts = ATTEMPTS[username]
-        while attempts and (at - attempts[0]).total_seconds() >= 60:
-            attempts.popleft()
-        if len(attempts) >= caller.settings.sign_in_attempts_per_minute:
-            raise RateLimited()
-        attempts.append(at)
-    with unit_of_work(caller.sessions, read_only=True) as session:
-        user = storage.account(session, username)
-        digest = storage.credentials(session, user["id"]) if user else None
-    try:
-        valid = PASSWORDS.verify(digest or dummy_hash(), request.password)
-    except (VerificationError, InvalidHashError):
-        valid = False
-    if not valid or digest is None or user is None or user["disabled_at"] is not None:
-        raise NotSignedIn()
-    # Hashing and verification finish before the write transaction.
-    replacement = PASSWORDS.hash(request.password) if PASSWORDS.check_needs_rehash(digest) else None
-    with unit_of_work(caller.sessions) as session:
-        current = storage.account(session, username, lock=True)
-        if (
-            current is None
-            or current["disabled_at"] is not None
-            or storage.credentials(session, current["id"]) != digest
-        ):
-            raise NotSignedIn()
-        if replacement:
-            session.execute(
-                storage.local_credentials.update()
-                .where(storage.local_credentials.c.user_id == user["id"])
-                .values(password_hash=replacement, updated_at=at)
-            )
-        assigned = open_session(caller, session, user["id"])
-    from app.accounts.handlers import Me
-
-    return Me(
-        id=user["id"],
-        username=user["username"],
-        display_name=user["display_name"],
-        roles=assigned,
-        language=user["language"],
-        email=user["email"],
-    )
-
-
-def open_session(caller: Caller, session, user) -> list:
+def open_session(caller: Caller, session, user) -> None:
     """A new browser session for `user` in the caller's transaction; the cookie is set on reply."""
     assert caller.settings is not None
     at = access.now()
@@ -134,18 +66,15 @@ def open_session(caller: Caller, session, user) -> list:
         )
         .returning(storage.auth_sessions.c.id)
     ).scalar_one()
-    assigned = storage.roles_for(session, user)
     context = current_call.get()
     if context is not None:
-        context.caller = replace(
-            caller, user_id=user, roles=frozenset(assigned), auth_session_id=identifier
-        )
+        roles = frozenset(storage.roles_for(session, user))
+        context.caller = replace(caller, user_id=user, roles=roles, auth_session_id=identifier)
     session_cookie(
         cookie,
         caller.settings.session_absolute_hours * 3600,
         cross_origin_browser=caller.settings.cross_origin_browser,
     )
-    return assigned
 
 
 FLOW_LIFETIME = timedelta(minutes=10)
@@ -303,18 +232,13 @@ def sign_out(caller: Caller) -> None:
 
 
 def add(caller: Caller, request) -> None:
-    if caller.sessions is None or caller.settings is None:
+    if caller.sessions is None:
         raise NotFound()
-    email = request.email.strip().lower() if request.email else None
-    if request.password is None and email is None:
+    email = request.email.strip().lower()
+    if not email:
         raise InvalidInput()
-    if request.password is not None and len(request.password) < caller.settings.password_min_length:
-        raise InvalidInput()
-    password_hash = PASSWORDS.hash(request.password) if request.password is not None else None
     with unit_of_work(caller.sessions) as session:
-        if storage.account(session, request.username.lower()) or (
-            email and storage.by_email(session, email)
-        ):
+        if storage.account(session, request.username.lower()) or storage.by_email(session, email):
             raise Conflict()
         user = session.execute(
             storage.users.insert()
@@ -323,10 +247,6 @@ def add(caller: Caller, request) -> None:
             )
             .returning(storage.users.c.id)
         ).scalar_one()
-        if password_hash is not None:
-            session.execute(
-                storage.local_credentials.insert().values(user_id=user, password_hash=password_hash)
-            )
         session.execute(storage.user_roles.insert().values(user_id=user, role="member"))
 
 
@@ -413,25 +333,13 @@ def promote(caller: Caller, username: str) -> None:
         )
 
 
-def reset_password(caller: Caller, username: str, password: str) -> None:
-    """Set a local password and end the account's sessions."""
+def end_sessions(caller: Caller, username: str) -> None:
+    """End the account's browser sessions; craft-id keeps its password."""
     if caller.sessions is None:
         raise NotFound()
-    if caller.settings is None or len(password) < caller.settings.password_min_length:
-        raise InvalidInput()
-    password_hash = PASSWORDS.hash(password)
     with unit_of_work(caller.sessions) as session:
         user_id = _locked_user_id(session, username)
-        at = access.now()
-        session.execute(
-            insert(storage.local_credentials)
-            .values(user_id=user_id, password_hash=password_hash)
-            .on_conflict_do_update(
-                index_elements=[storage.local_credentials.c.user_id],
-                set_={"password_hash": password_hash, "updated_at": at},
-            )
-        )
-        storage.revoke_sessions(session, user_id, at, "password_reset")
+        storage.revoke_sessions(session, user_id, access.now(), "admin_sign_out")
 
 
 def disable(caller: Caller, username: str) -> None:

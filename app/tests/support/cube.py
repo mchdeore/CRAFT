@@ -15,7 +15,7 @@ from app.infrastructure.access import Caller
 from app.infrastructure.database import metadata as m
 from app.infrastructure.provider.simulated import SimulatedProvider
 from app.library.convert import convert
-from app.tests.support import people, rows
+from app.tests.support import accounts, people, rows
 
 BUDGET = b"# 1 Budget\n\n| Parameter | Value | Unit |\n|---|---|---|\n| Peak power | 350 | W |\n"
 
@@ -108,11 +108,7 @@ def cube_source(settings, owner_engine, tmp_path):
         )
 
         def sign_in(client):
-            return client.post(
-                "/api/session",
-                json={"username": account.username, "password": account.password},
-                headers={"Origin": "https://testserver"},
-            )
+            accounts.sign_in(client, account.id)
 
         yield {
             "caller": caller,

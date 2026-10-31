@@ -2,7 +2,6 @@ import type { Message as AgUiMessage } from "@ag-ui/core";
 
 export type Id = string;
 export type Role = "member" | "admin";
-export interface SignIn { username: string; password: string }
 export type Language = "en" | "fr";
 /** `language` is the reply language; change it with PATCH /api/me. */
 export interface Me { id: Id; username: string; displayName: string; roles: Role[]; language: Language; email?: string | null }

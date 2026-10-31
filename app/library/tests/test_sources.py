@@ -118,7 +118,7 @@ def test_download_returns_the_exact_original_to_a_reader(cube_source):
     url = f"/api/library/documents/{item}/download"
     with TestClient(source["app"], base_url="https://testserver") as http:
         assert http.get(url, params={"version": 1}).status_code == 401
-        assert source["sign_in"](http).status_code == 200
+        source["sign_in"](http)
         response = http.get(url, params={"version": 1})
         assert response.status_code == 200
         assert response.content == source["provider"].read_content(item, 1)

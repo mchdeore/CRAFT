@@ -87,7 +87,7 @@ def test_chat_stream_valid_events_in_order(chat):
         )
     assert set(identifiers) == {message["id"] for message in stored}
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
-        assert chat["sign_in"](client).status_code == 200
+        chat["sign_in"](client)
         response = client.post(
             "/api/agent/runs",
             json=msgspec.to_builtins(request(chat)),
@@ -480,7 +480,7 @@ def test_chat_stream_spend_cap(chat, monkeypatch):
 def test_http_disconnect_keeps_the_run_going(chat):
     data = request(chat)
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
-        assert chat["sign_in"](client).status_code == 200
+        chat["sign_in"](client)
         cookie = client.cookies.get("__Host-craft_session")
     assert cookie is not None
 
@@ -624,7 +624,7 @@ def test_a_run_answers_its_newest_user_message_and_stores_only_it(chat):
     refused = request(chat)
     refused.messages.append({"id": str(uuid4()), "role": "user", "content": "  "})
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
-        assert chat["sign_in"](http).status_code == 200
+        chat["sign_in"](http)
         response = http.post(
             "/api/agent/runs",
             json=msgspec.to_builtins(refused),

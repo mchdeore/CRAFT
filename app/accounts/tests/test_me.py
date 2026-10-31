@@ -7,14 +7,14 @@ from fastapi.testclient import TestClient
 
 from app.accounts import storage
 from app.infrastructure import access
-from app.tests.support.accounts import login
+from app.tests.support.accounts import sign_in
 from app.tests.support.contract import typescript_schema
 
 
 @pytest.mark.slow
 def test_me_returns_signed_in_account(account, owner_engine) -> None:
     assert account.client.get("/api/me").status_code == 401
-    assert login(account).status_code == 200
+    sign_in(account.client, account.id)
     response = account.client.get("/api/me")
     assert response.status_code == 200
     assert response.json() == {
@@ -36,7 +36,7 @@ def test_me_returns_signed_in_account(account, owner_engine) -> None:
             .values(idle_expires_at=access.now() - timedelta(seconds=1))
         )
     assert account.client.get("/api/me").status_code == 401
-    assert login(account).status_code == 200
+    sign_in(account.client, account.id)
     assert account.client.delete("/api/session").status_code == 204
     assert account.client.get("/api/me").status_code == 401
     with TestClient(account.app) as anonymous:
@@ -44,7 +44,7 @@ def test_me_returns_signed_in_account(account, owner_engine) -> None:
 
 
 def test_me_ignores_browser_identity(account) -> None:
-    login(account)
+    sign_in(account.client, account.id)
     assert account.client.get("/api/me?userId=another").status_code == 400
     assert (
         account.client.request(
@@ -58,7 +58,7 @@ def test_me_ignores_browser_identity(account) -> None:
 
 
 def test_me_changes_only_the_callers_language(account) -> None:
-    login(account)
+    sign_in(account.client, account.id)
     changed = account.client.patch("/api/me", json={"language": "fr"})
     assert changed.status_code == 200 and changed.json()["language"] == "fr"
     assert account.client.get("/api/me").json()["language"] == "fr"

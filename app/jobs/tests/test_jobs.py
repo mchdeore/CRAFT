@@ -90,7 +90,7 @@ def test_running_jobs_stop_through_the_api(settings, jobs, cube_source):
         queue.worker_thread(settings, ["interactive"]),
         TestClient(cube_source["app"], base_url="https://testserver") as http,
     ):
-        assert cube_source["sign_in"](http).status_code == 200
+        cube_source["sign_in"](http)
         user = cube_source["caller"].user_id
         running = jobs.defer(test_jobs.sleep, requested_by=user, seconds=30)
         blocking = jobs.defer(test_jobs.blocking, requested_by=user, seconds=30)

@@ -53,6 +53,8 @@ sign_in_flows = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("octet_length(id_sha256) = 32", name="id_sha256"),
 )
+# Nothing reads or writes it since sign-in moved to craft-id; the frozen cube still lists it, so
+# it goes at the next cube rebuild.
 local_credentials = Table(
     "local_credentials",
     metadata,
@@ -194,14 +196,6 @@ def request_access(session, tenant, oid, email: str | None, name: str) -> None:
             set_={"email": email, "name": name, "last_seen_at": text("now()")},
         )
     )
-
-
-def credentials(session, user):
-    from sqlalchemy import select
-
-    return session.execute(
-        select(local_credentials.c.password_hash).where(local_credentials.c.user_id == user)
-    ).scalar_one_or_none()
 
 
 def roles_for(session, user):

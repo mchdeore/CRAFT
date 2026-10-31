@@ -1,6 +1,6 @@
-"""Account entry points: sign-in, browser sessions, the signed-in account, administration,
-mission grants, and personal tokens (`workspace` for /api, `mcp` for /mcp; a Hub workspace swaps
-its server's Hub token for a `workspace` one)."""
+"""Account entry points: sign-in at the identity provider, browser sessions, the signed-in
+account, administration, mission grants, and personal tokens (`workspace` for /api, `mcp` for
+/mcp; a Hub workspace swaps its server's Hub token for a `workspace` one)."""
 
 from typing import Annotated, Literal
 from uuid import UUID
@@ -32,11 +32,6 @@ def revoke(caller: Caller, request: GrantMission) -> None:
     service.change(caller, request, True)
 
 
-class SignIn(Shape):
-    username: Annotated[str, msgspec.Meta(min_length=1)]
-    password: Annotated[str, msgspec.Meta(min_length=1)]
-
-
 Language = Literal["en", "fr"]
 
 
@@ -56,9 +51,7 @@ class MeChange(Shape):
 class NewUser(Shape):
     username: str
     display_name: str
-    # A password is for tests' local sign-in; with an email, people sign in at the provider.
-    password: str | None = None
-    email: str | None = None
+    email: str  # people sign in at the identity provider with it
 
 
 class AccessApproval(Shape):
@@ -67,17 +60,6 @@ class AccessApproval(Shape):
 
 class UserRef(Shape):
     username: str
-
-
-class ResetPassword(Shape):
-    username: str
-    password: str
-
-
-@operation(PUBLIC, post="/session")
-def sign_in(caller: Caller, request: SignIn) -> Me:
-    """Sign in with a local account."""
-    return service.sign_in(caller, request)
 
 
 class SignInStart(Shape):
@@ -187,8 +169,9 @@ def promote(caller: Caller, request: UserRef) -> None:
 
 
 @operation("accounts.manage")
-def reset(caller: Caller, request: ResetPassword) -> None:
-    service.reset_password(caller, request.username, request.password)
+def end_sessions(caller: Caller, request: UserRef) -> None:
+    """End every browser session of an account; it signs in again at the provider."""
+    service.end_sessions(caller, request.username)
 
 
 @operation("accounts.manage")

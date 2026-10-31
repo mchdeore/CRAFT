@@ -20,7 +20,7 @@ ORIGIN = {"Origin": "https://testserver"}
 @pytest.fixture
 def http(chat):
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
-        assert chat["sign_in"](client).status_code == 200
+        chat["sign_in"](client)
         yield client
 
 
@@ -64,7 +64,7 @@ def test_create_list_reopen_on_fresh_client_and_rename_keeps_identity(http, chat
     second = save(http, identifier, edited)
     assert second.status_code == 200 and second.json()["revision"] == 2
     with TestClient(create_app(chat["settings"]), base_url="https://testserver") as fresh:
-        assert chat["sign_in"](fresh).status_code == 200
+        chat["sign_in"](fresh)
         current = fresh.get(f"/api/skills/{identifier}")
         assert current.status_code == 200
         assert current.json()["name"] == "Renamed comparison"
@@ -125,7 +125,7 @@ def test_two_concurrent_edits_append_once(http, chat):
 
     def edit(name):
         with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
-            assert chat["sign_in"](client).status_code == 200
+            chat["sign_in"](client)
             return save(client, identifier, definition(expectedRevision=1, name=name)).status_code
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -138,7 +138,7 @@ def test_two_concurrent_identical_creates_replay_once(http, chat):
 
     def put(_):
         with TestClient(create_app(chat["settings"]), base_url="https://testserver") as client:
-            assert chat["sign_in"](client).status_code == 200
+            chat["sign_in"](client)
             return save(client, identifier, body)
 
     with ThreadPoolExecutor(max_workers=2) as pool:

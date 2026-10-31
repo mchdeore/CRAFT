@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app import create_app
-from app.accounts import service, storage
+from app.accounts import storage
 from app.agent import service as agent_service
 from app.agent.handlers import RunRef, issue_run_token, revoke_run_token
 from app.infrastructure import traffic
@@ -25,12 +25,13 @@ from app.infrastructure.operations.storage import call_log
 from app.infrastructure.requests import RequestIdMiddleware
 from app.infrastructure.shapes import RawFile
 from app.infrastructure.traffic import TrafficMiddleware, traffic_log
+from app.tests.support.accounts import sign_in
 from app.tests.support.chat import chat as chat
 from app.tests.support.chat import request as run_request
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.grants import assert_grants
 
-PASSWORD = "synthetic-traffic-password"
+SECRET = "synthetic-traffic-secret"
 ORIGIN = "http://localhost:8000"
 
 
@@ -166,18 +167,11 @@ def signed_in(settings, owner_engine):
             .values(username=username, display_name="Test")
             .returning(storage.users.c.id)
         ).scalar_one()
-        connection.execute(
-            storage.local_credentials.insert().values(
-                user_id=user, password_hash=service.PASSWORDS.hash(PASSWORD)
-            )
-        )
         connection.execute(storage.user_roles.insert().values(user_id=user, role="member"))
-    service.ATTEMPTS.clear()
     with TestClient(
         create_app(settings), base_url="https://testserver", headers={"Origin": ORIGIN}
     ) as browser:
-        response = browser.post("/api/session", json={"username": username, "password": PASSWORD})
-        assert response.status_code == 200
+        sign_in(browser, user)
         yield SimpleNamespace(id=user, browser=browser)
     with owner_engine.begin() as connection:
         connection.execute(traffic_log.delete().where(traffic_log.c.user_id == user))
@@ -185,7 +179,6 @@ def signed_in(settings, owner_engine):
         for table in [
             storage.workspace_tokens,
             storage.auth_sessions,
-            storage.local_credentials,
             storage.user_roles,
         ]:
             connection.execute(table.delete().where(table.c.user_id == user))
@@ -356,7 +349,7 @@ def test_a_failed_record_never_touches_the_response(signed_in, monkeypatch) -> N
     assert signed_in.browser.get("/api/me").status_code == 200
 
 
-def test_no_password_token_or_content_reaches_rows_logs_or_error_bodies(
+def test_no_secret_token_or_content_reaches_rows_logs_or_error_bodies(
     signed_in, owner_engine, monkeypatch
 ) -> None:
     stream = io.StringIO()
@@ -374,7 +367,7 @@ def test_no_password_token_or_content_reaches_rows_logs_or_error_bodies(
     signed_in.browser.headers["Authorization"] = "Bearer " + token["token"][::-1]
     forged = signed_in.browser.get("/api/me")
     del signed_in.browser.headers["Authorization"]
-    retry = signed_in.browser.post("/api/session", json={"username": "x", "password": PASSWORD})
+    retry = signed_in.browser.post("/api/me/workspace-tokens", json={"label": SECRET})
 
     def broken(sessions, row):
         raise RuntimeError("cannot store " + content + " " + token["token"])
@@ -389,7 +382,7 @@ def test_no_password_token_or_content_reaches_rows_logs_or_error_bodies(
         401,
         401,
     ]
-    secrets = (PASSWORD, token["token"], content)
+    secrets = (SECRET, token["token"], content)
     output = stream.getvalue()
     assert "traffic_record_failed" in output and '"error_type":"RuntimeError"' in output
     for response in (bad, workspace, forged, retry, failed):
