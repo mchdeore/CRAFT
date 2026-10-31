@@ -12,6 +12,7 @@ from app.infrastructure.access import PUBLIC, SIGNED_IN, Caller
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.pipeline import checked_access, token_allowed
 from app.infrastructure.operations.registry import Operation, registry, tool_operations
+from app.infrastructure.operations.storage import call_log
 from app.infrastructure.queue import JOB_MODULES, job_operations
 from app.tests.access_matrix import MATRIX
 from app.tests.support import people
@@ -114,14 +115,21 @@ def url(operation: Operation) -> str:
     return "/api" + re.sub(r"\{[^}]+\}", "x", operation.path or "")
 
 
+@pytest.fixture
+def someone(owner_engine):
+    """A member, removed with its call_log rows: a `workspace` row left behind would stop the
+    next run's migration test from downgrading call_log's origin check."""
+    with people.person(owner_engine) as person:
+        yield person
+        with owner_engine.begin() as connection:
+            connection.execute(call_log.delete().where(call_log.c.user_id == person.id))
+
+
 def test_a_signed_in_browser_without_an_allowed_origin_cannot_change_anything(
-    app, owner_engine, operations
+    app, someone, operations
 ) -> None:
     unsafe = [o for o in operations.values() if o.method in {"POST", "PUT", "PATCH", "DELETE"}]
-    with (
-        people.person(owner_engine) as someone,
-        TestClient(app, base_url="https://testserver") as browser,
-    ):
+    with TestClient(app, base_url="https://testserver") as browser:
         sign_in(browser, someone.id)
         for headers in [{}, {"Origin": "https://elsewhere.example"}]:
             answers = {o.name: browser.request(o.method, url(o), headers=headers) for o in unsafe}
@@ -131,14 +139,11 @@ def test_a_signed_in_browser_without_an_allowed_origin_cannot_change_anything(
 
 
 def test_a_refused_caller_with_an_empty_body_hears_401_or_403_not_400(
-    app, owner_engine, operations
+    app, someone, operations
 ) -> None:
     routes = [o for o in operations.values() if o.method and o.access != PUBLIC]
     empty = {"Origin": ORIGIN, "Content-Type": "application/json"}
-    with (
-        people.person(owner_engine) as someone,
-        TestClient(app, base_url="https://testserver") as client,
-    ):
+    with TestClient(app, base_url="https://testserver") as client:
         anonymous = {
             o.name: client.request(o.method, url(o), content=b"", headers=empty) for o in routes
         }
