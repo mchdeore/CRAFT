@@ -16,6 +16,7 @@ PreparedSource = service.PreparedSource
 
 Classification = Literal["unclassified", "protected-a", "protected-b"]
 Facet = Literal["purpose", "design", "operations", "program", "cost_and_risk"]
+CitationState = Literal["current", "changed", "newer_version", "withdrawn"]
 
 
 class DocumentList(Shape):
@@ -184,7 +185,7 @@ class CitationCheck(Shape):
 
 
 class CitationStatus(Shape):
-    status: Literal["current", "changed", "newer_version", "withdrawn"]
+    status: CitationState
     latest_version: int
 
 
@@ -333,33 +334,13 @@ def inspect_file(caller: Caller, request: RawFile) -> InspectedFile:
     return service.inspect_file(request)
 
 
-def citation_status(caller: Caller, handle: CitationHandle):
-    """Use the checked fresh-source operation for cross-feature citation status."""
-    return check_citation(caller, CitationCheck(handle=handle)).status
-
-
-def citation_quote(caller: Caller, handle: CitationHandle) -> str:
-    """Read the authorized cached block or source row named by a citation."""
-    import hashlib
-
-    from app.infrastructure.errors import NotFound
-    from app.library.citation import quote as locate_quote
-
-    page = read_chunks(
-        caller,
-        ChunkRange(
-            item=handle.item, version=handle.version, from_block=handle.block, to_block=handle.block
-        ),
-    )
-    if not page.chunks:
-        raise NotFound()
-    chunk = page.chunks[0]
-    quote = locate_quote(chunk.text, handle.locator, chunk.handle.locator)
-    if quote is None:
-        raise NotFound()
-    if hashlib.sha256(quote.encode()).hexdigest() != handle.quote_sha256:
-        raise NotFound()
-    return quote
+@observe("library.citation_evidence")
+def citation_evidence(caller: Caller, handle: CitationHandle) -> tuple[CitationState, str | None]:
+    """A citation's status and the quote its stored block holds (None when it no longer holds
+    it), from one check."""
+    require(caller, SIGNED_IN)
+    status, _, _, quote = service.checked_citation(caller, handle)
+    return status.status, quote
 
 
 class RevisionUpload(RawFile, kw_only=True):

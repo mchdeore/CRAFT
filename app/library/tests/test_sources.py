@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.infrastructure.access import Caller
 from app.infrastructure.errors import InvalidInput, NotFound, NotSignedIn
+from app.library import convert
 from app.library.handlers import (
     ChunkRange,
     CitationCheck,
@@ -40,6 +41,16 @@ def budget_row(source):
     )
 
 
+@pytest.fixture
+def no_conversion(monkeypatch):
+    """Fail any conversion: a citation check reads the stored block and hashes the original."""
+
+    def refuse(content, filename):
+        raise AssertionError("an original was converted")
+
+    monkeypatch.setattr(convert, "convert", refuse)
+
+
 def checked(caller, handle):
     result = check_citation(caller, CitationCheck(handle=handle))
     return result.status, result.latest_version
@@ -49,12 +60,13 @@ def stranger(source):
     return replace(source["caller"], user_id=uuid4())
 
 
-def test_a_citation_check_answers_from_the_live_source(cube_source):
+def test_a_citation_check_answers_from_the_live_source(cube_source, no_conversion):
     source, caller = cube_source, cube_source["caller"]
     handle = budget_row(source)
     assert checked(caller, handle) == ("current", 1)
     other = hashlib.sha256(b"| Peak power | 401 | W |").hexdigest()
     assert checked(caller, msgspec.structs.replace(handle, quote_sha256=other)) == ("changed", 1)
+    assert checked(caller, msgspec.structs.replace(handle, block=2)) == ("changed", 1)
 
     source["provider"].write_content(source["path"], REVISED)
     rows.load(source["owner"], source["provider"])
@@ -64,7 +76,7 @@ def test_a_citation_check_answers_from_the_live_source(cube_source):
     assert checked(caller, handle) == ("withdrawn", 2)
 
 
-def test_an_original_changed_in_place_is_changed_and_not_downloadable(cube_source):
+def test_an_original_changed_in_place_is_changed_and_not_downloadable(cube_source, no_conversion):
     source = cube_source
     handle = budget_row(source)
     snapshot = Path(source["settings"].provider_root, ".provider/versions", source["item"], "1")
