@@ -11,9 +11,11 @@ from app.infrastructure.operations import storage
 
 
 def record(caller: Caller, fields: dict[str, Any]) -> None:
+    """One call_log row in a transaction of its own, never an approved operation's, so a step's
+    row stays when that operation rolls back."""
     if caller.sessions is None:
         return
-    with unit_of_work(caller.sessions) as session:
+    with caller.sessions() as session, session.begin():
         storage.append_call(session, fields)
 
 

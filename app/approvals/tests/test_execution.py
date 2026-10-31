@@ -20,6 +20,7 @@ from app.approvals.handlers import (
 from app.infrastructure.database.metadata import metadata
 from app.infrastructure.errors import ApiError
 from app.infrastructure.operations.pipeline import ApprovalRequired
+from app.library import service as library
 from app.notes import storage as notes_storage
 from app.notes.handlers import WriteNote, write_note
 
@@ -188,3 +189,36 @@ def test_write_failure_rolls_back_effect_and_records_terminal_failure(context, m
     assert read_approval(context["caller"], ApprovalRef(id=identifier)).status == "failed"
     with pytest.raises(ApprovalRequired):
         execute_write(caller, value)
+
+
+def test_a_failed_source_check_keeps_its_step_row(context, monkeypatch, last_call_id):
+    """The approved transaction rolls back; the step's call_log row, written apart, stays."""
+    handle = {
+        "item": "generated-item",
+        "version": 1,
+        "block": 1,
+        "locator": "generated",
+        "quoteSha256": "0" * 64,
+        "simulated": True,
+    }
+    caller, value, identifier = prepare(context, evidence=[{"handle": handle}])
+
+    def stale(session, caller, prepared):
+        raise RuntimeError("generated stale source")
+
+    monkeypatch.setattr(library, "prepare_source", lambda caller, handle: handle)
+    monkeypatch.setattr(library, "validate_prepared_source", stale)
+    with pytest.raises(ApiError):
+        execute_write(caller, value)
+    logs = metadata.tables["call_log"]
+    with context["owner"].connect() as connection:
+        steps = connection.execute(
+            select(logs.c.name, logs.c.outcome).where(
+                logs.c.id > last_call_id,
+                logs.c.kind == "step",
+                logs.c.user_id == context["caller"].user_id,
+            )
+        ).all()
+    assert ("library.validate_prepared_source", "error") in steps
+    assert count_notes(context) == 0
+    assert read_approval(context["caller"], ApprovalRef(id=identifier)).status == "failed"

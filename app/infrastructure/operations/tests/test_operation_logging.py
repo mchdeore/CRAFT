@@ -4,20 +4,26 @@ import asyncio
 import io
 import json
 import logging
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app import create_app
 from app.infrastructure.access import PUBLIC, Caller
 from app.infrastructure.database.unit_of_work import unit_of_work
 from app.infrastructure.errors import ApiError, InvalidInput
 from app.infrastructure.logging import configure_logging
-from app.infrastructure.operations import observe, operation
+from app.infrastructure.operations import observe, operation, storage
+from app.infrastructure.operations.jobs import SCHEDULED, runner
 from app.infrastructure.operations.registry import registry
+from app.infrastructure.queue import PermanentError
 from app.infrastructure.shapes import Shape
+from app.tests.support import jobs as test_jobs
 from app.tests.support.chat import chat as chat
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.operations import ProbeInput, rows, trusted
@@ -165,9 +171,39 @@ def test_async_cancellation_records_failure(app: FastAPI) -> None:
     assert child["parent_call_id"] == parent["call_id"]
 
 
-def test_malformed_protocol_logging_has_no_input() -> None:
-    from uuid import uuid4
+def test_a_call_log_outage_changes_no_result(settings, monkeypatch) -> None:
+    """With call_log unwritable, a call still answers and a job keeps its own error; the log
+    names the failure's type and nothing else."""
 
+    @operation(PUBLIC, get="/call-log-outage")
+    def answered(caller: Caller) -> ProbeInput:
+        return ProbeInput(value=7)
+
+    def unwritable(session, fields):
+        raise OperationalError("insert into call_log", {}, RuntimeError("generated outage"))
+
+    monkeypatch.setattr(storage, "append_call", unwritable)
+    app = create_app(settings)
+    stream = io.StringIO()
+    configure_logging("DEBUG", stream)
+    job = SimpleNamespace(sessions=app.state.sessions, settings=settings, id=1, attempt=1)
+    requester = SCHEDULED["caller"] | {"user": str(uuid4()), "roles": ["member"]}
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/call-log-outage")
+        run = runner(test_jobs.sleep.__operation__)
+        with pytest.raises(PermanentError):
+            asyncio.run(run(job, {"fail": "permanent"}, requester, None))
+    finally:
+        app.state.engine.dispose()
+    assert response.status_code == 200 and response.json() == {"value": 7}
+    lines = [json.loads(line) for line in stream.getvalue().splitlines()]
+    lost = [line for line in lines if line["event"] == "call_log_record_failed"]
+    assert [line["error_type"] for line in lost] == ["OperationalError"] * 2
+    assert "generated outage" not in stream.getvalue()
+
+
+def test_malformed_protocol_logging_has_no_input() -> None:
     import anyio
     from mcp.server.models import InitializationOptions
     from mcp.server.session import ServerSession
@@ -206,7 +242,6 @@ def test_malformed_protocol_logging_has_no_input() -> None:
 
 def test_native_mcp_logs_have_no_payload(chat, capsys, caplog) -> None:
     from dataclasses import replace
-    from uuid import uuid4
 
     from sqlalchemy import select
 
