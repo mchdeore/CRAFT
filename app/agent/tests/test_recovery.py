@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+import msgspec
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, text
@@ -13,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app import create_app
-from app.agent import handlers, model, storage
+from app.agent import handlers, model, service, storage
 from app.agent.service import CANCELLED, RUN_LOCK
 from app.approvals import service as approval_service
 from app.infrastructure.access import SIGNED_IN
@@ -65,8 +66,9 @@ def recovery_http(context):
 
 
 @pytest.fixture
-def native_pause(context, monkeypatch):
-    """Obtain the actual framework serialization, never invent a paused snapshot."""
+def native_pause(context, monkeypatch, request):
+    """Obtain the actual framework serialization, never invent a paused snapshot. A `task`
+    parameter (indirect) pauses a task-mode run."""
     monkeypatch.setattr(model, "client", lambda _: WriteClient())
     runs = metadata.tables["agent_runs"]
     with context["owner"].begin() as connection:
@@ -79,6 +81,8 @@ def native_pause(context, monkeypatch):
         "runId": str(identifier),
         "messages": [{"role": "user", "content": "Store the generated fixture calculation."}],
     }
+    if getattr(request, "param", None) == "task":
+        body["mode"] = "task"
     try:
         with runtime_client(context) as http:
             outcome = events(http.post("/api/agent/runs", json=body))[-1]
@@ -202,12 +206,12 @@ def reattach(http, run):
     return events(http.get(f"/api/agent/runs/{run}/events", params={"after": 0}))
 
 
-def refused(http, context, run, *bodies):
+def refused(http, context, run, *bodies, status=409):
     """Each POST is refused before it records or queues anything: re-attaching still replays
     the run's stream, and lastEvent still counts it."""
     stream = reattach(http, run)
     for body in bodies:
-        assert http.post("/api/agent/runs", json=body).status_code == 409
+        assert http.post("/api/agent/runs", json=body).status_code == status
         assert reattach(http, run) == stream
         assert read_recovery(http, context)["lastEvent"] == len(stream)
 
@@ -623,15 +627,10 @@ def test_a_refused_start_or_resume_leaves_the_run_and_its_stream(context, native
         refused(http, context, run, start, resume)
         decision = f"/api/approvals/{native_pause['approval']}/decision"
         assert http.post(decision, json={"approve": False}).status_code == 200
-        # Another approval, and a resume that brings its own answer.
+        # An approval that isn't this run's, and a resume that brings its own answer.
+        refused(http, context, run, resume | {"resume": {"approvalId": str(uuid4())}}, status=404)
         forged = {"approvalId": str(native_pause["approval"]), "approved": True}
-        refused(
-            http,
-            context,
-            run,
-            resume | {"resume": {"approvalId": str(uuid4())}},
-            resume | {"resume": forged},
-        )
+        refused(http, context, run, resume | {"resume": forged})
         assert events(http.post("/api/agent/runs", json=resume))[-1]["type"] == "RUN_FINISHED"
         # A replayed resume, and a start of the finished run.
         refused(http, context, run, resume, start)
@@ -656,3 +655,64 @@ def test_cancelling_a_paused_run_ends_its_stream_with_the_cancel(
     assert cancelled == paused[:-1] + [CANCELLED]
     recovered = read_recovery(recovery_http, context)
     assert (recovered["status"], recovered["lastEvent"]) == ("cancelled", len(cancelled))
+
+
+@pytest.mark.parametrize("native_pause", ["task"], indirect=True)
+def test_a_task_resume_while_another_task_runs_is_refused_before_it_is_recorded(
+    context, native_pause
+):
+    """One task runs at a time: resuming a paused task while another runs answers 429 before
+    anything is recorded or queued, and the paused task keeps its stream until it is cancelled."""
+    run, approval = native_pause["run"], native_pause["approval"]
+    resume = native_pause["body"] | {"messages": [], "resume": {"approvalId": str(approval)}}
+    user = context["users"][0][0]
+    conversations, runs = metadata.tables["conversations"], metadata.tables["agent_runs"]
+    with context["owner"].begin() as connection:
+        thread = connection.execute(
+            conversations.insert()
+            .values(owner_id=user, title="Another task")
+            .returning(conversations.c.id)
+        ).scalar_one()
+    other = uuid4()  # started as queue_run and the worker start a task
+    with context["caller"].sessions.begin() as session:
+        storage.add_segment(session, user, other, thread, {})
+    with context["caller"].sessions.begin() as session:
+        storage.start(session, user, thread, other, "scripted", "v", "task")
+    try:
+        with runtime_client(context) as http:
+            decision = f"/api/approvals/{approval}/decision"
+            assert http.post(decision, json={"approve": False}).status_code == 200
+            stream = reattach(http, run)
+            assert http.post("/api/agent/runs", json=resume).status_code == 429
+            assert not run_locked(context, run)
+            assert reattach(http, run) == stream
+            assert read_recovery(http, context)["lastEvent"] == len(stream)
+            assert http.post(f"/api/agent/runs/{run}/cancel").status_code == 204
+            assert reattach(http, run) == stream[:-1] + [CANCELLED]
+    finally:
+        with context["owner"].begin() as connection:
+            connection.execute(runs.update().where(runs.c.id == other).values(status="finished"))
+
+
+def test_cancelling_a_paused_run_cancels_the_resume_still_waiting_for_a_worker(
+    context, native_pause
+):
+    """A resume queued while no worker runs never runs once its paused run is cancelled, so the
+    stream ends once, with the cancel."""
+    run, approval = native_pause["run"], native_pause["approval"]
+    resume = native_pause["body"] | {"messages": [], "resume": {"approvalId": str(approval)}}
+    with runtime_client(context) as http:
+        decision = f"/api/approvals/{approval}/decision"
+        assert http.post(decision, json={"approve": True}).status_code == 200
+        worker = context["worker"]
+        worker.stop()
+        try:
+            request = msgspec.convert(resume, handlers.RunAgentInput)
+            service.queue_run(context["caller"], request, False)
+            assert run_locked(context, run)
+            assert http.post(f"/api/agent/runs/{run}/cancel").status_code == 204
+            assert not run_locked(context, run)
+        finally:
+            worker.start(worker.settings)
+        assert reattach(http, run) == [CANCELLED]
+        assert read_recovery(http, context)["lastEvent"] == 1

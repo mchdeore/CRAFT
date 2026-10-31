@@ -301,7 +301,7 @@ def stalled(session: Session) -> list:
     return list(session.execute(running).scalars())
 
 
-def _refuse_second_task(session: Session, user) -> None:
+def refuse_second_task(session: Session, user) -> None:
     """One running task-mode run per person, so a few people can't fill the agent worker.
     A run counts only while its newest segment is recent: a row left "running" by a lost
     database connection must not lock its owner out of task mode."""
@@ -313,6 +313,11 @@ def _refuse_second_task(session: Session, user) -> None:
     )
     if session.execute(running.limit(1)).first() is not None:
         raise RateLimited()
+
+
+def mode(session: Session, run) -> str | None:
+    """The run's mode, `chat` or `task`; None before it has started."""
+    return session.execute(select(agent_runs.c.mode).where(agent_runs.c.id == run)).scalar()
 
 
 def started(session: Session, run) -> bool:
@@ -358,7 +363,7 @@ def start(session: Session, user, conversation, identifier, model, version, mode
     if count >= 3:
         raise RateLimited()
     if mode == "task":
-        _refuse_second_task(session, user)
+        refuse_second_task(session, user)
     session.execute(
         agent_runs.insert().values(
             id=identifier,
@@ -411,7 +416,7 @@ def resume(session: Session, user, identifier) -> str:
         )
     ).scalar_one()
     if mode == "task":
-        _refuse_second_task(session, user)
+        refuse_second_task(session, user)
     session.execute(
         agent_runs.update()
         .where(agent_runs.c.id == identifier, agent_runs.c.started_by == user)
