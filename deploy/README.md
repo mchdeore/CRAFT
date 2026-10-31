@@ -1,10 +1,10 @@
 # Running CRAFT on the local cluster
 
-CRAFT on Colima's built-in Kubernetes (k3s), with one Helm chart: the API, the workers, craft-id and PostgreSQL. Colima's Docker engine builds the image and k3s uses it directly, so there is no registry. Compose keeps working beside it.
+CRAFT on Colima's built-in Kubernetes (k3s), with one Helm chart: the API, the workers, craft-id and PostgreSQL. Colima's Docker engine builds the image and k3s uses it directly, so there is no registry.
 
-- `craft/` the chart. Each setting comes from the `craft-env` Secret, made from `.env`; a container reads only the keys it needs, the same `CRAFT_*` variables compose passes.
+- `craft/` the chart. Each setting comes from the `craft-env` Secret, made from `.env`; a container reads only the keys it needs.
 - `jupyterhub/` the workspaces: JupyterHub's own chart beside this one (`jupyterhub/README.md`).
-- `local.yaml` the local values: `worker-agent`, `worker-interactive` and `worker-bulk`, as compose has them, each with its queues, jobs at once per queue and memory limit.
+- `local.yaml` the local values: `worker-agent`, `worker-interactive` and `worker-bulk`, each with its queues, jobs at once per queue and memory limit.
 - `worker-agent` and craft-id run inside the API's pod. Chat turns call the API's MCP on `127.0.0.1`, and the API reaches craft-id on `localhost:8100`, the address the browser uses. The API runs there as a sidecar, so it starts before `worker-agent` and stops after it. The other workers have their own Deployments.
 - PostgreSQL first boots with `app/infrastructure/database/initdb.sh` (`craft/initdb.sh` links to it).
 - Probes: the API is live on `/health/live` and ready on `/health/ready`, so it's ready only once the database is at the latest migration (after `scripts/seed` or `alembic upgrade head`). The workers check their heartbeat file with `python -I -S app/infrastructure/heartbeat.py`, which never imports the app, and craft-id uses `/health/live`. Every probe sets its own timeout: on a busy machine the 1 s default killed a healthy database.
@@ -37,14 +37,14 @@ helm install craft deploy/craft -f deploy/local.yaml --set provider.hostPath="$P
 kubectl rollout status statefulset/craft-postgres
 ```
 
-Then load the frozen set through a port forward. Run the forward in a second terminal and keep it open. It uses port 55432, not 5432, so nothing meant for compose's database reaches the cluster's:
+Then load the frozen set through a port forward. Run the forward in a second terminal and keep it open. It uses port 55432, not `.env`'s 5432, so only a command given that port reaches the cluster's database:
 
 ```bash
 kubectl port-forward svc/craft-postgres 55432:5432
 ```
 
 ```bash
-CRAFT_DATABASE_PORT=55432 scripts/seed cluster
+CRAFT_DATABASE_PORT=55432 scripts/seed
 ```
 
 Then reach the API on `localhost` (in another terminal):

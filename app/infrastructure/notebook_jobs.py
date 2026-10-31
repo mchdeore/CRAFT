@@ -9,9 +9,6 @@ run at once.
 
 The worker's service account may only create, read and delete Jobs, and an admission policy
 (``deploy/craft/templates/notebook-runs.yaml``) holds those Jobs to this shape.
-
-``JobRunner`` is the cluster's ``NotebookRunner`` (``notebook_runs.py``); nothing here depends
-on the Docker sandbox.
 """
 
 import asyncio
@@ -25,17 +22,27 @@ from uuid import UUID, uuid4
 
 import httpx
 
-from app.infrastructure.notebook_runs import STEP_SECONDS, TOTAL_SECONDS, RunError
-
 logger = logging.getLogger("craft.workspace")
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 LABEL = "craft-notebook-run"
 POLL_SECONDS = 2.0
 USER = 1000
+# One run, start to finish. craft_run, in the workspace image, enforces it (and a limit for each
+# cell) with its own copy, since it can't import the app.
+TOTAL_SECONDS = 15 * 60
+STEP_SECONDS = 120  # each trusted step around a run: prepare and collect
+# The queued job's own limit (app/workspace/jobs.py) is longer than the Job's deadline, so the
+# deadline fires first and reports run_timeout.
+JOB_SECONDS = TOTAL_SECONDS + 2 * STEP_SECONDS + 60
 # collect's exit codes for a run cut short (craft_run's TIMED_OUT and KERNEL_DIED): the executed
 # copy is back as far as it got, and the Job fails with the code in its message.
 CUT_SHORT = {4: "run_timeout", 5: "kernel_died"}
+
+
+class RunError(RuntimeError):
+    """A run that didn't finish. The message is one fixed code, never notebook content:
+    ``run_failed``, ``run_timeout`` or ``kernel_died``."""
 
 
 @dataclass

@@ -117,12 +117,6 @@ def test_chart_probes_never_start_the_cli_and_always_set_a_timeout():
         assert "[python, -I, -S, " + IN_IMAGE + "]" in block, block
 
 
-def test_compose_worker_healthcheck_runs_the_same_check():
-    compose = (ROOT / "compose.yaml").read_text()
-    assert f'["CMD", "python", "-I", "-S", "{IN_IMAGE}"]' in compose
-    assert '"craft", "worker", "--check"' not in compose
-
-
 def manifests(values: tuple[str, ...]) -> dict[tuple[str, str], dict]:
     documents = yaml.safe_load_all(helm_template(*values))
     return {(doc["kind"], doc["metadata"]["name"]): doc for doc in documents if doc}
@@ -137,7 +131,7 @@ def test_chart_runs_craft_id_beside_the_api_which_outlives_its_workers(values):
     assert [(c["name"], c["restartPolicy"]) for c in pod["spec"]["initContainers"]] == [
         ("api", "Always")
     ]
-    # craft-id on the pod's localhost, where the API finds its issuer, as compose shares one.
+    # craft-id on the pod's localhost, where the API finds its issuer.
     assert "id" in [container["name"] for container in pod["spec"]["containers"]]
     assert rendered["Service", "craft-id"]["spec"]["selector"] == pod["metadata"]["labels"]
     assert ("Deployment", "craft-id") not in rendered

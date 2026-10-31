@@ -369,9 +369,9 @@ def test_workbook_and_slides_get_native_charts_from_a_vega_lite_spec(tmp_path, m
     assert len(slides) == 2 and any(shape.has_chart for shape in slides[1].shapes)
 
 
-@pytest.mark.docker
+@pytest.mark.slow
 def test_pages_and_preview_render_with_libreoffice_in_the_workspace_image():
-    import docker
+    import subprocess
 
     # Guarded like the kernel, so page rendering is checked where the agent runs it.
     script = """
@@ -392,17 +392,16 @@ assert all(report[part].startswith("ok") for part in
            ("LibreOffice", "Poppler", "Fonts", "Python libraries")), report
 print("ok")
 """
-    client = docker.from_env(timeout=120)
-    output = client.containers.run(
-        "craft-user-workspace:local-pilot",
-        ["python", "-c", script],
-        environment={"CRAFT_GUARD": "1"},
-        remove=True,
-        network_disabled=True,
-        read_only=True,
-        tmpfs={"/tmp": "", "/workspace": "uid=1000"},
+    # The image scripts/check full builds, offline with a read-only root.
+    run = subprocess.run(
+        ["docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp"]
+        + ["--tmpfs", "/workspace:uid=1000", "--env", "CRAFT_GUARD=1"]
+        + ["craft-user-workspace:local-pilot", "python", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
-    assert output.strip().endswith(b"ok")
+    assert run.returncode == 0 and run.stdout.strip().endswith("ok"), run.stderr[-2000:]
 
 
 def test_a_failed_save_keeps_the_previous_file_and_leaves_nothing_behind(tmp_path, monkeypatch):

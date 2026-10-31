@@ -1,20 +1,18 @@
-"""Whole-notebook runs queue a job, run through a NotebookRunner and never overwrite a file.
+"""Whole-notebook runs queue a job and run as a Kubernetes Job, which never overwrites a file.
 
-The service codes only against ``NotebookRunner``; these tests cover how it picks a backend, the
-Docker sandbox's copy-back (``SandboxRunner``) and the Kubernetes Job's lifecycle (``JobRunner``),
-including failures, cancellation and what reaches the logs.
+These tests cover the queue, how the service starts a ``JobRunner`` (and fails outside a
+cluster) and the Job's lifecycle, including failures, cancellation and what reaches the logs.
 """
 
 import asyncio
-import json
 from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
-from app.infrastructure import notebook_jobs, notebook_sandbox, workspaces
-from app.infrastructure.notebook_runs import NotebookRunner, RunError
+from app.infrastructure import notebook_jobs
+from app.infrastructure.notebook_jobs import RunError
 from app.workspace import service
 from app.workspace.handlers import RunNotebook, run_notebook
 
@@ -42,160 +40,15 @@ def test_a_person_can_queue_more_than_two_notebook_runs(context, workspace, monk
         )
 
 
-def test_a_run_copies_back_its_notebook_and_outputs_without_overwriting(
-    context, workspace, monkeypatch
-):
-    _, files = workspace
-    written = {}
-    existing = {"work/outputs/table.csv": b"old\n", "work/fit.ipynb": b"{}"}
-
-    async def read_folder(target, folder, limit):
-        assert folder == "work"
-        return {"fit.ipynb": b"{}", "outputs/table.csv": b"old\n", "outputs/same.csv": b"x"}
-
-    async def exists(target, path):
-        return path in existing or path in written
-
-    async def write_bytes(target, path, content):
-        written[path] = content
-
-    class FakeSandbox:
-        def __init__(self, image):
-            self.image = image
-
-        def run(self, files, notebook, output):
-            assert notebook == "fit.ipynb" and "outputs/table.csv" in files
-            return 0, {
-                output: json.dumps(NOTEBOOK).encode(),
-                "outputs/table.csv": b"new\n",
-                "outputs/same.csv": b"x",
-                "outputs/chart.png": b"png",
-            }
-
-        def kill(self):
-            pass
-
-    monkeypatch.setattr(workspaces, "read_folder", read_folder)
-    monkeypatch.setattr(workspaces, "exists", exists)
-    monkeypatch.setattr(workspaces, "write_bytes", write_bytes)
-    monkeypatch.setattr(notebook_sandbox, "Sandbox", FakeSandbox)
-    own = replace(context["caller"], origin="http")
-    asyncio.run(service.notebook_job(own, "work/fit.ipynb", "fit.run-1.ipynb"))
-    assert written["work/fit.run-1.ipynb"] == json.dumps(NOTEBOOK).encode()
-    assert written["work/outputs/chart.png"] == b"png"
-    renamed = [name for name in written if name.startswith("work/outputs/table.run-")]
-    assert len(renamed) == 1 and written[renamed[0]] == b"new\n"
-    assert "work/outputs/table.csv" not in written and "work/outputs/same.csv" not in written
-    assert "work/fit.ipynb" not in written
-
-
-class FakeSandbox:
-    """Stands in for the Docker container: returns ``made`` with exit ``code``, or blocks."""
-
-    killed = 0
-
-    def __init__(self, image, code=0, made=None, block=None):
-        self.image, self.code, self.made, self.block = image, code, made or {}, block
-
-    def run(self, files, notebook, output):
-        if self.block is not None:
-            self.block.wait(5)
-        return self.code, self.made
-
-    def kill(self):
-        FakeSandbox.killed += 1
-        if self.block is not None:
-            self.block.set()
-
-
-def _sandbox_runner(monkeypatch, written, **fake):
-    async def read_folder(target, folder, limit):
-        return {"nb.ipynb": b"{}"}
-
-    async def exists(target, path):
-        return False
-
-    async def write_bytes(target, path, content):
-        written[path] = content
-
-    monkeypatch.setattr(workspaces, "read_folder", read_folder)
-    monkeypatch.setattr(workspaces, "exists", exists)
-    monkeypatch.setattr(workspaces, "write_bytes", write_bytes)
-    monkeypatch.setattr(notebook_sandbox, "Sandbox", lambda image: FakeSandbox(image, **fake))
-    target = workspaces.JupyterTarget("http://jupyter/user/x/", "generated-never-sent", "")
-    runner: NotebookRunner = notebook_sandbox.SandboxRunner(target, "image")
-    return runner
-
-
-def test_a_sandbox_run_that_fails_keeps_its_results_and_reports_a_fixed_code(monkeypatch):
-    written = {}
-    runner = _sandbox_runner(monkeypatch, written, code=1, made={"o.ipynb": b"{}"})
-    with pytest.raises(RunError, match="^run_failed$"):
-        asyncio.run(runner.run("", "nb.ipynb", "o.ipynb"))
-    assert written == {"o.ipynb": b"{}"}  # the executed copy shows where it stopped
-    # A cell that raised (exit 3) is a finished run, with the error in the executed copy.
-    asyncio.run(_sandbox_runner(monkeypatch, {}, code=3).run("", "nb.ipynb", "o.ipynb"))
-
-
-def test_a_sandbox_result_craft_cannot_write_is_skipped_and_the_rest_written(monkeypatch, caplog):
-    import logging
-
-    caplog.set_level(logging.INFO)
-    written = {}
-    made = {
-        "../../escape.txt": b"x",  # leaves the folder
-        "outputs/.cache/state": b"c",  # hidden: CRAFT never writes these
-        "outputs/table.csv": b"t",
-        "o.ipynb": b"{}",
-    }
-    runner = _sandbox_runner(monkeypatch, written, made=made)
-    asyncio.run(runner.run("work", "nb.ipynb", "o.ipynb"))
-    assert written == {"work/outputs/table.csv": b"t", "work/o.ipynb": b"{}"}
-    (line,) = [r for r in caplog.records if r.getMessage() == "notebook run skipped results"]
-    assert line.__dict__["fields"] == {"skipped": 2}  # a count, never the names
-
-
-def test_a_folder_over_the_limit_fails_before_anything_runs(monkeypatch):
-    written = {}
-    runner = _sandbox_runner(monkeypatch, written)
-
-    async def too_large(target, folder, limit):
-        raise ValueError("The notebook folder is too large")
-
-    monkeypatch.setattr(workspaces, "read_folder", too_large)
-    monkeypatch.setattr(notebook_sandbox, "Sandbox", None)  # never reached
-    with pytest.raises(RunError, match="^folder_too_large$"):
-        asyncio.run(runner.run("work", "nb.ipynb", "o.ipynb"))
-    assert written == {}
-
-
-def test_the_queued_job_outlasts_every_backend_limit():
-    from app.infrastructure.notebook_runs import JOB_SECONDS, TOTAL_SECONDS
+def test_the_queued_job_outlasts_the_run_jobs_deadline():
+    from app.infrastructure.notebook_jobs import JOB_SECONDS, TOTAL_SECONDS
     from app.workspace.jobs import notebook_run
 
     job = notebook_jobs.manifest("notebook-run-1", "image", uuid4(), "", "nb.ipynb", "o")
-    # The Job's deadline and the sandbox's run limit fire first, so a slow run is a run_timeout.
+    # The Job's deadline fires first, so a slow run is a run_timeout.
     assert TOTAL_SECONDS < job["spec"]["activeDeadlineSeconds"] < JOB_SECONDS
     queued = notebook_run.__dict__["__operation__"].job
     assert queued is not None and queued.timeout == JOB_SECONDS
-
-
-def test_cancelling_a_sandbox_run_kills_its_container(monkeypatch):
-    import threading
-
-    block = threading.Event()
-    runner = _sandbox_runner(monkeypatch, {}, block=block)
-    FakeSandbox.killed = 0
-
-    async def cancel():
-        task = asyncio.ensure_future(runner.run("", "nb.ipynb", "o.ipynb"))
-        await asyncio.sleep(0.05)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(cancel())
-    assert FakeSandbox.killed == 1
 
 
 def test_on_the_cluster_the_service_runs_a_job_for_the_caller(context, workspace, monkeypatch):
@@ -215,89 +68,18 @@ def test_on_the_cluster_the_service_runs_a_job_for_the_caller(context, workspace
     cluster = notebook_jobs.Cluster("https://k8s", "craft", {})
     monkeypatch.setattr(notebook_jobs, "in_cluster", lambda: cluster)
     monkeypatch.setattr(notebook_jobs.JobRunner, "run", run)
-    monkeypatch.setattr(notebook_sandbox, "Sandbox", None)  # never reached on the cluster
     own = replace(context["caller"], origin="http")
     asyncio.run(service.notebook_job(own, "work/fit.ipynb", "fit.run-1.ipynb"))
     image = own.settings.notebook_image
     assert started == [(own.user_id, image, "work", "fit.ipynb", "fit.run-1.ipynb")]
 
 
-def test_each_backend_stands_alone():
-    import ast
-    import inspect
-
-    for module, other in ((notebook_jobs, "notebook_sandbox"), (notebook_sandbox, "notebook_jobs")):
-        imported = {
-            name
-            for node in ast.walk(ast.parse(inspect.getsource(module)))
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for name in [getattr(node, "module", None) or "", *(a.name for a in node.names)]
-        }
-        assert not any(other in name for name in imported), module.__name__
-
-
-def _notebook(*sources):
-    return json.dumps(
-        {
-            "cells": [
-                {
-                    "cell_type": "code",
-                    "metadata": {},
-                    "source": s,
-                    "outputs": [],
-                    "execution_count": None,
-                }
-                for s in sources
-            ],
-            "metadata": {
-                "kernelspec": {"name": "python3", "display_name": "Python 3", "language": "python"}
-            },
-            "nbformat": 4,
-            "nbformat_minor": 5,
-        }
-    ).encode()
-
-
-@pytest.mark.docker
-def test_sandbox_runs_offline_and_stops_at_once_when_cancelled():
-    import threading
-    import time
-
-    image = "craft-user-workspace:local-pilot"
-    code = (
-        "import socket, pathlib\n"
-        "pathlib.Path('outputs').mkdir(exist_ok=True)\n"
-        "pathlib.Path('outputs/answer.txt').write_text('42')\n"
-        "try:\n    socket.create_connection(('1.1.1.1', 80), timeout=3); print('online')\n"
-        "except OSError:\n    print('offline')\n"
-    )
-    status, made = notebook_sandbox.Sandbox(image).run(
-        {"nb.ipynb": _notebook(code)}, "nb.ipynb", "nb.run.ipynb"
-    )
-    assert status == 0 and made["outputs/answer.txt"] == b"42"
-    executed = json.loads(made["nb.run.ipynb"])
-    text = "".join("".join(o.get("text", "")) for o in executed["cells"][0]["outputs"])
-    assert "offline" in text and "online" not in text.replace("offline", "")
-
-    sandbox = notebook_sandbox.Sandbox(image)
-    result = {}
-
-    def run():
-        try:
-            sandbox.run(
-                {"slow.ipynb": _notebook("import time; time.sleep(600)")}, "slow.ipynb", "o.ipynb"
-            )
-        except Exception as error:
-            result["error"] = error
-
-    worker = threading.Thread(target=run)
-    worker.start()
-    time.sleep(8)
-    started = time.monotonic()
-    sandbox.kill()
-    worker.join(10)
-    assert not worker.is_alive() and time.monotonic() - started < 5
-    assert "error" in result
+def test_outside_a_cluster_a_run_fails_without_starting(context, monkeypatch):
+    monkeypatch.setattr(notebook_jobs, "in_cluster", lambda: None)
+    monkeypatch.setattr(notebook_jobs.JobRunner, "run", None)  # never reached
+    own = replace(context["caller"], origin="http")
+    with pytest.raises(RunError, match="^run_failed$"):
+        asyncio.run(service.notebook_job(own, "work/fit.ipynb", "fit.run-1.ipynb"))
 
 
 def _cluster(answers, requests):
@@ -372,7 +154,7 @@ def test_a_finished_failed_or_timed_out_job_is_reported_and_deleted(monkeypatch)
     ):
         requests = []
         cluster = _cluster([*answers, httpx.Response(404)], requests)
-        runner: NotebookRunner = notebook_jobs.JobRunner(cluster, "image", uuid4())
+        runner = notebook_jobs.JobRunner(cluster, "image", uuid4())
         call = runner.run("", "nb.ipynb", "o.ipynb")
         if error is None:
             asyncio.run(call)
@@ -411,12 +193,10 @@ def test_only_a_blip_while_polling_is_asked_again_and_the_job_is_deleted_once(mo
     assert methods == ["POST", "GET", "GET", "DELETE"]
 
 
-def test_the_runner_in_the_image_keeps_the_same_limits_and_codes():
+def test_the_runner_in_the_image_keeps_the_same_run_limit_and_codes():
     import craft_run
 
-    from app.infrastructure.notebook_runs import CELL_SECONDS, TOTAL_SECONDS
-
-    assert (craft_run.TOTAL_SECONDS, craft_run.CELL_SECONDS) == (TOTAL_SECONDS, CELL_SECONDS)
+    assert craft_run.TOTAL_SECONDS == notebook_jobs.TOTAL_SECONDS
     cut_short = {craft_run.TIMED_OUT: "run_timeout", craft_run.KERNEL_DIED: "kernel_died"}
     assert notebook_jobs.CUT_SHORT == cut_short
 

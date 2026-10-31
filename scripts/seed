@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Load the frozen dataset (the library index and the datacube as of 2026-10-21) into an empty
 # database and provider folder. No model calls: the data is restored, never rebuilt.
-#   scripts/seed                   restore .local/seed/cube-v1.1 into the compose db, then apply newer migrations
-#   scripts/seed cluster           the same into the database on 127.0.0.1:$CRAFT_DATABASE_PORT, such as the
-#                                  local cluster's through kubectl port-forward (deploy/README.md); needs psql
-#   scripts/seed verify [cluster]  compare an already seeded database with the set's manifest; changes nothing
+#   scripts/seed          restore .local/seed/cube-v1.1 into the database on 127.0.0.1:$CRAFT_DATABASE_PORT,
+#                         the local cluster's through kubectl port-forward (deploy/README.md), then apply
+#                         newer migrations; needs psql
+#   scripts/seed verify   compare an already seeded database with the set's manifest; changes nothing
 # The frozen set is private (never committed): craft_dev.dump, provider.tgz, embedding and manifest.json.
 # The manifest holds each file's SHA-256, the embedding model, every dataset table's row count, the
 # tables that must be empty (call log, sessions, tokens, credentials) and the tag values;
@@ -13,15 +13,15 @@
 # empty, since the call log and credentials grow with use. CRAFT_SEED picks another set (one without a
 # manifest, such as cube-v1, restores unchecked). The set's accounts have no passwords: give one
 # with `craft id users reset-password <username>`.
-# To start over: docker compose down -v, remove the provider folder, run this again.
+# To start over: empty the database (deploy/README.md, Stop, then Start) and the provider folder,
+# then run this again.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 action=seed
 [ "${1:-}" = verify ] && { action=verify; shift; }
-mode=${1:-compose}
-[ "$mode" = compose ] || [ "$mode" = cluster ] || { echo "usage: scripts/seed [verify] [cluster]" >&2; exit 2; }
+[ $# = 0 ] || { echo "usage: scripts/seed [verify]" >&2; exit 2; }
 [ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
-export DOCKER_CONTEXT=${DOCKER_CONTEXT:-colima} UV_NO_PROGRESS=1
+export UV_NO_PROGRESS=1
 # .env fills in what the environment does not already set.
 while IFS='=' read -r key value; do
   [[ $key =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
@@ -31,7 +31,7 @@ main=$(git rev-parse --path-format=absolute --git-common-dir)/..
 SEED=${CRAFT_SEED:-$main/.local/seed/cube-v1.1}
 DATABASE=${CRAFT_DATABASE_NAME:-craft_dev}
 PROVIDER=${CRAFT_PROVIDER_ROOT:-.local/runtime/provider}
-# Python reaches the database the way migrations do: as craft_owner, on the published port.
+# Python reaches the database the way migrations do: as craft_owner, on the same port.
 craft_python() { CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_NAME=$DATABASE uv run -q "$@"; }
 checked=false
 [ -f "$SEED/manifest.json" ] && checked=true
@@ -54,24 +54,18 @@ if [ -n "$(ls -A "$PROVIDER" 2>/dev/null)" ]; then
   echo "$PROVIDER is not empty; remove it first" >&2; exit 1
 fi
 
-if [ "$mode" = cluster ]; then
-  export PGHOST=127.0.0.1 PGPORT=${CRAFT_DATABASE_PORT:-5432} PGPASSWORD=$CRAFT_DB_ADMIN_PASSWORD
-  admin() { "$@"; }
-else
-  docker compose up -d --wait db >/dev/null
-  admin() { docker compose exec -T db "$@"; }
-fi
-sql() { admin psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -Atc "$1"; }
+export PGHOST=127.0.0.1 PGPORT=${CRAFT_DATABASE_PORT:-5432} PGPASSWORD=$CRAFT_DB_ADMIN_PASSWORD
+sql() { psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -Atc "$1"; }
 tables=$(sql "select count(*) from pg_tables where schemaname = 'public'")
-[ "$tables" = 0 ] || { echo "$DATABASE already has tables; run docker compose down -v first" >&2; exit 1; }
+[ "$tables" = 0 ] || { echo "$DATABASE already has tables; seed an empty database" >&2; exit 1; }
 
 echo "Restoring the frozen database into $DATABASE"
-admin pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
+pg_restore -U postgres -d "$DATABASE" --exit-on-error < "$SEED/craft_dev.dump"
 # craft-id's login: initdb.sh makes it only at the database's first boot, and only if its password
 # was set then.
 if [ -n "${CRAFT_ID_DB_PASSWORD:-}" ] && [ -z "$(sql "select 1 from pg_roles where rolname = 'craft_id'")" ]; then
   echo "Creating craft-id's login"
-  admin psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -v id_pw="$CRAFT_ID_DB_PASSWORD" >/dev/null <<'SQL'
+  psql -U postgres -d "$DATABASE" -v ON_ERROR_STOP=1 -v id_pw="$CRAFT_ID_DB_PASSWORD" >/dev/null <<'SQL'
 create role craft_id login password :'id_pw';
 SQL
 fi
