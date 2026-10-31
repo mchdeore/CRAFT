@@ -109,7 +109,8 @@ class TextProbe(Shape):
 
 def test_text_holding_nul_is_refused_before_the_handler(settings: Settings) -> None:
     """PostgreSQL text refuses NUL, so a request whose decoded strings hold one is invalid input
-    on every transport. An escaped backslash before u0000 is plain text, and bytes are not text."""
+    on every transport, and so is a lone surrogate, which the MCP SDK's JSON parser keeps. An
+    escaped backslash before u0000 is plain text, and bytes are not text."""
     seen = []
 
     @operation(PUBLIC, post="/text-probe")
@@ -129,11 +130,44 @@ def test_text_holding_nul_is_refused_before_the_handler(settings: Settings) -> N
         assert escaped.status_code == 204
     with pytest.raises(InvalidInput):
         text_probe(trusted(app), {"text": "a\x00b"})
+    with pytest.raises(InvalidInput):
+        text_probe(trusted(app), {"text": "a\udc00b"})
     text_probe(trusted(app), TextProbe(text="", data=b"\x00"))
     assert [(request.text, request.data) for request in seen] == [
         ("a\\u0000b", b""),
         ("", b"\x00"),
     ]
+    app.state.engine.dispose()
+
+
+class RoomyProbe(Shape):
+    max_bytes: ClassVar[int] = 65_536
+    text: str
+
+
+def test_json_nested_deeper_than_msgspec_decodes_is_invalid_input(settings: Settings) -> None:
+    """msgspec stops at about 10,000 levels with RecursionError: a body that deep is invalid
+    input, and a caller who isn't signed in still hears 401 first."""
+
+    @operation(PUBLIC, post="/deep-probe")
+    def deep_probe(caller: Caller, request: TextProbe) -> None:
+        return None
+
+    @operation(PUBLIC, post="/deep-roomy-probe")
+    def deep_roomy(caller: Caller, request: RoomyProbe) -> None:
+        return None
+
+    deep = "[" * 20_000 + "]" * 20_000
+    app = create_app(settings)
+    with TestClient(app, headers={"Origin": "http://localhost:8000"}) as client:
+        for path, body in [
+            ("/api/deep-probe", '{"text": "", "spec": {"a": ' + deep + "}}"),
+            ("/api/deep-roomy-probe", '{"text": ' + deep + "}"),
+        ]:
+            response = client.post(path, content=body)
+            assert response.status_code == 400 and response.json()["code"] == "invalid_input"
+        anonymous = client.post("/api/conversations", content='{"title": ' + deep + "}")
+        assert anonymous.status_code == 401
     app.state.engine.dispose()
 
 
