@@ -120,7 +120,8 @@ class Journey:
         for method, path, *options in calls:
             response = self.stranger.request(method, path, **(options[0] if options else {}))
             operation = operation_for(method, urlsplit(path).path)
-            needs_permission = operation is not None and operation.access not in {PUBLIC, SIGNED_IN}
+            assert operation is not None, f"{method} {path} reaches no route"
+            needs_permission = operation.access not in {PUBLIC, SIGNED_IN}
             answers.append((method, path, response.status_code))
             expected.append((method, path, 403 if needs_permission else 404))
         assert answers == expected
