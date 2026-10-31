@@ -420,14 +420,8 @@ async def _within(events, deadline):
 
 async def _run(caller, request) -> AsyncGenerator[AGUIEvent, None]:
     resuming = request.resume is not None
-    newest = next(
-        (message for message in reversed(request.messages) if message.get("role") == "user"), None
-    )
-    if not resuming and (
-        newest is None
-        or not isinstance(newest.get("content"), str)
-        or not newest["content"].strip()
-    ):
+    newest = service.newest_message(request)
+    if not resuming and newest is None:
         raise InvalidInput()
     instructions = (ROOT / "app/agent/instructions.md").read_text()
     version = hashlib.sha256(instructions.encode()).hexdigest()
