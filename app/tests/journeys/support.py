@@ -3,14 +3,14 @@
 A journey signs a generated person in, calls routes with the browser's Origin, reads chat
 streams and records which operation each call reached, so a guard can check that every route
 has a journey. `as_stranger` checks that a second person can't read, change or delete what the
-first one made. `runs` serves chat turns. Each Journey is one person's own client, so several
-can run on threads at once.
+first one made. `runs` serves chat turns and `worker` runs a queue. Each Journey is one person's
+own client, so several can run on threads at once.
 """
 
 import json
 import threading
 from collections.abc import Iterator
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -18,17 +18,18 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, or_, text
+from sqlalchemy import Engine, func, or_, select, text
 
 from app import create_app
 from app.infrastructure.access import PUBLIC, SIGNED_IN
 from app.infrastructure.config.settings import Settings
 from app.infrastructure.operations.registry import Operation, registry
 from app.infrastructure.operations.storage import call_log
+from app.infrastructure.queue import worker_thread
 from app.infrastructure.traffic import traffic_log
+from app.jobs.storage import queue_samples
 from app.tests.support import people
 from app.tests.support.accounts import ORIGIN, sign_in
-from app.tests.support.chat import agent_worker
 from app.tests.support.server import live_server
 
 TERMINAL = {"RUN_FINISHED", "RUN_ERROR"}
@@ -57,6 +58,13 @@ def browser(app: FastAPI) -> TestClient:
     )
 
 
+def run_body(thread: str, text: str, **body: Any) -> dict:
+    """What POST /api/agent/runs takes: `text` as a new run in the conversation, or with
+    `runId` and `resume`, going on with a run."""
+    messages = [{"role": "user", "content": text}] if text else []
+    return {"threadId": thread, "runId": str(uuid4()), "messages": messages} | body
+
+
 class Journey:
     """One person's browser on the app. Their calls are recorded; their rows go at the end."""
 
@@ -74,6 +82,18 @@ class Journey:
         """Sign the person in as the provider's callback does; returns the session cookie."""
         return sign_in(self.http, self.person.id)
 
+    @property
+    def stranger(self) -> TestClient:
+        """A second signed-in member's browser on the app, made on first use."""
+        if self._stranger is None:
+            stranger = self._person()
+            # Not entered: a second lifespan on the app would take /mcp from the first.
+            self._stranger = browser(self.app)
+            self.stack.callback(self._stranger.close)
+            self._stranger.event_hooks["response"].append(self._remember)
+            sign_in(self._stranger, stranger.id)
+        return self._stranger
+
     def events(self, response: Any) -> list[dict]:
         """A chat stream's events, which end with RUN_FINISHED or RUN_ERROR."""
         assert response.status_code == 200, response.text
@@ -89,40 +109,26 @@ class Journey:
     def chat(self, thread: str, text: str, **body: Any) -> tuple[str, list[dict]]:
         """Send `text` in a conversation as a new run (or with `runId` and `resume`, go on with
         one) and read its stream to the end. Returns the run's id and its events."""
-        run = body.pop("runId", str(uuid4()))
-        messages = [{"role": "user", "content": text}] if text else []
-        response = self.http.post(
-            "/api/agent/runs", json={"threadId": thread, "runId": run, "messages": messages, **body}
-        )
-        return run, self.events(response)
+        sent = run_body(thread, text, **body)
+        return sent["runId"], self.events(self.http.post("/api/agent/runs", json=sent))
 
     def as_stranger(self, *calls: tuple) -> None:
-        """Each call, made by a second signed-in person, answers 404, or 403 where a permission
-        is needed: another person's records don't exist for them. A call is (method, path) or
-        (method, path, request keyword arguments)."""
-        stranger = self._stranger or self._new_stranger()
-        answers, expected = {}, {}
+        """Each call, made by the stranger, answers 404, or 403 where a permission is needed:
+        another person's records don't exist for them. A call is (method, path) or (method,
+        path, request keyword arguments)."""
+        answers, expected = [], []
         for method, path, *options in calls:
-            response = stranger.request(method, path, **(options[0] if options else {}))
+            response = self.stranger.request(method, path, **(options[0] if options else {}))
             operation = operation_for(method, urlsplit(path).path)
             needs_permission = operation is not None and operation.access not in {PUBLIC, SIGNED_IN}
-            answers[method, path] = response.status_code
-            expected[method, path] = 403 if needs_permission else 404
+            answers.append((method, path, response.status_code))
+            expected.append((method, path, 403 if needs_permission else 404))
         assert answers == expected
 
     def _person(self) -> people.Person:
         person = self.stack.enter_context(people.person(self.owner))
         self.users.append(person.id)
         return person
-
-    def _new_stranger(self) -> TestClient:
-        stranger = self._person()
-        # Not entered: a second lifespan on the app would take /mcp from the first.
-        self._stranger = browser(self.app)
-        self.stack.callback(self._stranger.close)
-        self._stranger.event_hooks["response"].append(self._remember)
-        sign_in(self._stranger, stranger.id)
-        return self._stranger
 
     def _remember(self, response: Any) -> None:
         self.request_ids.append(response.headers["x-request-id"])
@@ -164,14 +170,56 @@ def journey(app: FastAPI, owner_engine: Engine) -> Iterator[Journey]:
         yield Journey(app, owner_engine, stack)
 
 
-@pytest.fixture
-def runs(owner_engine: Engine, settings: Settings) -> Iterator[Settings]:
-    """Chat turns: the agent's tools on a live server, and an agent worker. Request it after
-    `journey`, so the worker stops before the journey's rows go. Yields the runs' settings."""
+@contextmanager
+def worker(owner: Engine, settings: Settings, queues: list[str]) -> Iterator[None]:
+    """A worker on the queues that takes only this journey's jobs: one an earlier test left
+    queued is cancelled first. Afterwards the rows it leaves with no person on them go: its
+    queue samples and the calls that rang a bell. Leave it only once its jobs have ended."""
+    with owner.begin() as connection:
+        connection.execute(
+            text(
+                "update procrastinate_jobs set status = 'cancelled'"
+                " where status = 'todo' and queue_name = any(:queues)"
+            ),
+            {"queues": queues},
+        )
+        sample = connection.execute(select(func.max(queue_samples.c.id))).scalar_one() or 0
+        call = connection.execute(select(func.max(call_log.c.id))).scalar_one() or 0
+    try:
+        with worker_thread(settings, queues):
+            yield
+    finally:
+        with owner.begin() as connection:
+            connection.execute(
+                queue_samples.delete().where(
+                    queue_samples.c.id > sample, queue_samples.c.queue.in_(queues)
+                )
+            )
+            connection.execute(
+                call_log.delete().where(
+                    call_log.c.id > call,
+                    call_log.c.name == "notifications.job_ended",
+                    call_log.c.user_id.is_(None),
+                )
+            )
+
+
+@contextmanager
+def serve_runs(owner: Engine, settings: Settings) -> Iterator[Settings]:
+    """Chat turns with these settings: the agent's tools on a live server, and an agent
+    worker. Yields the runs' settings."""
     server = create_app(settings)  # never a TestClient on it: that would take its /mcp
     try:
         with live_server(server):
-            with agent_worker(owner_engine, server.state.settings):
+            with worker(owner, server.state.settings, ["agent"]):
                 yield server.state.settings
     finally:
         server.state.engine.dispose()
+
+
+@pytest.fixture
+def runs(owner_engine: Engine, settings: Settings) -> Iterator[Settings]:
+    """Chat turns with the test settings. Request it after `journey`, so the worker stops
+    before the journey's rows go."""
+    with serve_runs(owner_engine, settings) as configured:
+        yield configured
