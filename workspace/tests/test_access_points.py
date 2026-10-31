@@ -4,6 +4,8 @@ import json
 import socket
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -237,8 +239,6 @@ def test_editable_copy_skips_dangling_symlink(root, tmp_path):
 
 
 def test_editable_copy_refuses_racing_destination(root, monkeypatch):
-    from pathlib import Path
-
     import craft
 
     craft.path("source.csv").write_bytes(b"original")
@@ -309,9 +309,26 @@ def test_a_conversion_that_makes_no_pdf_fails_and_each_process_has_its_profile(
     assert f"/craft-office-profile-{os.getpid()} " in arguments.read_text()
 
 
-def test_a_conversion_past_its_time_stops_everything_it_started(root, tmp_path, monkeypatch):
-    import time
+def started_child(path):
+    """The pid the stand-in soffice wrote for the child it started."""
+    deadline = time.monotonic() + 5
+    while not (path.exists() and path.read_text().strip()) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return path.read_text().strip()
 
+
+def stopped(pid):
+    """Whether the process is gone, or dead and not yet reaped, within 5 s."""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", pid], capture_output=True, text=True)
+        if not state.stdout.strip() or state.stdout.strip().startswith("Z"):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_a_conversion_past_its_time_stops_everything_it_started(root, tmp_path, monkeypatch):
     import craft
 
     child = tmp_path / "child.pid"
@@ -319,13 +336,24 @@ def test_a_conversion_past_its_time_stops_everything_it_started(root, tmp_path, 
     (root / "memo.docx").write_bytes(b"generated")
     with pytest.raises(subprocess.TimeoutExpired):
         craft.docs.to_pdf("memo.docx", timeout=0.5)
-    pid, deadline = child.read_text().strip(), time.monotonic() + 5
-    while time.monotonic() < deadline:
-        state = subprocess.run(["ps", "-o", "stat=", "-p", pid], capture_output=True, text=True)
-        if not state.stdout.strip() or state.stdout.strip().startswith("Z"):
-            return  # gone, or dead and not yet reaped
-        time.sleep(0.05)
-    pytest.fail("what LibreOffice started outlived its timeout")
+    assert stopped(started_child(child)), "what LibreOffice started outlived its timeout"
+
+
+def test_an_interrupted_conversion_stops_everything_it_started(root, tmp_path, monkeypatch):
+    import craft
+
+    child = tmp_path / "child.pid"
+    fake_soffice(tmp_path, monkeypatch, f'sleep 60 & echo $! > "{child}"; wait')
+    (root / "memo.docx").write_bytes(b"generated")
+
+    def interrupted(process, *args, **kwargs):  # the kernel's interrupt, mid-conversion
+        started_child(child)
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patched, pytest.raises(KeyboardInterrupt):
+        patched.setattr(subprocess.Popen, "communicate", interrupted)
+        craft.docs.to_pdf("memo.docx")
+    assert stopped(started_child(child)), "what LibreOffice started outlived the interrupt"
 
 
 def test_vega_charts_take_inline_data_naming_urls_and_load_none(root):
@@ -357,12 +385,14 @@ answers, lookups, clock = ["127.0.0.2"], [], [1000.0]
 
 def resolve(host, port, *args, **kwargs):  # the cluster's DNS for the API's Service
     lookups.append(host)
+    if answers[0] is None:
+        raise OSError("temporary failure in name resolution")
     return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (answers[0], port))]
 
-def connect():
+def connect(host="127.0.0.1"):
     attempt = socket.socket()
     try:
-        attempt.connect(("127.0.0.1", port))
+        attempt.connect((host, port))
         return "connected"
     except craft_guard.OutboundBlocked:
         return "blocked"
@@ -376,22 +406,30 @@ answers[0] = "127.0.0.1"  # the Service moved
 assert connect() == "blocked" and lookups == ["craft-api"], lookups  # too soon to look again
 clock[0] += craft_guard.REFRESH_SECONDS
 assert connect() == "connected" and lookups == ["craft-api"] * 2, lookups
-assert connect() == "connected" and lookups == ["craft-api"] * 2, lookups
+answers[0] = None  # the lookup fails for a moment
+clock[0] += craft_guard.REFRESH_SECONDS
+assert connect("127.0.0.3") == "blocked" and lookups == ["craft-api"] * 3, lookups
+assert connect() == "connected"  # the API keeps its last address
 print("refreshed")
 """
 
 
-def test_the_guard_looks_up_a_moved_api_again_at_most_every_30_seconds():
+def run_guarded(probe: str) -> str:
+    """Run ``probe`` in a fresh interpreter with the outbound guard on; return its output."""
     result = subprocess.run(
-        [sys.executable, "-c", GUARD_REFRESH_PROBE],
+        [sys.executable, "-c", probe],
         env={"CRAFT_GUARD": "1", "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
         timeout=60,
-        cwd=str(__import__("pathlib").Path(__file__).parents[1] / "src"),
+        cwd=Path(__file__).parents[1] / "src",
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "refreshed"
+    return result.stdout.strip()
+
+
+def test_the_guard_looks_up_a_moved_api_again_at_most_every_30_seconds():
+    assert run_guarded(GUARD_REFRESH_PROBE) == "refreshed"
 
 
 GUARD_PROBE = """
@@ -422,16 +460,7 @@ except craft_guard.OutboundBlocked:
 
 
 def test_guard_blocks_everything_but_allowed_endpoints():
-    result = subprocess.run(
-        [sys.executable, "-c", GUARD_PROBE],
-        env={"CRAFT_GUARD": "1", "PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        timeout=60,
-        cwd=str(__import__("pathlib").Path(__file__).parents[1] / "src"),
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "guarded"
+    assert run_guarded(GUARD_PROBE) == "guarded"
 
 
 def test_guard_is_off_without_the_flag():

@@ -70,9 +70,13 @@ def _address_allowed(address: object) -> bool:
     api = _endpoints.get("api")
     if api is None or port != api.port or monotonic() - api.resolved < REFRESH_SECONDS:
         return False
-    allow("api", api.host, api.port)
-    refreshed = _endpoints.get("api")  # revoked meanwhile: None
-    return refreshed is not None and host in refreshed.addresses
+    # A failed lookup keeps the last answer; either way the next one waits REFRESH_SECONDS.
+    refreshed = _Endpoint(api.host, api.port, _resolve(api.host, api.port) or api.addresses)
+    with _lock:
+        if _endpoints.get("api") is not api:
+            return False  # revoked or replaced meanwhile
+        _endpoints["api"] = refreshed
+    return host in refreshed.addresses
 
 
 def _name_allowed(host: object) -> bool:
@@ -115,23 +119,30 @@ def installed() -> bool:
     return _installed
 
 
-def allow(name: str, host: str, port: int) -> None:
-    """Permit one named endpoint, resolving its host name now."""
-    addresses: set[str] = set()
+def _resolve(host: str, port: int) -> frozenset[str]:
+    """The host itself when it is an address, else what a lookup finds: nothing if it fails."""
     try:
         ipaddress.ip_address(host)
-        addresses.add(host)
+        return frozenset({host})
     except ValueError:
-        _local.bypass = True
-        try:
-            for *_, sockaddr in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
-                addresses.add(str(sockaddr[0]))
-        except OSError:
-            pass
-        finally:
-            _local.bypass = False
+        pass
+    addresses: set[str] = set()
+    _local.bypass = True
+    try:
+        for *_, sockaddr in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+            addresses.add(str(sockaddr[0]))
+    except OSError:
+        pass
+    finally:
+        _local.bypass = False
+    return frozenset(addresses)
+
+
+def allow(name: str, host: str, port: int) -> None:
+    """Permit one named endpoint, resolving its host name now."""
+    endpoint = _Endpoint(host, port, _resolve(host, port))
     with _lock:
-        _endpoints[name] = _Endpoint(host, port, frozenset(addresses))
+        _endpoints[name] = endpoint
 
 
 def revoke(name: str) -> None:

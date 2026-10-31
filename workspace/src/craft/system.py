@@ -11,7 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any
 
 _TOOLS: dict[str, dict[str, Any]] = {
@@ -131,17 +131,22 @@ def _access_status() -> str:
 
 
 def _launch(command: list[str], timeout: float) -> subprocess.CompletedProcess:
-    """Run in a process group of its own, so a timeout also stops what the tool started, such
-    as LibreOffice's soffice.bin, which would otherwise keep its profile locked."""
+    """Run in a process group of its own, so stopping the tool also stops what it started, such
+    as LibreOffice's soffice.bin, which would otherwise keep its profile locked.
+
+    Its own group misses the kernel's interrupt (which Jupyter also sends before a restart or a
+    shutdown), so any early exit, a timeout or an interrupt, kills the group here.
+    """
     with _guard_paused():
         with subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True
         ) as process:
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.communicate()
+            except BaseException:
+                with suppress(ProcessLookupError):  # the whole group may be gone already
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()  # not communicate(): one that left the group may hold the pipes
                 raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
