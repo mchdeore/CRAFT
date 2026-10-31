@@ -7,7 +7,7 @@ from dataclasses import replace
 from time import perf_counter
 from types import SimpleNamespace
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -28,6 +28,38 @@ from app.tests.support.workspace import HUB, KERNEL, discover, generated_hub, pr
 
 def operation_context(caller):
     return CallContext(uuid4(), uuid4(), None, caller, perf_counter())
+
+
+def test_factory_selects_trusted_owner_and_hides_credentials():
+    owner_a = UUID("00000000-0000-4000-8000-000000000001")
+    owner_b = UUID("00000000-0000-4000-8000-000000000002")
+    endpoints = {
+        str(owner_a): WorkspaceEndpoint(
+            url="http://127.0.0.1:8101/mcp",
+            headers={"Authorization": "Bearer synthetic-a"},
+            tools=("read_file", "execute_code"),
+        ),
+        str(owner_b): WorkspaceEndpoint(
+            url="http://127.0.0.1:8102/mcp",
+            headers={"Authorization": "Bearer synthetic-b"},
+            tools=("read_file",),
+        ),
+    }
+    factory = WorkspaceToolsets(endpoints)
+    with pytest.raises(PermissionError):
+        factory.for_caller(Caller(user_id=UUID("00000000-0000-4000-8000-000000000003")))
+    selected = factory.for_caller(Caller(user_id=owner_a))
+    other = factory.for_caller(Caller(user_id=owner_b))
+    try:
+        assert selected.url == "http://127.0.0.1:8101/mcp"
+        assert other.url == "http://127.0.0.1:8102/mcp"
+        provider = selected._header_provider
+        assert provider is not None
+        assert provider({"url": other.url}) == {"Authorization": "Bearer synthetic-a"}
+        assert "synthetic-a" not in repr(endpoints[str(owner_a)])
+    finally:
+        asyncio.run(selected.close())
+        asyncio.run(other.close())
 
 
 def test_external_allowlist_keeps_correlation_and_private_trace():

@@ -3,7 +3,11 @@
 # pod's loopback only: CRAFT reaches it through JupyterLab's proxy, behind the Hub's sign-in. It
 # reads notebooks with the server's own Hub token, which JupyterLab writes to /run/craft-control.
 FROM python:3.12.13-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
-RUN pip install --no-cache-dir jupyter-mcp-server==2.2.4 \
+# jupyter-mcp-server (mcp-requirements.in) and everything it needs, pinned with hashes; the
+# command at the top of mcp-requirements.txt regenerates it.
+COPY mcp-requirements.txt /tmp/mcp-requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/mcp-requirements.txt \
+    && rm /tmp/mcp-requirements.txt \
     && useradd --uid 1000 --create-home control
 USER control
 EXPOSE 4040

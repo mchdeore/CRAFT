@@ -3,7 +3,6 @@
 import asyncio
 from types import SimpleNamespace
 from typing import Any
-from uuid import UUID
 
 import pytest
 from mcp.types import CallToolResult, ListToolsResult, TextContent
@@ -69,41 +68,6 @@ def test_owned_path_rejects_escape_and_symlink(tmp_path):
     for path in ["../outside/a.py", "/etc/passwd", "link/a.py", "dangling", "a/../b", ""]:
         with pytest.raises(ValueError):
             owned_path(path, root=root)
-
-
-def test_factory_selects_trusted_owner_and_hides_credentials():
-    from app.agent.workspace import WorkspaceEndpoint, WorkspaceToolsets
-    from app.infrastructure.access import Caller
-
-    owner_a = UUID("00000000-0000-4000-8000-000000000001")
-    owner_b = UUID("00000000-0000-4000-8000-000000000002")
-    endpoints = {
-        str(owner_a): WorkspaceEndpoint(
-            url="http://127.0.0.1:8101/mcp",
-            headers={"Authorization": "Bearer synthetic-a"},
-            tools=("read_file", "execute_code"),
-        ),
-        str(owner_b): WorkspaceEndpoint(
-            url="http://127.0.0.1:8102/mcp",
-            headers={"Authorization": "Bearer synthetic-b"},
-            tools=("read_file",),
-        ),
-    }
-    factory = WorkspaceToolsets(endpoints)
-    with pytest.raises(PermissionError):
-        factory.for_caller(Caller(user_id=UUID("00000000-0000-4000-8000-000000000003")))
-    selected = factory.for_caller(Caller(user_id=owner_a))
-    other = factory.for_caller(Caller(user_id=owner_b))
-    try:
-        assert selected.url == "http://127.0.0.1:8101/mcp"
-        assert other.url == "http://127.0.0.1:8102/mcp"
-        provider = selected._header_provider
-        assert provider is not None
-        assert provider({"url": other.url}) == {"Authorization": "Bearer synthetic-a"}
-        assert "synthetic-a" not in repr(endpoints[str(owner_a)])
-    finally:
-        asyncio.run(selected.close())
-        asyncio.run(other.close())
 
 
 def test_official_mcp_connection_forwards_bearer_outside_arguments(monkeypatch):
