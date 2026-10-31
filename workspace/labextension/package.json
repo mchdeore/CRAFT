@@ -7,7 +7,7 @@
   "main": "lib/index.js",
   "files": ["lib/*.js"],
   "scripts": {
-    "build": "tsc && jupyter labextension build ."
+    "build": "tsc && jupyter-builder build ."
   },
   "dependencies": {
     "@jupyterlab/application": "4.6.4",
@@ -16,7 +16,8 @@
     "@jupyterlab/filebrowser": "4.6.4"
   },
   "devDependencies": {
-    "@jupyterlab/builder": "4.5.11",
+    "@jupyter/builder": "1.2.4",
+    "@jupyterlab/core-meta": "4.6.4",
     "typescript": "5.9.3"
   },
   "jupyterlab": {

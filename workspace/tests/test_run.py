@@ -16,10 +16,10 @@ import pytest
 
 @pytest.fixture
 def kernel(monkeypatch):
-    """nbformat and nbclient live only in the workspace image; these stand in for the names the
-    run step uses, on a fake clock. A cell's source is how many seconds it takes, "raise" or
-    "die"; anything else breaks the client itself. As in nbclient 0.11.0, a timeout and a dead
-    kernel aren't CellExecutionErrors."""
+    """Stands in for the nbformat and nbclient names the run step uses, on a fake clock, so each
+    cell's outcome is scripted: a cell's source is how many seconds it takes, "raise" or "die";
+    anything else breaks the client itself. As in nbclient 0.11.0, a timeout and a dead kernel
+    aren't CellExecutionErrors."""
 
     class CellExecutionError(Exception):
         pass

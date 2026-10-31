@@ -146,7 +146,6 @@ def root(monkeypatch, tmp_path):
 
 
 def test_files_read_and_save_by_extension(root):
-    pytest.importorskip("duckdb", reason="needs the analysis extra")
     import craft
     import pandas as pd
 
@@ -170,8 +169,6 @@ def test_files_read_and_save_by_extension(root):
 
 
 def test_analysis_helpers_shape_tables_and_save_charts(root):
-    pytest.importorskip("matplotlib", reason="needs the analysis extra")
-    pytest.importorskip("pandas", reason="needs the analysis extra")
     import matplotlib  # pyright: ignore[reportMissingImports]
 
     matplotlib.use("Agg")
@@ -197,7 +194,6 @@ def test_analysis_helpers_shape_tables_and_save_charts(root):
 
 
 def test_docs_editable_copy_makes_safe_derivatives(root):
-    pytest.importorskip("pandas", reason="needs the analysis extra")
     import craft
     import pandas as pd
 
@@ -261,8 +257,6 @@ def test_editable_copy_refuses_racing_destination(root, monkeypatch):
 
 
 def test_word_and_slides_round_trip(root):
-    for module in ("matplotlib", "docx", "pptx"):
-        pytest.importorskip(module, reason="needs the analysis extra")
     import matplotlib  # pyright: ignore[reportMissingImports]
 
     matplotlib.use("Agg")

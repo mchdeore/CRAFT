@@ -6,7 +6,7 @@ import runpy
 import tempfile
 import unittest
 from contextlib import redirect_stderr
-from importlib import import_module, util
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -55,8 +55,6 @@ class JupyterConfigTest(unittest.TestCase):
                 self.assertFalse(config.FileContentsManager.allow_hidden)
 
     def test_serverapp_accepts_config_and_suppresses_info_logging(self):
-        if any(util.find_spec(name) is None for name in ("jupyter_server", "traitlets")):
-            self.skipTest("Optional JupyterLab dependencies are absent; run in the lab environment")
         ServerApp = import_module("jupyter_server.serverapp").ServerApp
         Config = import_module("traitlets.config").Config
 

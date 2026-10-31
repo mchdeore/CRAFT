@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks for CRAFT. There is no CI; run these yourself.
-#   scripts/check        quick: lint, format, types, fast tests (+ contract types when the contract changed)
+#   scripts/check        quick: lint, format, types, fast tests (+ the workspace's when workspace/ changed, contract types when the contract did)
 #   scripts/check full   milestone: lock, migrations, the app and workspace images, every test except live and cluster, contract types
+# The workspace package's tests run in its own environment, with the image's pins (workspace/pyproject.toml).
 # Tests use a disposable PostgreSQL container (craft-check-db) on port 55481 and the passwords in .env.
 # Each worktree tests in a database of its own there, so branches whose migrations differ don't
 # collide; the main checkout keeps craft_test. CHECK_DB_PORT=<port> uses craft_test in the database
@@ -12,7 +13,12 @@ cd "$(dirname "$0")/.."
 mode=${1:-quick}
 [ "$mode" = quick ] || [ "$mode" = full ] || { echo "usage: scripts/check [full]" >&2; exit 2; }
 [ -f .env ] || { echo "Missing .env (in a worktree: ln -s <main checkout>/.env .env)" >&2; exit 1; }
-export DOCKER_CONTEXT=${DOCKER_CONTEXT:-colima} UV_NO_PROGRESS=1
+# Pyright is locked, so its wrapper needn't ask PyPI for a newer one: the checks stay offline.
+export UV_NO_PROGRESS=1 PYRIGHT_PYTHON_IGNORE_WARNINGS=1
+# The local cluster's Docker engine (Colima's craft-k8s profile) where it exists; else Docker's own.
+if [ -z "${DOCKER_CONTEXT:-}" ] && docker context inspect colima-craft-k8s >/dev/null 2>&1; then
+  export DOCKER_CONTEXT=colima-craft-k8s
+fi
 export CRAFT_DATABASE_HOST=127.0.0.1 CRAFT_DATABASE_PORT=${CHECK_DB_PORT:-55481}
 if [ -f .git ] && [ -z "${CHECK_DB_PORT:-}" ]; then # a linked worktree, where .git is a file
   export CRAFT_TEST_DATABASE=craft_test_$(printf %s "$PWD" | git hash-object --stdin | cut -c1-8)
@@ -101,9 +107,14 @@ alter default privileges for role craft_owner in schema public grant usage on se
 SQL
 }
 
-contract_changed() {
-  git fetch -q origin main 2>/dev/null || true
-  { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; } 2>/dev/null | grep -q '^app/contract/'
+changed() { # this branch changes paths matching $1, committed, uncommitted or new, against the last fetched origin/main
+  # grep reads every name: -q could stop early and fail git with SIGPIPE under pipefail.
+  { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } \
+    2>/dev/null | grep "$1" >/dev/null
+}
+
+workspace_tests() { # in the workspace package's own environment, with the image's pins
+  uv run --project workspace --locked --extra all pytest workspace/tests --tb=short "$@"
 }
 
 contract_types() { # the partner frontend compiles against app/contract
@@ -121,7 +132,10 @@ echo "== database"
 start_db || { echo "== FAILED: database (nothing else can run)"; exit 1; }
 if [ "$mode" = quick ]; then
   step "pytest (quick)" uv run pytest -x --tb=short
-  if contract_changed; then
+  if changed '^workspace/'; then
+    step "workspace tests" workspace_tests -x
+  fi
+  if changed '^app/contract/'; then
     step "contract types" contract_types
   fi
 else
@@ -130,6 +144,7 @@ else
   step "app image" docker build -q -t craft-app:check -f app/Dockerfile .
   step "workspace image" docker build -q -t craft-user-workspace:local-pilot workspace
   step "pytest (full)" uv run pytest -m 'not live and not cluster' --tb=short
+  step "workspace tests" workspace_tests -m ''
   step "contract types" contract_types
 fi
 

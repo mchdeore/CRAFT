@@ -6,13 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
     && pip install --no-cache-dir jupyterlab==4.6.4
 WORKDIR /build/labextension
 COPY labextension/ ./
-RUN npm install --no-audit --no-fund --ignore-scripts && npm run build
+RUN npm ci --no-audit --no-fund --ignore-scripts && npm run build
 
 FROM python:3.12.13-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
 COPY --from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 /uv /bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/notebook \
     UV_PYTHON_DOWNLOADS=never \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
 
 # LibreOffice renders Office previews and page images; the fonts are metric-compatible
 # stand-ins (Carlito for Calibri, Caladea for Cambria, Liberation for Arial, Times, Courier).
@@ -29,14 +30,16 @@ RUN groupadd --gid 1000 workspace \
 
 WORKDIR /opt/craft-user-workspace
 COPY pyproject.toml uv.lock ./
-COPY src ./src
-COPY --from=preview /build/src/craft_preview/labextension ./src/craft_preview/labextension
 # The external MCP2 control service runs outside this user image.
-# Install locked wheels, including Setuptools, before building the local package.
-RUN uv sync --locked --extra all --no-dev --group build --no-editable \
-        --no-install-project --no-build --no-cache \
-    && uv sync --locked --extra all --no-dev --group build --no-editable \
-        --no-build-isolation-package craft-user-workspace --no-cache
+# The locked wheels, Setuptools included, are their own layer, so an edit under src/ reuses it;
+# then the local package is built with that Setuptools.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --extra all --no-dev --group build --no-editable \
+        --no-install-project --no-build
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --extra all --no-dev --group build --no-editable \
+        --no-build-isolation-package craft-user-workspace
 # Load the outbound guard at interpreter start; it installs only where CRAFT_GUARD=1,
 # which the kernel specification sets. The Jupyter server runs without it.
 RUN /opt/notebook/bin/python -c "import json, pathlib, site; \
@@ -47,8 +50,8 @@ data = json.loads(spec.read_text()); data['env'] = {**data.get('env', {}), 'CRAF
 spec.write_text(json.dumps(data, indent=1) + '\n')"
 COPY skills ./skills
 COPY jupyter_server_config.py ./jupyter_server_config.py
-RUN mkdir -p /opt/notebook/share/jupyter/labextensions \
-    && cp -R src/craft_preview/labextension /opt/notebook/share/jupyter/labextensions/craft-preview
+COPY --from=preview /build/src/craft_preview/labextension \
+    /opt/notebook/share/jupyter/labextensions/craft-preview
 
 ENV PATH=/opt/notebook/bin:$PATH \
     USER_ROOT=/workspace \
