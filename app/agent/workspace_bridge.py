@@ -1,7 +1,8 @@
 """Private per-run MCP transport; the root controller supplies serving and kernels.
 
-Serve this HTTP-only ASGI app on a root-owned 127.0.0.1 ephemeral socket inside
-``run()``. This component opens no socket and supplies no standalone login.
+Serve this HTTP-only ASGI app inside ``run()`` on an ephemeral socket the root controller
+owns: the API pod's own address on the cluster, 127.0.0.1 off it. This component opens no
+socket and supplies no standalone login.
 """
 
 import asyncio

@@ -84,12 +84,6 @@ class JupyterConfigTest(unittest.TestCase):
                 self.assertNotIn("generated-info", output.getvalue())
                 self.assertIn("generated-warning", output.getvalue())
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-class HubConfigTest(unittest.TestCase):
     def test_without_the_hubs_token_the_config_refuses_even_a_jupyter_token(self):
         with tempfile.TemporaryDirectory() as root:
             environment = {
@@ -103,7 +97,7 @@ class HubConfigTest(unittest.TestCase):
                         init_globals={"get_config": SimpleNamespace},
                     )
 
-    def test_under_the_hub_no_token_is_set_and_the_control_server_gets_its_own(self):
+    def test_no_token_is_set_and_the_control_server_gets_the_hub_token(self):
         settings = SimpleNamespace(
             ServerApp=SimpleNamespace(),
             IdentityProvider=SimpleNamespace(),
