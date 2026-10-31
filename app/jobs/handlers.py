@@ -106,9 +106,9 @@ def prune_progress(session, days: int) -> None:
     service.prune_progress(session, days)
 
 
-def queue_counts(sessions) -> dict:
-    """Counts and last-hour percentiles for /health/queue."""
-    return service.health(sessions)
+def prune_history(session, job_days: int, sample_days: int) -> None:
+    """Delete jobs that ended `job_days` ago, with their errors, and older queue samples."""
+    service.prune_history(session, job_days, sample_days)
 
 
 def queue_report(sessions, since_seconds: float) -> dict:

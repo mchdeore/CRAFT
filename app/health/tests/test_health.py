@@ -58,7 +58,7 @@ def test_health_ready_checks_db_and_head(client: TestClient) -> None:
 def test_health_probes_add_no_call_log_rows(
     client: TestClient, owner_engine: Engine, last_call_id: int
 ) -> None:
-    for path in ["/health/live", "/health/ready", "/health/queue"]:
+    for path in ["/health/live", "/health/ready"]:
         assert client.get(path).status_code == 200
     with owner_engine.connect() as connection:
         added = connection.execute(
@@ -67,6 +67,11 @@ def test_health_probes_add_no_call_log_rows(
             )
         ).all()
     assert added == []
+
+
+def test_queue_health_is_gone(client: TestClient) -> None:
+    """Queue numbers are for `craft queues report`, not anonymous callers."""
+    assert client.get("/health/queue").status_code == 404
 
 
 def test_health_ready_503_when_db_down(settings: Settings) -> None:

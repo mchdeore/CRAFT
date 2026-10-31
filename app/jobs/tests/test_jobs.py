@@ -106,7 +106,6 @@ def test_running_jobs_stop_through_the_api(settings, jobs, cube_source):
             assert stopping.status_code == 200
             assert stopping.json()["status"] in {"stopping", "stopped"}
             assert jobs.wait(job, {"stopped", "failed", "finished"}).state == "stopped"
-        assert http.get("/health/queue").json()["queues"][0]["queue"] == "agent"
 
 
 def test_a_long_bulk_job_never_delays_the_agent_queue(settings, jobs):
