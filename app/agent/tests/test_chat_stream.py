@@ -12,10 +12,10 @@ import msgspec
 import pytest
 from agent_framework import ChatResponse, ChatResponseUpdate, Content, Message, ResponseStream
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app import create_app
-from app.agent import runtime, service
+from app.agent import jobs, runtime, service
 from app.agent.handlers import (
     RunEventsRef,
     RunRef,
@@ -28,8 +28,8 @@ from app.infrastructure import queue
 from app.infrastructure.database import metadata as m
 from app.infrastructure.database.engine import make_engine
 from app.infrastructure.errors import Conflict, NotFound, RateLimited
+from app.tests.support.chat import ask, collect, request, row, wait_for
 from app.tests.support.chat import chat as chat
-from app.tests.support.chat import collect, request, row, wait_for
 from app.tests.support.contract import validate_chat_events
 from app.tests.support.cube import cube_source as cube_source
 from app.tests.support.model import ScriptedChatClient
@@ -537,3 +537,116 @@ def test_http_disconnect_keeps_the_run_going(chat):
         assert bool(stored)
 
     asyncio.run(execute())
+
+
+def trickling(answers):
+    """ScriptedChatClient.reply streaming each answer five characters at a time, as a model's
+    deltas arrive; it records each answer whole."""
+    original = ScriptedChatClient.reply
+
+    def reply(self, messages):
+        response = original(self, messages)
+        for message in response.messages:
+            text = "".join(c.text or "" for c in message.contents if c.type == "text")
+            if self.role == "main" and text:
+                answers.append(text)
+                message.contents = [
+                    Content.from_text(text[at : at + 5]) for at in range(0, len(text), 5)
+                ]
+        return response
+
+    return reply
+
+
+def replay(chat, run):
+    """The run's events from the first, following it until it ends."""
+
+    async def execute():
+        events = run_events(chat["caller"], RunEventsRef(run=run, after=0))
+        return [msgspec.to_builtins(event) async for event in events]
+
+    return asyncio.run(execute())
+
+
+def test_text_deltas_are_written_merged(chat, monkeypatch):
+    """Five-character deltas are written as rows of at least DELTA_CHARACTERS (16 here); the
+    stream, a re-attach and get_answer each carry the whole answer."""
+    answers = []
+    monkeypatch.setattr(ScriptedChatClient, "reply", trickling(answers))
+    monkeypatch.setattr(jobs, "DELTA_CHARACTERS", 16)
+    monkeypatch.setattr(jobs, "DELTA_SECONDS", 60)  # no row waits on the clock
+    data = request(chat)
+    streamed = collect(chat["caller"], data)
+    answer = answers[-1]
+    assert len(answer) > 40
+    for events in (streamed, replay(chat, data.run_id)):
+        rows = [event["delta"] for event in events if event["type"] == "TEXT_MESSAGE_CONTENT"]
+        assert "".join(rows) == answer
+        assert all(16 <= len(delta) < 21 for delta in rows[:-1]) and len(rows) < len(answer) / 10
+    assert ask(chat["caller"], "Peak power").answer == answers[-1]
+
+
+def test_a_stop_while_merged_text_is_written_writes_it_once(chat, monkeypatch):
+    """A Stop lands while a merged delta's write is in flight: the row is not written again."""
+    monkeypatch.setattr(ScriptedChatClient, "reply", trickling([]))
+    original = service.append_event
+    writing, release = threading.Event(), threading.Event()
+
+    def append_event(sessions, run, segment, event):
+        original(sessions, run, segment, event)
+        if event["type"] == "TEXT_MESSAGE_CONTENT" and not writing.is_set():
+            writing.set()
+            release.wait(10)
+
+    monkeypatch.setattr(service, "append_event", append_event)
+    data = request(chat)
+
+    async def leave():
+        iterator = run_agent(chat["caller"], data)
+        assert (await anext(iterator)).type == "RUN_STARTED"
+        await iterator.aclose()
+
+    try:
+        asyncio.run(leave())
+        assert writing.wait(10)
+        cancel_run(chat["caller"], RunRef(run=data.run_id))
+        wait_for(lambda: row(chat, data.run_id)["status"] == "cancelled")
+    finally:
+        release.set()
+    kinds = [event["type"] for event in replay(chat, data.run_id)]
+    assert kinds.count("TEXT_MESSAGE_CONTENT") == 1 and kinds[-1] == "RUN_ERROR"
+
+
+def test_a_run_answers_its_newest_user_message_and_stores_only_it(chat):
+    """An empty newest user message is refused (400) before anything is queued; a queued input
+    keeps that one message."""
+    inputs = m.metadata.tables["agent_run_inputs"]
+    refused = request(chat)
+    refused.messages.append({"id": str(uuid4()), "role": "user", "content": "  "})
+    with TestClient(create_app(chat["settings"]), base_url="https://testserver") as http:
+        assert chat["sign_in"](http).status_code == 200
+        response = http.post(
+            "/api/agent/runs",
+            json=msgspec.to_builtins(refused),
+            headers={"Origin": "https://testserver"},
+        )
+    assert response.status_code == 400
+    data = request(chat)
+    data.messages[:0] = [
+        {"id": str(uuid4()), "role": "user", "content": "An earlier question"},
+        {"id": str(uuid4()), "role": "assistant", "content": "An earlier answer"},
+    ]
+    assert collect(chat["caller"], data)[-1]["type"] == "RUN_FINISHED"
+    runs = [refused.run_id, data.run_id]
+    with chat["owner"].connect() as connection:
+        stored = connection.execute(
+            select(inputs.c.run_id, inputs.c.input).where(inputs.c.run_id.in_(runs))
+        ).all()
+        queued = connection.execute(
+            text("select count(*) from procrastinate_jobs where args::text like :run"),
+            {"run": f"%{refused.run_id}%"},
+        ).scalar_one()
+    assert [(run, value["messages"]) for run, value in stored] == [
+        (data.run_id, [data.messages[-1]])
+    ]
+    assert queued == 0

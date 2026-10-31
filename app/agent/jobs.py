@@ -1,6 +1,7 @@
 """The agent_run job: the agent worker runs one segment of a chat turn and writes its events."""
 
 import asyncio
+import time
 from contextlib import nullcontext
 from dataclasses import replace
 from uuid import UUID
@@ -16,6 +17,9 @@ from app.infrastructure.operations.context import current_call
 from app.infrastructure.shapes import Shape
 
 TERMINAL = {"RUN_FINISHED", "RUN_ERROR", "CRAFT_ERROR"}
+# Consecutive text deltas of one message are written as one event once they reach this many
+# characters, or when a later delta finds the first older than this; any other event writes them.
+DELTA_CHARACTERS, DELTA_SECONDS = 1024, 0.1
 
 
 class AgentRunJob(Shape):
@@ -64,11 +68,36 @@ async def agent_run(caller: Caller, request: AgentRunJob) -> None:
         return
     data = msgspec.convert(found.input, RunAgentInput)
     ended = False
+    pending, pending_since = None, 0.0  # text deltas merged and not yet written
+
+    async def append(event: dict) -> None:
+        await asyncio.to_thread(service.append_event, sessions, run, segment, event)
+
+    async def flush() -> None:
+        # Taken before the await: a write cancelled mid-way (a Stop) is not written again.
+        nonlocal pending
+        merged, pending = pending, None
+        if merged is not None:
+            await append(merged)
 
     async def write(event: dict) -> None:
-        nonlocal ended
-        await asyncio.to_thread(service.append_event, sessions, run, segment, event)
-        ended = event["type"] in TERMINAL
+        """Each written event is one transaction, so a message's text deltas are merged."""
+        nonlocal ended, pending, pending_since
+        delta = event["type"] == "TEXT_MESSAGE_CONTENT"
+        if delta and pending is not None and pending["messageId"] == event["messageId"]:
+            pending = pending | {"delta": pending["delta"] + event["delta"]}
+        else:
+            await flush()
+            if not delta:
+                await append(event)
+                ended = event["type"] in TERMINAL
+                return
+            pending, pending_since = event, time.monotonic()
+        if (
+            len(pending["delta"]) >= DELTA_CHARACTERS
+            or time.monotonic() - pending_since > DELTA_SECONDS
+        ):
+            await flush()
 
     context.caller = replace(caller, conversation_id=data.thread_id, run_id=run)
     try:

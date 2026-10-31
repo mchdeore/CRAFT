@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.agent import storage
 from app.infrastructure.database.unit_of_work import unit_of_work
-from app.infrastructure.errors import Conflict, NotFound
+from app.infrastructure.errors import Conflict, InvalidInput, NotFound
 
 # A run credential outlives any run; the run revokes it when it ends.
 TOKEN_SECONDS = storage.RUN_SECONDS + 60
@@ -183,20 +183,31 @@ def principal(caller, digest):
 RUN_LOCK = "agent-run:"
 
 
+def newest_message(request) -> dict | None:
+    """The newest user message, the one a run answers; None when it has no text."""
+    newest = next((m for m in reversed(request.messages) if m.get("role") == "user"), None)
+    content = newest.get("content") if newest is not None else None
+    return newest if isinstance(content, str) and content.strip() else None
+
+
 def queue_run(caller, request, read_only: bool) -> tuple[int, int]:
     """Record the run's next input and queue it on the agent worker; returns its segment and
-    job."""
+    job. The input keeps only the newest user message, and a resume none."""
     import msgspec
 
     from app.agent.jobs import AgentRunJob, agent_run
     from app.infrastructure.operations.jobs import enqueue
     from app.jobs.handlers import active_job
 
+    newest = newest_message(request)
+    if request.resume is None and newest is None:
+        raise InvalidInput()
+    stored = msgspec.structs.replace(request, messages=[newest] if request.resume is None else [])
     with unit_of_work(scope(caller)) as session:
         if active_job(session, RUN_LOCK + str(request.run_id)) is not None:
             raise Conflict()
         segment = storage.add_segment(
-            session, caller.user_id, request.run_id, request.thread_id, msgspec.to_builtins(request)
+            session, caller.user_id, request.run_id, request.thread_id, msgspec.to_builtins(stored)
         )
         job = AgentRunJob(run=request.run_id, segment=segment, read_only=read_only)
         return segment, enqueue(session, caller, agent_run, job)
