@@ -68,6 +68,9 @@ singleuser:
     USER_ROOT: /workspace
     CRAFT_API_URL: http://craft-api:8000
     CRAFT_UI_ORIGIN: http://localhost:5173
+    # JupyterLab's settings and layout on the person's volume, so they survive a restart.
+    JUPYTERLAB_SETTINGS_DIR: /workspace/.jupyterlab/user-settings
+    JUPYTERLAB_WORKSPACES_DIR: /workspace/.jupyterlab/workspaces
   # A volume per person (H9) from k3s's built-in storage, kept when the pod stops.
   storage:
     type: dynamic

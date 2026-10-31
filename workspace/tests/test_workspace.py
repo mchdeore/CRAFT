@@ -384,6 +384,30 @@ def test_a_failed_save_keeps_the_previous_file_and_leaves_nothing_behind(tmp_pat
     assert [p.name for p in (tmp_path / "out").iterdir()] == ["data.json"]
 
 
+def test_a_preview_header_carries_any_file_name():
+    from urllib.parse import unquote
+
+    import craft_preview
+
+    header = craft_preview.disposition('reports/数据 "v2".docx')
+    header.encode("latin-1")  # Tornado sends headers as Latin-1
+    fallback, exact = header.split("; filename*=UTF-8''")
+    assert fallback == 'inline; filename="__ _v2_.pdf"'
+    assert unquote(exact) == '数据 "v2".pdf'
+
+
+def test_lab_settings_and_layout_live_on_the_persons_volume():
+    from pathlib import Path
+
+    import yaml
+
+    hub = Path(__file__).parents[2] / "deploy/jupyterhub/values.yaml"
+    singleuser = yaml.safe_load(hub.read_text())["singleuser"]
+    volume, env = singleuser["storage"]["homeMountPath"], singleuser["extraEnv"]
+    for name in ("JUPYTERLAB_SETTINGS_DIR", "JUPYTERLAB_WORKSPACES_DIR"):
+        assert env[name].startswith(volume + "/"), name
+
+
 def test_the_preview_refuses_an_oversized_source_without_converting(tmp_path, monkeypatch):
     import craft_preview
     from craft import _root

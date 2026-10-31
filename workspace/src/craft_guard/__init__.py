@@ -12,6 +12,7 @@ import os
 import socket
 import sys
 import threading
+from time import monotonic
 
 _BLOCKED_PROCESS_EVENTS = frozenset(
     {
@@ -30,6 +31,10 @@ _SOCKET_EVENTS = frozenset(
 )
 _NAME_EVENTS = frozenset({"socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyname_ex"})
 
+# A refused connection on the API's port looks the API host up again, at most this often: the
+# kernel outlives the address it resolved at start (the API's Service can move).
+REFRESH_SECONDS = 30
+
 MESSAGE = (
     "Outbound access is blocked in the CRAFT workspace. "
     "Use the craft access points, such as craft.search or craft.cube.find."
@@ -41,10 +46,11 @@ _installed = False
 
 
 class _Endpoint:
-    __slots__ = ("addresses", "host", "port")
+    __slots__ = ("addresses", "host", "port", "resolved")
 
     def __init__(self, host: str, port: int, addresses: frozenset[str]):
         self.host, self.port, self.addresses = host, port, addresses
+        self.resolved = monotonic()
 
 
 # Named endpoints: "api" from CRAFT_API_URL and "bridge" during a bound agent run.
@@ -59,7 +65,18 @@ def _address_allowed(address: object) -> bool:
     if not isinstance(address, tuple) or len(address) < 2:
         return False  # Unix sockets and unknown address forms
     host, port = str(address[0]), address[1]
-    return any(port == e.port and host in e.addresses for e in list(_endpoints.values()))
+    if any(port == e.port and host in e.addresses for e in list(_endpoints.values())):
+        return True
+    api = _endpoints.get("api")
+    if api is None or port != api.port or monotonic() - api.resolved < REFRESH_SECONDS:
+        return False
+    # A failed lookup keeps the last answer; either way the next one waits REFRESH_SECONDS.
+    refreshed = _Endpoint(api.host, api.port, _resolve(api.host, api.port) or api.addresses)
+    with _lock:
+        if _endpoints.get("api") is not api:
+            return False  # revoked or replaced meanwhile
+        _endpoints["api"] = refreshed
+    return host in refreshed.addresses
 
 
 def _name_allowed(host: object) -> bool:
@@ -102,23 +119,30 @@ def installed() -> bool:
     return _installed
 
 
-def allow(name: str, host: str, port: int) -> None:
-    """Permit one named endpoint, resolving its host name once."""
-    addresses: set[str] = set()
+def _resolve(host: str, port: int) -> frozenset[str]:
+    """The host itself when it is an address, else what a lookup finds: nothing if it fails."""
     try:
         ipaddress.ip_address(host)
-        addresses.add(host)
+        return frozenset({host})
     except ValueError:
-        _local.bypass = True
-        try:
-            for *_, sockaddr in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
-                addresses.add(str(sockaddr[0]))
-        except OSError:
-            pass
-        finally:
-            _local.bypass = False
+        pass
+    addresses: set[str] = set()
+    _local.bypass = True
+    try:
+        for *_, sockaddr in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+            addresses.add(str(sockaddr[0]))
+    except OSError:
+        pass
+    finally:
+        _local.bypass = False
+    return frozenset(addresses)
+
+
+def allow(name: str, host: str, port: int) -> None:
+    """Permit one named endpoint, resolving its host name now."""
+    endpoint = _Endpoint(host, port, _resolve(host, port))
     with _lock:
-        _endpoints[name] = _Endpoint(host, port, frozenset(addresses))
+        _endpoints[name] = endpoint
 
 
 def revoke(name: str) -> None:

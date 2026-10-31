@@ -437,14 +437,16 @@ def to_pdf(name: str | Path, *, timeout: float = 120) -> bytes:
 
     Without LibreOffice this raises ``craft.MissingSoftware`` saying what to install.
     """
+    import os
     import tempfile
 
     source = files.path(name)
     if source.suffix.lower() not in {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}:
         raise ValueError("Pages come from .docx, .xlsx or .pptx files")
     with tempfile.TemporaryDirectory() as out:
-        # A persistent profile keeps later conversions warm.
-        profile = Path(tempfile.gettempdir(), "craft-office-profile").as_uri()
+        # A persistent profile keeps later conversions warm. LibreOffice locks its profile, so
+        # each process (the server's previews, each kernel) keeps its own.
+        profile = Path(tempfile.gettempdir(), f"craft-office-profile-{os.getpid()}").as_uri()
         system.run(
             "soffice",
             f"-env:UserInstallation={profile}",
@@ -457,7 +459,10 @@ def to_pdf(name: str | Path, *, timeout: float = 120) -> bytes:
             str(source),
             timeout=timeout,
         )
-        return Path(out, source.stem + ".pdf").read_bytes()
+        pdf = Path(out, source.stem + ".pdf")
+        if not pdf.is_file():  # LibreOffice can exit 0 without converting
+            raise RuntimeError(f"LibreOffice made no PDF of {source.name}")
+        return pdf.read_bytes()
 
 
 def pages(name: str | Path, *, first: int = 1, last: int | None = None, dpi: int = 80) -> list:
