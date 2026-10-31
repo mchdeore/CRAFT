@@ -1,4 +1,4 @@
-"""One locator-to-quote rule serves cached and freshly converted source evidence."""
+"""One locator-to-quote rule finds a citation's quote in its stored block."""
 
 import re
 

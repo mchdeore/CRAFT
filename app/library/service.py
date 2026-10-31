@@ -572,7 +572,7 @@ def checked_citation(caller: Caller, handle):
     """Check a citation against its stored version without converting the original: `changed`
     when the original's SHA-256 is no longer the stored version's, or when the stored block no
     longer holds the quote. Returns the status, the live source, the stored block and the quote
-    it holds (None when it doesn't)."""
+    it holds (None when the source is withdrawn or the block doesn't hold the quote)."""
     import hashlib
 
     from app.library.citation import quote

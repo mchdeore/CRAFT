@@ -336,8 +336,8 @@ def inspect_file(caller: Caller, request: RawFile) -> InspectedFile:
 
 @observe("library.citation_evidence")
 def citation_evidence(caller: Caller, handle: CitationHandle) -> tuple[CitationState, str | None]:
-    """A citation's status and the quote its stored block holds (None when it no longer holds
-    it), from one check."""
+    """A citation's status and the quote its stored block holds (None when the source is
+    withdrawn or the block doesn't hold the quote), from one check."""
     require(caller, SIGNED_IN)
     status, _, _, quote = service.checked_citation(caller, handle)
     return status.status, quote
